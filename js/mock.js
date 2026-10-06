@@ -2,7 +2,13 @@
 // 方便重整後仍在；清掉該 key 即回到初始。
 // ⚠ 以下密碼只是測試用，不是真密碼：
 //   TEST1 / store-test-1234（門市 mala，值班核定密碼 1234；duty 為空字串＝預設 0000，第一次要改）   TEST2 / store-test-1234（門市 mzt，功能全開）   ADMIN / admin-test-1234（管理者 hq）
+import { lossMock, lossAlias } from './mock-loss.js';
+import { transferMock, transferHome, TRANSFER_NODES, DEFAULT_TRANSFER_ALIAS } from './mock-transfer.js';   // 門市調撥假後端（獨立檔）
+import { inventory as invMock, homeItems as invHome } from './mock-inventory.js';   // 庫存盤點假後端（另一支檔案）
 const KEY = 'dzystore_mockdb';
+// e2e 注入的資料（window.__E2E_DATA，由測試每次隨機產生）；沒有就用下面內建預設，示範模式不受影響。
+const E2E = () => (typeof window !== 'undefined' && window.__E2E_DATA) || {};
+const clone = x => JSON.parse(JSON.stringify(x));
 const DB_VERSION = 3;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
 const MODS = ['purchase', 'cashbook', 'duty', 'transfer', 'loss', 'inventory'];
 const LABELS = { purchase: '貨單辨識', cashbook: '收支登記', duty: '值班核定', transfer: '門市調撥', loss: '耗損登記', inventory: '庫存盤點' };
@@ -10,18 +16,30 @@ const hex = n => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(b => 
 const ok = data => ({ ok: true, data: data === undefined ? {} : data });
 const fail = (error, message) => ({ ok: false, error, message });
 
+function seedSlips() {   // 測試注入的貨單：hours_ago＝幾小時前上傳；編號依當天流水號
+  const seed = ((E2E().purchase || {}).slips) || [], byDay = {};
+  return seed.map(x => {
+    const at = new Date(Date.now() - x.hours_ago * 3600e3), day = at.toISOString().slice(0, 10).replace(/-/g, '');
+    byDay[day] = (byDay[day] || 0) + 1;
+    return { id: `S${day}-${String(byDay[day]).padStart(4, '0')}`, client_id: 'seed-' + hex(8), store: x.store, status: x.status, vendor_name: x.vendor_name,
+      uploaded_at: at.toISOString(), photo_count: x.photo_count, return_reason: x.return_reason };
+  });
+}
 function fresh() {
-  return {
+  const A = E2E().accounts || {}, o = (c, k, d) => (A[c] && A[c][k] !== undefined ? A[c][k] : d);
+  const db = {
     v: DB_VERSION,
     accounts: {
-      TEST1: { code: 'TEST1', name: '測試門市', brand: 'mala', role: 'store', active: true, pw: 'store-test-1234', must: false, fails: 0, lockUntil: 0, features: [...MODS], duty: '1234' },
-      TEST2: { code: 'TEST2', name: '墨竹亭測試店', brand: 'mzt', role: 'store', active: true, pw: 'store-test-1234', must: false, fails: 0, lockUntil: 0, features: [...MODS], duty: '1234' },
-      ADMIN: { code: 'ADMIN', name: '系統管理者', brand: 'hq', role: 'admin', active: true, pw: 'admin-test-1234', must: false, fails: 0, lockUntil: 0, features: [...MODS], duty: '' },
+      TEST1: { code: 'TEST1', name: o('TEST1', 'name', '測試門市'), brand: 'mala', role: 'store', active: true, pw: o('TEST1', 'pw', 'store-test-1234'), must: false, fails: 0, lockUntil: 0, features: [...MODS], duty: o('TEST1', 'duty', '1234') },
+      TEST2: { code: 'TEST2', name: o('TEST2', 'name', '墨竹亭測試店'), brand: 'mzt', role: 'store', active: true, pw: o('TEST2', 'pw', 'store-test-1234'), must: false, fails: 0, lockUntil: 0, features: [...MODS], duty: o('TEST2', 'duty', '1234') },
+      ADMIN: { code: 'ADMIN', name: '系統管理者', brand: 'hq', role: 'admin', active: true, pw: o('ADMIN', 'pw', 'admin-test-1234'), must: false, fails: 0, lockUntil: 0, features: [...MODS], duty: '' },
     },
-    sessions: {}, audit: [], slips: [], alias: {}, vault: {},
+    sessions: {}, audit: [], slips: seedSlips(), alias: {}, vault: {},
     ui: { systemName: '門市營運系統', logoUrl: '', colors: { red: '#E8380D', black: '#231815' },
       cards: MODS.map((id, i) => ({ id, label: LABELS[id], visible: true, order: i + 1 })), banner: '' },
   };
+  (E2E().extraAccounts || []).forEach(x => { db.accounts[x.code] = { code: x.code, name: x.name, brand: x.brand, role: 'store', active: true, pw: '000000', must: true, fails: 0, lockUntil: 0, features: [...x.features], duty: '' }; });
+  return db;
 }
 let db;
 function load() {
@@ -84,14 +102,19 @@ function route(method, p, q, b, token) {
     for (const t of Object.values(db.sessions)) if (t.code === me.code && t !== s) { t.duty = false; t.dutyMust = false; }
     log(me.code, 'duty', 'password', true); return ok();
   }
+  if (method === 'GET' && p === '/home') return ok(homeFor(me));
   let m = p.match(/^\/m\/(\w+)\/(\w+)$/);
   if (method === 'POST' && m) {
     if (!MODS.includes(m[1]) || !me.features.includes(m[1])) return fail('FORBIDDEN', '這家店沒有開通這個功能');
+    if ((db.fail || []).includes(m[1] + '/' + m[2])) return fail('UPSTREAM', '伺服器暫時沒有回應，請稍後再試');   // e2e 用：db.fail = ['模組/動作'] 讓那個動作失敗
     if (m[1] === 'duty' && s.dutyMust) return fail('DUTY_MUST_CHANGE', '請先把值班核定通行碼改成自己的');
     if (m[1] === 'duty' && !s.duty) return fail('FORBIDDEN', '請先輸入值班核定通行碼');
     if (m[1] === 'purchase') return purchase(m[2], me, b);
     if (m[1] === 'cashbook') return cashbook(m[2], me, b);
     if (m[1] === 'duty') return duty(m[2], me, s, b);
+    if (m[1] === 'transfer') return transferMock(m[2], me, b, db);
+    if (m[1] === 'inventory') return invMock(m[2], me, b, db);
+    if (m[1] === 'loss') return lossMock(m[2], me, b, db);
     return fail('NOT_FOUND', '還在搬移中，暫時請用原本的系統');
   }
   if (p.startsWith('/admin/')) {
@@ -99,6 +122,51 @@ function route(method, p, q, b, token) {
     return admin(method, p, q, b, me);
   }
   return fail('NOT_FOUND', '找不到這個功能');
+}
+
+// ---------- 首頁待辦與異常（對照 server/home.js 的規則；用假資料算）----------
+// db.homeFaults（測試用，e2e 直接寫進 localStorage）：['cashbook', …]＝該模組讀不到；不動各模組的呼叫計數
+function homeFor(me) {
+  const has = id => me.features.includes(id);
+  const bad = id => (db.homeFaults || []).includes(id);
+  const items = [], errors = [];
+  const ERR = { duty: '值班核定暫時讀不到', purchase: '貨單辨識暫時讀不到', cashbook: '收支登記暫時讀不到' };
+  const add = (module, level, text, count, link) => items.push({ module, level, text, count, link });
+  if (has('duty')) {
+    if (bad('duty')) errors.push({ module: 'duty', message: ERR.duty });
+    else {
+      const d = dutyDb();
+      const n = new Set(dutyDo(d, 'mgr_pending_approvals', {}).data.items.map(x => x.date)).size;
+      if (n) add('duty', 'todo', `本月還有 ${n} 天沒核定`, n, '#/duty/approve');
+      if (d.devices.length) add('duty', 'todo', `${d.devices.length} 支新手機等核准`, d.devices.length, '#/duty/device');
+    }
+  }
+  if (has('purchase')) {
+    if (bad('purchase')) errors.push({ module: 'purchase', message: ERR.purchase });
+    else {
+      if (!db.slips) db.slips = seedSlips();
+      const mine = db.slips.filter(x => x.store === me.code && Date.parse(x.uploaded_at) >= Date.now() - STORE_SLIPS_DAYS * 86400e3);
+      const nBad = mine.filter(x => x.status === 'failed' || x.status === 'returned').length;
+      const nSlow = mine.filter(x => ['uploaded', 'queued', 'recognizing'].includes(x.status) && Date.now() - Date.parse(x.uploaded_at) > 2 * 3600e3).length;
+      if (nBad) add('purchase', 'error', `${nBad} 張貨單要重拍或處理`, nBad, '#/purchase/mine');
+      if (nSlow) add('purchase', 'warn', `${nSlow} 張貨單辨識超過 2 小時`, nSlow, '#/purchase/mine');
+    }
+  }
+  if (has('cashbook')) {
+    if (bad('cashbook')) errors.push({ module: 'cashbook', message: ERR.cashbook });
+    else {
+      const t = taipeiDay(), y = +t.slice(0, 4), mo = +t.slice(5, 7);
+      const prev = mo === 1 ? `${y - 1}-12` : `${y}-${String(mo - 1).padStart(2, '0')}`;
+      if (!db.cb) db.cb = cbSeed();
+      const locked = ((db.cb.locks && db.cb.locks[me.code]) || []).includes(prev);
+      if (+t.slice(8, 10) > 5 && !locked) add('cashbook', 'todo', `上個月（${prev}）還沒月結`, 1, '#/cashbook/close');
+    }
+  }
+  if (has('transfer')) items.push(...transferHome(db, me));
+  if (has('inventory')) items.push(...invHome(me, db));
+  const rank = { error: 0, warn: 1, todo: 2 };
+  items.sort((a, c) => rank[a.level] - rank[c.level]);
+  return { items, errors, at: new Date().toISOString() };
 }
 
 function admin(method, p, q, b, me) {
@@ -147,12 +215,21 @@ function admin(method, p, q, b, me) {
   if (method === 'GET' && p === '/admin/alias') {
     const stores = [['', '光復小辛辣', 'duty:_'], ['cf', '央廚', 'duty:cf'], ['hq', '總部', 'duty:hq'], ['mztjs', '墨竹亭金山', 'duty:mztjs'], ['mztgf', '墨竹亭光復', 'duty:mztgf']];
     return ok({ aliases: Object.values(db.accounts).filter(a => a.role === 'store').sort((x, y) => x.code.localeCompare(y.code))
-        .map(a => ({ code: a.code, name: a.name, system: 'clock', value: Object.prototype.hasOwnProperty.call(db.alias, a.code) ? db.alias[a.code] : null })),
+        .map(a => ({ code: a.code, name: a.name, system: 'clock', value: Object.prototype.hasOwnProperty.call(db.alias, a.code) ? db.alias[a.code] : null, transfer: (db.aliasTr || DEFAULT_TRANSFER_ALIAS)[a.code] || null })),
       stores: stores.map(([value, label]) => ({ value, label })),
-      vault: stores.map(([, label, name]) => ({ name, label, set: !!db.vault[name], updatedAt: db.vault[name] || null })) });
+      ...lossAlias.info(db),
+      vault: stores.map(([, label, name]) => ({ name, label, set: !!db.vault[name], updatedAt: db.vault[name] || null })),
+      transferNodes: TRANSFER_NODES.map(n => ({ code: n.code, name: n.name, short: n.short })),
+      transferVault: TRANSFER_NODES.map(n => ({ name: 'transfer:' + n.code, label: n.name, set: !!db.vault['transfer:' + n.code], updatedAt: db.vault['transfer:' + n.code] || null })) });
   }
   if (method === 'POST' && p === '/admin/alias') {
     const a = acc(); if (!a) return fail('NOT_FOUND', '找不到這個帳號');
+    if (b.system === 'transfer') {
+      if (b.value !== null && !TRANSFER_NODES.some(n => n.code === b.value)) return fail('BAD_INPUT', '調撥節點不正確');
+      db.aliasTr = { ...(db.aliasTr || DEFAULT_TRANSFER_ALIAS) }; if (b.value === null) delete db.aliasTr[a.code]; else db.aliasTr[a.code] = b.value;
+      log(me.code, 'admin', 'alias-set', true); return ok();
+    }
+    if (b.system === 'mzt_loss') return lossAlias.set(db, a, b);
     if (b.system !== 'clock') return fail('BAD_INPUT', '對照類型不正確');
     if (b.value === null) delete db.alias[a.code];
     else if (!['', 'cf', 'hq', 'mztjs', 'mztgf'].includes(b.value)) return fail('BAD_INPUT', '打卡店別不正確');
@@ -175,12 +252,13 @@ function admin(method, p, q, b, me) {
 }
 
 // ---------- 貨單辨識（模擬貨單伺服器：廠商、上傳、我的貨單、照片）----------
-const VENDORS = [{ id: 1, name: '大成肉品' }, { id: 2, name: '新鮮蔬果行' }, { id: 3, name: '冷凍食品批發' }];
+const VENDORS_DEFAULT = [{ id: 1, name: '大成肉品' }, { id: 2, name: '新鮮蔬果行' }, { id: 3, name: '冷凍食品批發' }];
+const vendorList = () => { const v = (E2E().purchase || {}).vendors; return v || VENDORS_DEFAULT; };
 const STORE_SLIPS_DAYS = 30;
 
 function purchase(action, me, b) {
-  if (!db.slips) db.slips = [];
-  if (action === 'vendors') return ok(VENDORS);
+  if (!db.slips) db.slips = seedSlips();
+  if (action === 'vendors') return ok(vendorList());
   if (action === 'mine') {
     const since = Date.now() - STORE_SLIPS_DAYS * 86400e3;
     return ok(db.slips.filter(x => x.store === me.code && Date.parse(x.uploaded_at) >= since).sort((a, c) => c.uploaded_at.localeCompare(a.uploaded_at) || c.id.localeCompare(a.id))
@@ -196,7 +274,7 @@ function purchase(action, me, b) {
     if (photos.length > 6) return fail('BAD_INPUT', '一次最多 6 張照片');
     let vendor = null;
     const vid = b.get('vendor_id'), vname = String(b.get('vendor_name') || '').trim();
-    if (vid) { vendor = VENDORS.find(v => String(v.id) === String(vid)); if (!vendor) return fail('BAD_INPUT', '廠商不存在'); }
+    if (vid) { vendor = vendorList().find(v => String(v.id) === String(vid)); if (!vendor) return fail('BAD_INPUT', '廠商不存在'); }
     const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const n = db.slips.filter(x => x.id.startsWith('S' + day)).length + 1;
     const slip = { id: `S${day}-${String(n).padStart(4, '0')}`, client_id: cid, store: me.code, status: 'queued', vendor_name: vendor ? vendor.name : (vname || null),
@@ -226,12 +304,18 @@ export async function handleBlob(path, token) {
 // 資料在 db.cb：{ rows, frequent:{店:[...]}, locks:{店:[月]}, tokens:{店|token:id}, calls:{動作:次數}, faults:[...] }
 // faults（測試用，由 e2e 直接寫進 localStorage）：{ action, mode, once }
 //   mode='timeout'：不執行、回 TIMEOUT；'timeout-saved'：先寫進去再回 TIMEOUT（逾時但其實有記到）；'down'：回 UPSTREAM（連不上）
-const CB_EXPENSE = ['食材', '包材', '瓦斯水電', '雜支', '交通'];
-const CB_INCOME = ['雜項收入', '廢料回收'];
+const CB_EXPENSE_D = ['食材', '包材', '瓦斯水電', '雜支', '交通'];
+const CB_INCOME_D = ['雜項收入', '廢料回收'];
+const cbSubj = () => { const c = E2E().cashbook || {}; return { exp: c.expense || CB_EXPENSE_D, inc: c.income || CB_INCOME_D }; };
+function cbSeed() {
+  const c = E2E().cashbook;
+  if (!c) return { rows: [], frequent: {}, locks: {}, tokens: {}, calls: {}, faults: [] };
+  return { rows: clone(c.rows || []), frequent: clone(c.frequent || {}), locks: clone(c.locks || {}), tokens: {}, calls: {}, faults: [] };
+}
 const cbTax = (amount, inv) => { const a = Math.round(Number(amount) || 0); if (!inv) return { net: a, tax: 0 }; const net = Math.round(a / 1.05); return { net, tax: a - net }; };   // 同原系統 splitTax
 
 function cashbook(action, me, b) {
-  if (!db.cb) db.cb = { rows: [], frequent: {}, locks: {}, tokens: {}, calls: {}, faults: [] };
+  if (!db.cb) db.cb = cbSeed();
   const cb = db.cb, store = me.code;
   cb.calls[action] = (cb.calls[action] || 0) + 1;
   const fi = cb.faults.findIndex(f => f.action === action);
@@ -256,7 +340,7 @@ function cbDo(cb, action, store, b) {
   if (action === 'bootstrap' || action === 'list') {
     const rows = b.month ? monthRows(String(b.month)).map(view) : undefined;
     if (action === 'list') return ok({ rows: rows || [] });
-    return ok({ settings: { store: me_name(store), expenseSubjects: CB_EXPENSE, incomeSubjects: CB_INCOME }, frequent: freq().slice(), lockedMonths: locks().slice(), ...(rows ? { rows, month: b.month } : {}) });
+    return ok({ settings: { store: me_name(store), expenseSubjects: cbSubj().exp, incomeSubjects: cbSubj().inc }, frequent: freq().slice(), lockedMonths: locks().slice(), ...(rows ? { rows, month: b.month } : {}) });
   }
   if (action === 'create') {
     const tk = b.clientToken ? store + '|' + String(b.clientToken) : '';
@@ -312,13 +396,16 @@ const taipeiDay = (n = 0) => {
   const base = o ? new Date(o + 'T12:00:00Z') : new Date();
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date(base.getTime() + n * 86400000));
 };
-const DUTY_FAKE = {
+const DUTY_FAKE_D = {
   E01: { shift: ['08:00', '17:00'], segs: [{ in: '08:00', out: '17:02', cross: false }], ref: 9.03 },
   E02: { shift: ['09:00', '12:00'], segs: [{ in: '09:12', out: '12:00', cross: false }], ref: 2.8 },
   E03: { shift: ['', ''], segs: [], ref: null },
   E04: { shift: ['', ''], segs: [], ref: null, attempts: 2 },
 };
+const fakeOf = emp => ((E2E().duty || {}).fake || DUTY_FAKE_D)[emp];
 function dutyDb() {
+  const E = E2E().duty;
+  if (!db.duty && E) db.duty = { brk: [...E.brk], faults: [], calls: {}, approved: {}, leave: {}, roster: clone(E.roster), devices: clone(E.devices), notices: clone(E.notices) };
   if (!db.duty) db.duty = {
     brk: ['12:00', '13:00'], faults: [], calls: {}, approved: {}, leave: {},
     roster: [{ emp_id: 'E01', name: '王小明', active: true, created_by: '', removed_at: '', removed_by: '' }, { emp_id: 'E02', name: '李小華', active: true, created_by: '', removed_at: '', removed_by: '' },
@@ -330,7 +417,7 @@ function dutyDb() {
   };
   return db.duty;
 }
-function dutyHas(emp, date) { const f = DUTY_FAKE[emp]; return !!f && (f.segs.length > 0 || !!f.attempts); }
+function dutyHas(emp, date) { const f = fakeOf(emp); return !!f && (f.segs.length > 0 || !!f.attempts); }
 function duty(action, me, s, b) {
   const d = dutyDb();
   d.calls[action] = (d.calls[action] || 0) + 1;
@@ -350,7 +437,7 @@ function dutyDo(d, action, b) {
     const date = b.date || today;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return fail('BAD_INPUT', '日期格式不對。');
     const employees = d.roster.filter(r => r.active).map(r => {
-      const f = DUTY_FAKE[r.emp_id] || { shift: ['', ''], segs: [], ref: null };
+      const f = fakeOf(r.emp_id) || { shift: ['', ''], segs: [], ref: null };
       const out = { emp_id: r.emp_id, name: r.name, segments: f.segs.map(x => ({ ...x })), reference: f.ref, attempts: f.attempts || 0,
         leave_type: (d.leave[date + r.emp_id] || {}).type || '', leave_hours: (d.leave[date + r.emp_id] || {}).hours ?? '', shift_in: f.shift[0], shift_out: f.shift[1] };
       const a = d.approved[date + r.emp_id]; if (a) out.approved = { ...a };

@@ -118,15 +118,46 @@ function viewPassword(s) {
 }
 
 // ---------- 首頁 ----------
-function viewHome(s) {
+// 首頁內容區＝「待辦與異常」，依系統分組（順序照後台「介面設定」的卡片順序，與側邊欄同一份）；先畫分組骨架再非同步讀 /home。
+// 側邊欄各系統名稱右側顯示件數徽章（0 不顯示、含 error 紅色）。
+const rowHtml = it => `<a class="todo-row lv-${esc(it.level)}" href="${esc(it.link)}" data-module="${esc(it.module)}" data-level="${esc(it.level)}"><span class="tx">${esc(it.text)}</span><span class="go" aria-hidden="true">›</span></a>`;
+const noteHtml = (id, text) => `<div class="todo-row lv-note" data-module="${esc(id)}" data-level="note"><span class="tx">${esc(text)}</span></div>`;
+function fillGroups(d) {   // d＝null 表示整個讀不到
+  document.querySelectorAll('#todoBody .todo-group').forEach(g => {
+    const id = g.dataset.module, body = g.querySelector('.todo-body');
+    const its = d ? (d.items || []).filter(i => i.module === id) : [];
+    const failed = !d || (d.errors || []).some(e => e.module === id);
+    body.innerHTML = its.map(rowHtml).join('') + (failed ? noteHtml(id, '暫時讀不到') : '') || '<div class="todo-empty">沒有待辦</div>';
+  });
+}
+function applyBadges(items) {
+  document.querySelectorAll('#nav .badge').forEach(b => b.remove());
+  const by = {};
+  (items || []).forEach(it => { const b = by[it.module] || (by[it.module] = { n: 0, err: false }); b.n += Number(it.count) || 0; if (it.level === 'error') b.err = true; });
+  Object.keys(by).forEach(id => {
+    const a = document.querySelector(`#nav a[data-nav="${id}"]`);
+    if (!a || !by[id].n) return;
+    const i = document.createElement('i');
+    i.className = 'badge' + (by[id].err ? ' err' : ''); i.textContent = String(by[id].n); i.setAttribute('aria-label', `${by[id].n} 件待處理`);
+    a.appendChild(i);
+  });
+}
+async function loadTodos(tok) {
+  let d = null;
+  try { d = await api('GET', '/home'); } catch (e) { /* 讀不到：每組顯示「暫時讀不到」 */ }
+  if (tok !== renderToken || !document.getElementById('todoBody')) return;
+  fillGroups(d);
+  applyBadges(d ? d.items : []);
+}
+function viewHome(s, tok) {
   const feats = new Set(s.features || []);
   const cards = [...(UI.cards || [])].sort((a, b) => a.order - b.order)
     .filter(c => c.visible && feats.has(c.id) && MODULES.some(m => m.id === c.id));
   const html = cards.length
-    ? `<div class="cards">${cards.map(c => { const m = MODULES.find(x => x.id === c.id);
-        return `<a class="mcard" href="#/${c.id}/" data-module="${c.id}"><b>${esc(c.label)}</b><span>${esc(m.desc)}</span></a>`; }).join('')}</div>`
+    ? `<div id="todoBody" aria-live="polite">${cards.map(c => `<section class="card todo-group" data-module="${c.id}"><h2>${esc(c.label)}</h2><div class="todo-body"><div class="hint">讀取中…</div></div></section>`).join('')}</div>`
     : `<div class="card"><p>目前還沒有開通任何功能，請洽管理者。</p></div>`;
-  frame(s, bannerHtml() + html, '', { cur: 'home', title: '首頁', sub: s.name });
+  frame(s, bannerHtml() + html, '', { cur: 'home', title: '待辦與異常', sub: s.name });
+  if (cards.length) loadTodos(tok);
 }
 
 // ---------- 模組 ----------
@@ -163,7 +194,7 @@ export async function render() {
   if (r.page === 'password') return viewPassword(s);
   if (r.page === 'admin') return viewAdmin(s, r.tab, tok);
   if (r.page) return viewModule(s, r.page, r.tab, tok);
-  return viewHome(s);
+  return viewHome(s, tok);
 }
 
 async function boot() {

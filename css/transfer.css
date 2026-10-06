@@ -1,0 +1,67 @@
+/* 門市調撥（營運系統風格：沿用 tokens.css 的色票與 app.css 的 card／btn／fld／grid2，這裡只補調撥專用的版面） */
+.xf-me{margin-bottom:8px}
+.xf-sec>h2 .xf-count{display:inline-block;min-width:22px;padding:0 7px;border-radius:11px;background:var(--brand);color:var(--brand-ink);font-size:12.5px;font-weight:900;text-align:center;line-height:22px}
+.xf-none{color:var(--muted);font-size:14px;padding:8px 0;text-align:center}
+.xf-list,#xfQcards{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.xf-dc{display:block;width:100%;text-align:left;font:inherit;color:var(--black);background:#fff;border:1px solid var(--line);border-left:5px solid var(--brand);border-radius:9px;padding:10px 12px;cursor:pointer;min-height:44px}
+.xf-dc:hover{border-color:var(--pink);box-shadow:0 2px 8px rgba(35,24,21,.08)}
+.xf-dc .r1{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.xf-dc .r1 b{overflow-wrap:anywhere}
+.xf-dc .r2{color:#5d554f;font-size:13px;margin-top:2px}
+.xf-dc .r3{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
+.xf-pill{flex:none;font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:20px;background:#eef1f4;color:#556}
+.xf-pill.s0{background:#eef1f4;color:#556}.xf-pill.s1{background:#fff4d6;color:#8a6100}.xf-pill.s2{background:#e6f3ea;color:var(--ok)}.xf-pill.s3{background:#fdf0ee;color:var(--bad);text-decoration:line-through}
+.xf-od{display:inline-block;font-size:11.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:var(--bad);color:#fff;margin-right:4px}
+.xf-gap{color:var(--bad);font-weight:700}
+.xf-sum{background:var(--head);border-radius:8px;padding:9px 12px;margin:8px 0;font-size:13.5px}
+.xf-sum .big{font-size:20px;font-weight:900;color:var(--red)}
+.xf-sum .sub{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+.xf-qgrid{margin-top:8px}
+.xf-qgrid input,.xf-qgrid select,.xf-form input,.xf-form select{width:100%;min-height:44px}
+/* 開單 */
+.req{color:var(--bad);margin-left:2px}
+.xf-item{position:relative;padding-top:22px}
+.xf-item .fld{margin-bottom:10px}
+.xf-item input{width:100%;min-height:44px}
+.xf-del{position:absolute;z-index:2;top:6px;right:6px;width:36px;height:36px;border:0;border-radius:8px;background:#f6f2ee;color:var(--muted);font-size:14px;cursor:pointer}
+.xf-nmwrap{position:relative}
+.xf-cands{display:none;position:absolute;left:0;right:0;top:100%;z-index:10;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 18px rgba(35,24,21,.15);max-height:260px;overflow-y:auto}
+.xf-cands.on{display:block}
+.xf-cands div{padding:10px 12px;cursor:pointer;display:flex;justify-content:space-between;gap:8px;min-height:44px;align-items:center;border-bottom:1px solid var(--line)}
+.xf-cands div:last-child{border-bottom:0}
+.xf-cands div:hover{background:#fff8ec}
+.xf-cands span{color:var(--muted);font-size:12px;text-align:right}
+.xf-cats{display:flex;gap:0}
+.xf-cats button{flex:1;font:inherit;font-weight:700;padding:10px 6px;border:1px solid var(--line);background:#fff;cursor:pointer;min-height:44px}
+.xf-cats button:first-child{border-radius:8px 0 0 8px}.xf-cats button:last-child{border-radius:0 8px 8px 0}.xf-cats button+button{border-left:0}
+.xf-cats button.on{background:var(--red);border-color:var(--red);color:#fff}
+.xf-cats.bad,input.bad,select.bad{outline:2px solid var(--bad);outline-offset:-1px;border-radius:8px}
+.xf-why{display:none;color:var(--bad);font-size:12.5px;font-weight:700}.xf-why.on{display:block}
+.xf-subline{text-align:right;color:var(--muted);font-size:13px}.xf-subline b{color:var(--black);font-size:15px}
+.xf-addrow{margin-bottom:12px}
+.xf-totalbar{display:flex;align-items:baseline;gap:8px;position:sticky;bottom:8px;z-index:5;box-shadow:0 2px 12px rgba(35,24,21,.12)}
+.xf-totalbar b{font-size:22px;font-weight:900;color:var(--red)}
+.xf-actions{margin-top:12px}.xf-actions .btn{flex:1;min-height:46px}
+.btn.danger{color:var(--bad);border-color:var(--bad)}
+/* 詳情 */
+.xf-dochead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.xf-docno{flex:1;min-width:0;font-weight:900;overflow-wrap:anywhere}
+.xf-flow{font-size:17px;font-weight:900;margin-bottom:8px}.xf-flow span{color:var(--muted)}
+.xf-steps{display:flex;gap:6px;margin-bottom:10px}
+.xf-steps>div{flex:1;text-align:center;font-size:12px;padding:6px 2px;border-radius:8px;background:#f1ece6;color:var(--muted);font-weight:700}
+.xf-steps>div.done{background:var(--brand);color:var(--brand-ink)}
+.xf-steps b{display:block;font-size:11px;font-weight:500;min-height:1.2em}
+.xf-kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:14px}
+.xf-kv dt{color:var(--muted)}.xf-kv dd{overflow-wrap:anywhere}
+.xf-line{border-top:1px solid var(--line);padding:10px 0}.xf-line:first-of-type{border-top:0}
+.xf-line .t{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
+.xf-line .t i{color:var(--muted);font-size:12.5px;font-style:normal}.xf-line .t em{color:var(--muted);font-size:12.5px;font-style:normal}
+.xf-qty{margin-top:2px;font-size:14px}
+.xf-rowin{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:8px}
+.xf-rowin input,.xf-rowin select,.xf-rc input,.xf-namecard input{width:100%;min-height:44px}
+.xf-rc{margin-top:8px}
+.xf-diffline{font-size:13px;color:var(--muted);margin-top:4px;min-height:1.2em}
+.xf-previewbar{margin-top:12px;background:var(--head);border-radius:8px;padding:9px 12px;font-size:14px}
+.xf-previewbar b{font-size:16px}
+.xf-logs{font-size:12.5px;color:#5d554f;display:flex;flex-direction:column;gap:4px;overflow-wrap:anywhere}
+@media (max-width:480px){.xf-dc .r1{flex-wrap:wrap}.xf-actions{flex-wrap:wrap}}
