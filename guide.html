@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>門市操作手冊</title>
+<link rel="stylesheet" href="css/tokens.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{font-family:var(--font);background:var(--bg);color:var(--black);font-size:16px;line-height:1.75;overflow-x:hidden}
+header{background:var(--black);color:#fff;padding:14px 18px}
+header h1{font-size:18px;font-weight:900;letter-spacing:.5px}
+header p{font-size:12.5px;color:#e8dfd8;margin-top:2px}
+.wrap{max-width:760px;margin:0 auto;padding:18px 16px 64px}
+nav.toc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:18px}
+nav.toc b{display:block;font-size:14px;margin-bottom:6px}
+nav.toc a{display:inline-block;margin:2px 14px 2px 0;color:var(--red);font-weight:700;text-decoration:none;padding:5px 0;min-height:32px}
+section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 16px;margin-bottom:16px;border-top:4px solid var(--red)}
+h2{font-size:18px;font-weight:900;margin-bottom:8px}
+h3{font-size:15.5px;font-weight:900;margin:16px 0 6px}
+p{margin:6px 0;overflow-wrap:anywhere}
+ol,ul{margin:6px 0 6px 1.4em}
+li{margin:4px 0;overflow-wrap:anywhere}
+.tip{background:#fff8ec;border-left:4px solid var(--gold);padding:10px 12px;border-radius:0 7px 7px 0;font-size:14.5px;margin:10px 0}
+.warn{background:#fdf0ee;border-left:4px solid var(--red);padding:10px 12px;border-radius:0 7px 7px 0;font-size:14.5px;margin:10px 0}
+.btn{display:inline-block;background:var(--head);border-radius:5px;padding:0 7px;font-weight:700;white-space:nowrap}
+code{background:var(--head);border-radius:4px;padding:0 5px;font-weight:700}
+.shot{border:1px dashed var(--line);border-radius:8px;color:var(--muted);font-size:13px;text-align:center;padding:14px;margin:10px 0}
+footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
+</style>
+</head>
+<body>
+<header><h1>門市操作手冊</h1><p>登入、貨單辨識、收支登記、值班核定</p></header>
+<div class="wrap">
+<nav class="toc" aria-label="目錄"><b>想看哪一段</b>
+  <a href="#login">登入與改密碼</a><a href="#home">首頁</a><a href="#purchase">貨單辨識</a><a href="#cashbook">收支登記</a><a href="#duty">值班核定</a><a href="#help">遇到問題</a></nav>
+
+<section id="login"><h2>一、登入與改密碼</h2>
+  <h3>第一次登入</h3>
+  <ol>
+    <li>輸入你們店的<b>門市代號</b>（管理者會告訴你）。</li>
+    <li>密碼輸入 <code>000000</code>（六個零）。</li>
+    <li>按 <span class="btn">登入</span>。</li>
+    <li>系統會請你設定自己的新密碼：輸入目前的密碼 <code>000000</code>，再輸入兩次新密碼（至少 8 個字），按 <span class="btn">儲存新密碼</span>。</li>
+    <li>新密碼<b>不能再用 000000</b>。請設成只有你們店知道的密碼，並記下來。</li>
+  </ol>
+  <h3>之後登入</h3>
+  <p>手機會記住門市代號，只要輸入密碼就好。登入後大約 12 小時會自動登出，到時重新登入即可。</p>
+  <h3>想換密碼</h3>
+  <p>登入後按畫面上方的 <span class="btn">改密碼</span>，照畫面輸入舊密碼與新密碼。</p>
+  <h3>忘記密碼</h3>
+  <ol>
+    <li>請找管理者，請他在後台幫你重設。</li>
+    <li>重設後，密碼會回到 <code>000000</code>。</li>
+    <li>用 000000 登入，再照上面的步驟設定新密碼。</li>
+  </ol>
+  <div class="tip">連續輸入錯誤 5 次，帳號會暫時鎖住 15 分鐘。請等一下再試，或請管理者幫你解鎖。</div>
+  <div class="shot">（登入畫面圖：之後補上）</div>
+</section>
+
+<section id="home"><h2>二、首頁</h2>
+  <p>登入後會看到幾張卡片，每張卡片就是一項工作。點進去就能使用，要回來按左上角的 <span class="btn">‹ 回首頁</span>。</p>
+  <ul>
+    <li><b>貨單辨識</b>：拍進貨單照片傳給總部。</li>
+    <li><b>收支登記</b>：記每天店裡的現金支出與收入。</li>
+    <li><b>值班核定</b>：主管核定同仁的上下班工時、管理裝置與名冊。</li>
+  </ul>
+  <p>如果少了某張卡片，表示你們店還沒開這項功能，請洽管理者。</p>
+  <div class="shot">（首頁圖：之後補上）</div>
+</section>
+
+<section id="purchase"><h2>三、貨單辨識</h2>
+  <h3>上傳一張貨單</h3>
+  <ol>
+    <li>點首頁的 <b>貨單辨識</b>。</li>
+    <li>在「廠商」選這張貨單是哪一家廠商送的。找不到就選「其他」，再自己打廠商名稱。</li>
+    <li>按 <span class="btn">拍照</span>（或 <span class="btn">從相簿選</span>），把整張貨單拍清楚。一張貨單可以拍好幾頁，<b>一次最多 6 張</b>。</li>
+    <li>預覽看一下，拍糊或拍錯的照片按旁邊的叉叉刪掉重拍。</li>
+    <li>確定沒問題，按 <span class="btn">送出這張貨單</span>。</li>
+    <li>看到「已送出」就完成了。<b>只要按一次</b>，不用重複按。</li>
+  </ol>
+  <div class="tip">拍照小技巧：貨單平放、四個角都拍到、光線亮一點、字看得清楚。</div>
+  <h3>看送出的結果</h3>
+  <p>切到 <b>我的貨單</b>，可以看到最近送出的貨單和處理狀況。按 <span class="btn">看照片</span> 可以看你傳的照片。如果總部退回，會寫上原因，照原因重新拍一張再上傳。</p>
+  <h3>網路不好怎麼辦</h3>
+  <p>送出時如果顯示連不上，先<b>不要關掉頁面</b>，等網路好一點再按一次送出。系統會認得是同一張，不會重複上傳。</p>
+  <div class="shot">（貨單辨識圖：之後補上）</div>
+</section>
+
+<section id="cashbook"><h2>四、收支登記</h2>
+  <p>用來記店裡每天的現金進出，取代紙本的「現金支出明細表」和「現金收入明細表」。會計月底會直接匯出來入帳。</p>
+  <h3>記一筆</h3>
+  <ol>
+    <li>點首頁的 <b>收支登記</b>，進到 <b>記帳</b> 分頁。</li>
+    <li>選是 <b>支出</b> 還是 <b>收入</b>。</li>
+    <li>選日期（預設今天）、填項目名稱、選科目、輸入金額。常用的項目名稱系統會幫你記住，下次直接點選。</li>
+    <li>單據選 <span class="btn">統一發票</span> 或 <span class="btn">收據／無發票</span>。選統一發票時，系統會自動算出未稅金額與稅額。</li>
+    <li>有收據的，可以拍照附上。</li>
+    <li>按 <span class="btn">送出這一筆</span>，畫面會顯示收據編號。</li>
+  </ol>
+  <div class="tip">按一次就好。網路慢的時候多按幾次，系統也不會重複記。</div>
+  <h3>看明細、修改</h3>
+  <ol>
+    <li>切到 <b>明細</b> 分頁，選要看的月份。</li>
+    <li>可以看到每一筆，以及當月的支出、收入合計。</li>
+    <li>按某一筆的 <span class="btn">修改</span>，可以改日期、金額、項目名稱等，改完按 <span class="btn">儲存修改</span>。</li>
+  </ol>
+  <h3>記錯了：作廢</h3>
+  <ol>
+    <li>在 <b>明細</b> 找到那一筆，按 <span class="btn">作廢</span>。</li>
+    <li>寫下作廢原因，按 <span class="btn">確定作廢</span>。</li>
+    <li>作廢的那一筆<b>不會被刪掉</b>，會留著並標示「作廢」，只是不再算進合計。收據編號也會保留，這樣帳才查得清楚。</li>
+    <li>然後重新記一筆正確的。</li>
+  </ol>
+  <h3>「回應太久」怎麼辦</h3>
+  <p>如果按送出後出現「回應太久，不一定沒記進去」，<b>先不要重複記</b>。請切到 <b>明細</b> 看看那一筆有沒有出現：</p>
+  <ul>
+    <li>有出現：已經記好了，不用再記。</li>
+    <li>沒有出現：再記一次。</li>
+  </ul>
+  <h3>月結</h3>
+  <ol>
+    <li>每個月底（或會計通知時），到 <b>月結</b> 分頁。</li>
+    <li>先核對當月合計沒問題。</li>
+    <li>按 <span class="btn">鎖定這個月</span>。鎖定後這個月不能再新增、修改或作廢。</li>
+    <li>鎖錯了或需要補記，可以按 <span class="btn">解除鎖定</span>，或洽管理者。</li>
+  </ol>
+  <div class="warn">鎖定前請確認當月每一筆都已記完，也都核對過。</div>
+  <div class="shot">（收支登記圖：之後補上）</div>
+</section>
+
+<section id="duty"><h2>五、值班核定</h2>
+  <p>給值班主管用：核定同仁的工時、管理打卡用的手機（裝置）、維護員工名冊、發布打卡公告。</p>
+  <h3>第一次進入：設定核定通行碼</h3>
+  <ol>
+    <li>點首頁的 <b>值班核定</b>。</li>
+    <li>輸入核定通行碼 <code>0000</code>（四個零），按 <span class="btn">進入</span>。</li>
+    <li>系統會請你改成自己的核定通行碼：輸入兩次新的（至少 4 碼，<b>不能是 0000</b>），按 <span class="btn">儲存並進入</span>。</li>
+    <li>之後進入都輸入你設定的新通行碼。登入期間只需要輸入一次。</li>
+  </ol>
+  <div class="tip">核定通行碼和登入密碼是兩組，請不要設成一樣。忘記時請管理者在後台「重設為 0000」，再從上面第 2 步開始。</div>
+  <h3>核定工時</h3>
+  <ol>
+    <li>切到 <b>核定工時</b>。上面的日期列可以按 <span class="btn">‹</span> 前一天、<span class="btn">›</span> 後一天，或按 <span class="btn">今天</span>，也能直接選日期。</li>
+    <li>如果上方出現「<b>本月還有 N 天沒核定</b>」，點裡面的同仁名字，會直接跳到那一天並展開那位同仁。</li>
+    <li>每位同仁一張卡，點一下展開。卡片上看得到當天的打卡與參考時數。系統會幫你展開「下一位還沒核定的人」，核完自動翻到下一位。</li>
+    <li>檢查上班時段（有預設班別會先填好）。要多一段按 <span class="btn">＋ 加一段</span>，要刪掉一段按該段右邊的 <span class="btn">－</span>。<b>核定時數</b>會即時算給你看。</li>
+    <li>同仁請假就在「<b>請假註記</b>」選假別、填時數（每 0.25 小時一格）。出差一樣選「出差」，時數填幾小時就核定幾小時，出差那段不用再填進上班時段。</li>
+    <li>「<b>遲到分鐘</b>」留空＝系統自動判定；填 0＝認定不算遲到；填數字＝以你填的為準。</li>
+    <li>按 <span class="btn">送出核定</span>，確認畫面核對無誤後按 <b>送出</b>。成功後卡片會顯示「已核定」。要修改就再展開、改完按 <span class="btn">重新送出核定</span>。</li>
+  </ol>
+  <div class="tip">有休息時間的店（例如中央廚房），預設班別會自動分成兩段、中間標示休息。當天沒休息就按 <span class="btn">今天沒休息 → 併成一段</span>。</div>
+  <h3>裝置核准</h3>
+  <p>同仁換手機或第一次打卡，要先經過主管核准。切到 <b>裝置核准</b>，看到「新裝置待核准」的卡片，確認是本人的手機後按 <span class="btn">核准</span>；不認得的按 <span class="btn">拒絕</span>。卡片若寫「有打卡超出門市範圍」，核准只會解除裝置這一關，超出範圍的那幾筆仍然不會入帳。</p>
+  <h3>員工名冊</h3>
+  <p>切到 <b>員工名冊</b>：</p>
+  <ul>
+    <li><b>新進同仁報到</b>：輸入姓名按 <span class="btn">建立帳號</span>，會產生他的專屬打卡連結，按 <span class="btn">複製連結</span> 傳給他，請他用 Safari 開、加入主畫面。</li>
+    <li><b>同仁異動</b>：選同仁按 <span class="btn">設為離職</span>，他立刻不能打卡，過去的紀錄都保留。設錯了，在「已離職」清單按 <span class="btn">恢復在職</span>。</li>
+  </ul>
+  <h3>公告</h3>
+  <p>切到 <b>公告</b>：輸入內容（最多 120 字），需要時選「顯示到」的日期（留空＝一直顯示），按 <span class="btn">發布公告</span>，同仁打卡頁最上方就會看到。下面的清單可以按 <span class="btn">下架</span>，之後也能按 <span class="btn">重新顯示</span>。</p>
+  <div class="warn">連續輸入錯誤核定通行碼 5 次，會暫時鎖住 15 分鐘。</div>
+  <div class="shot">（值班核定圖：之後補上）</div>
+</section>
+
+<section id="help"><h2>六、遇到問題</h2>
+  <ul>
+    <li><b>登入不了</b>：確認門市代號、密碼。忘記密碼請找管理者重設。被鎖住請等 15 分鐘。</li>
+    <li><b>看不到某張卡片</b>：那項功能還沒開給你們店，請洽管理者。</li>
+    <li><b>畫面一直轉圈或連不上</b>：先確認網路，換 Wi-Fi 或行動網路試試，稍後再按一次。</li>
+    <li><b>登入一段時間後被登出</b>：這是正常的，重新登入即可，沒送出的資料請重新輸入。</li>
+  </ul>
+</section>
+<footer>門市營運系統・門市版操作手冊</footer>
+</div>
+</body>
+</html>

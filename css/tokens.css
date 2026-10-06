@@ -1,0 +1,11 @@
+/* 色票唯一來源（品牌色取自 ~/mala-payroll/index.html 第 8-12 行；側邊欄色票取自 ~/mala-clock-in/payroll.html 第 8-9 行）。後台「介面設定」在執行時覆寫 --red、--black。 */
+:root{
+  --red:#E8380D; --pink:#EF856D; --black:#231815; --orange:#F08300;
+  --brand:#FABE00; --brand-ink:#231815;   /* 品牌色：由 js/theme.js 依登入者品牌覆寫（側邊欄選中膠囊、小字、卡片色條）；主要按鈕仍用 --red */
+  --gold:#FABE00; --cream:#FFE893;
+  --bg:#faf8f6; --card:#fff; --line:#e6e0da; --muted:#8a817a; --head:#fbe9e4;
+  --ok:#2f7d4f; --bad:#c0392b;
+  --red-dark:color-mix(in srgb,var(--red) 82%,#000);
+  --sidebar:#1b1917; --sidebar-2:#2a2623; --sidebar-line:#332e2a; --side-txt:#b8afa5; --gold-soft:#fff4d1;
+  --font:"Noto Sans TC","PingFang TC","Hiragino Sans GB",sans-serif;
+}
