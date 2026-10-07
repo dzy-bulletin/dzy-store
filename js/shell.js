@@ -198,7 +198,7 @@ export async function render() {
 }
 
 async function boot() {
-  if (MOCK) { document.getElementById('demoBar').hidden = false; document.body.classList.add('has-demo'); }
+  if (MOCK) { const db = document.getElementById('demoBar'); db.textContent = '示範模式：資料只存在這個瀏覽器，不會送到真的系統'; db.hidden = false; document.body.classList.add('has-demo'); }
   initAuth(() => { location.hash = '#/'; render(); }, () => render());
   await loadUi();
   window.addEventListener('hashchange', render);
