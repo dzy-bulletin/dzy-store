@@ -25,7 +25,7 @@ function rowHtml(r, locked) {
   const open = (S.openId === r.id || S.editingId === r.id) && !voided && !locked;
   const meta = `${r.subject}　#${r.seq}${r.hasInvoice ? `　發票（稅 ${r.tax}）` : '　收據'}${r.photo ? '　📎' : ''}`;
   const actions = !open ? '' : S.editingId === r.id ? editForm(r)
-    : `<div class="cb-actions"><button class="btn ghost sm" type="button" data-act="edit" data-id="${esc(r.id)}">修改</button><button class="btn ghost sm" type="button" data-act="void" data-id="${esc(r.id)}">作廢</button></div>`;
+    : `<div class="cb-actions"><button class="btn ghost sm" type="button" data-act="edit" data-id="${esc(r.id)}">修改</button><button class="btn ghost sm" type="button" data-act="void" data-id="${esc(r.id)}" data-busy="作廢中">作廢</button></div>`;
   return `<li class="cb-item ${r.kind === '收入' ? 'income' : 'expense'}${voided ? ' voided' : ''}${open ? ' open' : ''}" data-id="${esc(r.id)}">
     <span class="d">${esc(r.date.slice(5))}</span>
     <span class="b"><span class="n">${esc(r.name)}</span><span class="m">${voided ? '<span class="cb-void">已作廢</span>　' : ''}${esc(meta)}${r.voidReason ? `<br>作廢原因：${esc(r.voidReason)}` : ''}</span></span>
@@ -97,9 +97,11 @@ export function renderList(ctx) {
     if (act === 'void') {
       const reason = await askVoid();
       if (reason === null) return;
-      try { const res = await call('void', { id: btn.dataset.id, reason }); replaceRow(res.row); S.openId = null; }
-      catch (er) { if (el.isConnected) err(msgOf(er)); return; }
-      if (el.isConnected) draw();
+      await runBusy(btn, async () => {       // 所有打後端的按鈕都要有「作廢中 X.X 秒」，也擋連點
+        const res = await call('void', { id: btn.dataset.id, reason });
+        replaceRow(res.row); S.openId = null;
+        if (el.isConnected) draw();
+      }, { doneText: '已作廢 ✓', onError: m => { if (el.isConnected) err(m); } });
     } else if (act === 'save') {
       const li = btn.closest('.cb-item'), patch = {};
       li.querySelectorAll('[data-f]').forEach(inp => {

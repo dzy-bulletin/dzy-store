@@ -2,20 +2,21 @@
 import { api } from '../../js/api.js';
 
 export const S = {
-  key: null, loaded: false, loading: null, me: null, nodes: [], reasons: [], mem: [], cats: ['食材', '包材', '雜貨'], today: '',
+  key: null, code: '', loaded: false, loading: null, me: null, nodes: [], reasons: [], mem: [], cats: ['食材', '包材', '雜貨'], today: '',
   tab: '', form: null, editNo: '', docNo: '', doc: null, mode: '', from: '',
   q: { f: { kw: '', from: '', to: '', st: '' }, rows: [], total: 0, sum: null, offset: 0, searched: false },
 };
 
 const FORM_KEY = 'dzystore_xfer_form';
-const nameKey = () => 'dzystore_xfer_name_' + (S.key || '');
+// 打包人姓名記憶：永久存 localStorage，所以鍵名只能用門市代號（不是入口通行證——通行證只存 sessionStorage，登出就沒了，用它當鍵名會留下洗不掉、也無限累積的鍵）
+const nameKey = () => 'dzystore_xfer_name_' + (S.code || '');
 export const getName = () => { try { return localStorage.getItem(nameKey()) || ''; } catch (e) { return ''; } };
 export const setName = v => { try { localStorage.setItem(nameKey(), v); } catch (e) {} };
 export const saveForm = () => { try { sessionStorage.setItem(FORM_KEY + ':' + S.key, JSON.stringify(S.form)); } catch (e) {} };
 const loadForm = () => { try { return JSON.parse(sessionStorage.getItem(FORM_KEY + ':' + S.key) || 'null'); } catch (e) { return null; } };
 
-export function resetState(key) {
-  Object.assign(S, { key, loaded: false, loading: null, me: null, nodes: [], reasons: [], mem: [], today: '', tab: '', form: null, editNo: '', docNo: '', doc: null, mode: '', from: '',
+export function resetState(key, code) {
+  Object.assign(S, { key, code: code || '', loaded: false, loading: null, me: null, nodes: [], reasons: [], mem: [], today: '', tab: '', form: null, editNo: '', docNo: '', doc: null, mode: '', from: '',
     q: { f: { kw: '', from: '', to: '', st: '' }, rows: [], total: 0, sum: null, offset: 0, searched: false } });
   S.form = loadForm();
 }

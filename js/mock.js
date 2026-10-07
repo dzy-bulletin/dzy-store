@@ -4,6 +4,7 @@
 //   TEST1 / store-test-1234（門市 mala，值班核定密碼 1234；duty 為空字串＝預設 0000，第一次要改）   TEST2 / store-test-1234（門市 mzt，功能全開）   ADMIN / admin-test-1234（管理者 hq）
 import { lossMock, lossAlias } from './mock-loss.js';
 import { transferMock, transferHome, TRANSFER_NODES, DEFAULT_TRANSFER_ALIAS } from './mock-transfer.js';   // 門市調撥假後端（獨立檔）
+import { LEAVE_TYPES as MOCK_LEAVES } from '../modules/duty/calc.js';   // 假別名稱沿用內建清單，假後端的「薪酬假別表」預設就是這些
 import { inventory as invMock, homeItems as invHome } from './mock-inventory.js';   // 庫存盤點假後端（另一支檔案）
 const KEY = 'dzystore_mockdb';
 // e2e 注入的資料（window.__E2E_DATA，由測試每次隨機產生）；沒有就用下面內建預設，示範模式不受影響。
@@ -175,7 +176,7 @@ function admin(method, p, q, b, me) {
     return ok(Object.values(db.accounts).map(a => ({ code: a.code, name: a.name, brand: a.brand, role: a.role, active: a.active, locked: a.lockUntil > Date.now(), mustChangePassword: a.must, features: a.features })));
   if (method === 'POST' && p === '/admin/accounts') {
     const code = String(b.code || '').toUpperCase();
-    if (!/^[A-Z0-9]{2,12}$/.test(code)) return fail('BAD_INPUT', '門市代號要是 2-12 碼的大寫英數字');
+    if (!/^[A-Z0-9]{2,10}$/.test(code)) return fail('BAD_INPUT', '門市代號要是 2-10 碼的大寫英數字');
     if (db.accounts[code]) return fail('BAD_INPUT', '這個代號已經有人用了');
     if (!String(b.name || '').trim()) return fail('BAD_INPUT', '請填店名');
     if (!['mala', 'mzt', 'yiwu', 'cf', 'hq'].includes(b.brand)) return fail('BAD_INPUT', '品牌不正確');
@@ -241,7 +242,7 @@ function admin(method, p, q, b, me) {
     if (!b.colors || !hexc.test(b.colors.red) || !hexc.test(b.colors.black)) return fail('BAD_INPUT', '顏色格式不正確');
     const ids = (b.cards || []).map(c => c.id);
     if (ids.length !== 6 || new Set(ids).size !== 6 || !MODS.every(m => ids.includes(m))) return fail('BAD_INPUT', '首頁卡片要六張齊全、不能重複');
-    if (b.logoUrl && !/^(https:\/\/|\/|data:image)/.test(b.logoUrl)) return fail('BAD_INPUT', 'Logo 網址要以 https:// 或 / 開頭');
+    if (b.logoUrl && !/^(https:\/\/[^/]|\/[^/]|data:image\/(png|jpeg|webp);base64,)/.test(b.logoUrl)) return fail('BAD_INPUT', 'Logo 網址要以 https:// 開頭、或是 / 開頭的站內路徑（不能是 //），或 png／jpeg／webp 的內嵌圖片');
     if ((b.banner || '').length > 300) return fail('BAD_INPUT', '公告橫幅最多 300 字');
     db.ui = { systemName: String(b.systemName || '').trim() || '門市營運系統', logoUrl: b.logoUrl || '', colors: b.colors,
       cards: (b.cards || []).map(c => ({ id: c.id, label: c.label, visible: !!c.visible, order: c.order })), banner: b.banner || '' };
@@ -474,6 +475,9 @@ function dutyDo(d, action, b) {
     const rec = { periods: periods.map(p => ({ ...p })), approved_hours: hours, status_text: status, manager_name: MGR };
     d.approved[date + emp.emp_id] = rec; d.leave[date + emp.emp_id] = { type: leave, hours: lh };
     return ok({ date, emp_id: emp.emp_id, name: emp.name, periods, approved_hours: hours, leave_type: leave, leave_hours: lh, status_text: status, manager_name: MGR });
+  }
+  if (action === 'payroll_leave_options') {      // 薪酬假別表＋額度＋期限事件日；e2e 可把 d.leaveOpts 換成自己的（含 blocked、window_days、events）
+    return ok(clone(d.leaveOpts || { ok: true, store: 'SSLGF', ym: taipeiDay().slice(0, 7), day_hours: 8, types: MOCK_LEAVES.map((n, i) => ({ code: 'lt' + i, name: n })), quotas: {}, events: {} }));
   }
   if (action === 'mgr_pending_devices') return ok({ pending: d.devices.map(x => ({ ...x })) });
   if (action === 'mgr_device_decision') {

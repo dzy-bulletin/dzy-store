@@ -12,7 +12,7 @@ export default async function view({ el, api }) {
         <div class="mt"><button class="btn ghost sm" id="tempDone" type="button">知道了</button></div></div>` : ''}
       <div class="card"><h2>新增帳號</h2><p class="hint">新帳號的密碼是 000000，門市第一次登入時系統會要求自己改。</p>
         <form id="addForm"><div class="grid2">
-          <div class="fld"><label for="nCode">門市代號（大寫英數 2-12 碼）</label><input id="nCode" type="text" autocapitalize="characters"></div>
+          <div class="fld"><label for="nCode">門市代號（大寫英數 2-10 碼）</label><input id="nCode" type="text" autocapitalize="characters"></div>
           <div class="fld"><label for="nName">店名</label><input id="nName" type="text"></div>
           <div class="fld"><label for="nBrand">品牌</label><select id="nBrand">${Object.entries(BRANDS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
           <div class="fld"><label for="nRole">角色</label><select id="nRole"><option value="store">門市</option><option value="admin">管理者</option></select></div>

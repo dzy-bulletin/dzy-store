@@ -13,11 +13,11 @@ function findProduct(S, pid) { for (const c in S.products) { const f = (S.produc
 const pg = p => (p.spec > 0 ? p.price / p.spec : p.price);
 const value = (S, i) => { const p = findProduct(S, i.pid); return p ? (parseFloat(i.qty) || 0) * (parseFloat(i.spec) || 1) * pg(p) : 0; };
 const total = S => { let t = 0; S.cartCats.forEach(c => (S.cartItems[c] || []).forEach(i => { t += value(S, i); })); S.stockCats.forEach(c => (S.stockItems[c] || []).forEach(i => { t += value(S, i); })); return t; };
-function counts(S) {
+function counts(S, homeLow) {      // homeLow：首頁用，偏低只算有填數量（qty>0）的列
   let low = 0, high = 0;
   const scan = (cats, items) => cats.forEach(c => (items[c] || []).forEach(i => {
     const t = S.thresholds[i.pid]; if (!t) return; const v = value(S, i);
-    if (t.low !== null && t.low !== undefined && v < t.low) low++; else if (t.high !== null && t.high !== undefined && v > t.high) high++;
+    if (t.low !== null && t.low !== undefined && v < t.low) { if (!homeLow || (parseFloat(i.qty) || 0) > 0) low++; } else if (t.high !== null && t.high !== undefined && v > t.high) high++;
   }));
   scan(S.cartCats, S.cartItems); scan(S.stockCats, S.stockItems);
   return { low, high };
@@ -91,12 +91,14 @@ function parseLegacy(data) {
       }
     }
   }
-  const th = data.thresholds;
-  if (th && typeof th === 'object' && !Array.isArray(th)) for (const pid of Object.keys(th)) {
+  const th = data.thresholds && typeof data.thresholds === 'object' && !Array.isArray(data.thresholds) ? data.thresholds : {};
+  for (const pid of Object.keys(th)) {
     if (!ids.has(pid) || !th[pid] || typeof th[pid] !== 'object') continue;
     const low = numOrNull(th[pid].low), high = numOrNull(th[pid].high);
     S.thresholds[pid] = { low: low === undefined ? null : low, high: high === undefined ? null : high };
   }
+  // 同正本 applyDefaultThresholds：只補「從未出現過」的商品預設門檻，檔案裡已有的 key（含明確清除的 null）保留
+  for (const pid of Object.keys(DEFAULTS.thresholds || {})) if (ids.has(pid) && !Object.prototype.hasOwnProperty.call(th, pid)) S.thresholds[pid] = { low: DEFAULTS.thresholds[pid].low, high: DEFAULTS.thresholds[pid].high };
   if (!ids.size && !Object.values(S.cartItems).flat().length && !Object.values(S.stockItems).flat().length) return bad('這個檔案裡沒有商品也沒有盤點資料');
   S.dropped = dropped;
   return S;
@@ -112,7 +114,7 @@ export function inventory(action, me, b, db) {
   const st = store(db, me.code), S = st.S;
   const at = () => new Date().toISOString();
   if (action === 'bootstrap') { const d = snap(st); return ok({ at: at(), lastFinish: st.lastFinish, data: d }); }
-  if (action === 'lowCount') return ok({ ...counts(S), missing: 0 });
+  if (action === 'lowCount') return ok({ ...counts(S, true), missing: 0 });
   if (action === 'saveCounts') {
     if (!ZONES.includes(b.zone)) return bad('區域不正確');
     const zone = b.zone, cats = zone === 'cart' ? S.cartCats : S.stockCats, items = zone === 'cart' ? S.cartItems : S.stockItems;
@@ -212,6 +214,6 @@ export function inventory(action, me, b, db) {
 
 // 首頁：庫存偏低 N 項（對照 server/home.js 的 inventory 規則）
 export function homeItems(me, db) {
-  const n = counts(store(db, me.code).S).low;
+  const n = counts(store(db, me.code).S, true).low;
   return n ? [{ module: 'inventory', level: 'warn', text: `庫存偏低 ${n} 項`, count: n, link: '#/inventory/stock' }] : [];
 }

@@ -31,10 +31,12 @@ export function msgOf(err) {
   return MESSAGES[code] || (err && err.message && !/^[A-Z_]+$/.test(err.message) ? err.message : '出錯了：' + code);
 }
 
-const CLIENT_TIMEOUT_MS = 30000;   // 後端 25 秒會自己回 TIMEOUT；這是連後端都沒回時的保險
-function once(action, body) {
+// 與原系統 ~/mala-cashbook 的拍板一致（js/config.js）：第一次等 20 秒、唯讀動作重送只等 12 秒，最壞 32 秒就有結果。
+// 後端自己 25 秒會回 TIMEOUT；這是連後端都沒回時的保險。
+export const TIMEOUT_MS = 20000, RETRY_TIMEOUT_MS = 12000;
+function once(action, body, ms) {
   let timer;
-  const guard = new Promise((_, rej) => { timer = setTimeout(() => rej(Object.assign(new Error('TIMEOUT'), { code: 'TIMEOUT' })), CLIENT_TIMEOUT_MS); });
+  const guard = new Promise((_, rej) => { timer = setTimeout(() => rej(Object.assign(new Error('TIMEOUT'), { code: 'TIMEOUT' })), ms); });
   return Promise.race([api('POST', '/m/cashbook/' + action, body || {}), guard]).finally(() => clearTimeout(timer));
 }
 // 只有唯讀動作（bootstrap／list）在逾時或連不上時自動重送一次；寫入動作（create／update／void／lock／unlock）永遠不自動重送——
@@ -42,11 +44,11 @@ function once(action, body) {
 const READONLY = new Set(['bootstrap', 'list']);
 const RETRY_ON = new Set(['TIMEOUT', 'NETWORK']);
 export async function call(action, body) {
-  try { return await once(action, body); }
+  try { return await once(action, body, TIMEOUT_MS); }
   catch (e) {
     if (!READONLY.has(action) || !RETRY_ON.has(e.code)) throw e;
     S.retrying = true;
-    try { return await once(action, body); } finally { S.retrying = false; }
+    try { return await once(action, body, RETRY_TIMEOUT_MS); } finally { S.retrying = false; }
   }
 }
 

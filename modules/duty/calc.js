@@ -111,13 +111,45 @@ export function lateFromStatus(statusText) {
   return '';
 }
 
-// 假別清單：後端 LEAVE_TYPES 白名單（~/mala-gas/mala-clock-in/程式碼.js:134–142），選什麼後端都收。
-// 原頁還會向薪酬系統問「剩餘額度、期限規則」（payroll_leave_options），那個動作不在營運系統放行的 11 個動作內，所以這裡沒有額度提示。
+// 假別清單：平時由 payroll_leave_options 動態帶出（薪酬假別表是正本：在那裡加一列這裡就多一個選項，manager.html:1171–1173）；
+// 拿不到才退回下面這份——後端 mgr_approve 的 LEAVE_TYPES 白名單（~/mala-gas/mala-clock-in/程式碼.js:134–142），選什麼後端都收。
 export const LEAVE_TYPES = [
   '特休假', '事假', '病假', '住院傷病假', '安胎休養假', '生理假', '家庭照顧假', '喪假（父母・配偶）', '喪假（祖父母・子女・配偶父母）',
   '喪假（曾祖父母・兄弟姊妹）', '婚假', '天災假', '公傷病假', '產假（分娩）', '流產假（妊娠3個月以上）', '流產假（妊娠2～未滿3個月）',
   '流產假（妊娠未滿2個月）', '產檢假', '陪產檢及陪產假', '公假', '謀職假', '育嬰假', '喪假', '產假', '出差',
 ];
+export function leaveNames(opts) {
+  return opts && Array.isArray(opts.types) && opts.types.length ? opts.types.map(t => t.name) : LEAVE_TYPES;
+}
+export const leaveDefOf = (opts, name) => (opts && Array.isArray(opts.types) ? opts.types.filter(x => x.name === name)[0] : null) || null;
+// manager.html:675–679：某人某假別的額度資料
+export function quotaOf(opts, empId, code) {
+  if (!opts || !opts.quotas) return null;
+  return (opts.quotas[empId] || {})[code] || null;
+}
+// manager.html:1184–1206：下拉選項的文字與是否反灰（額度用完）。曆年制與每子女制才擋；婚喪產檢是「每次事件」，標每次上限
+export function leaveOptionView(name, def, q) {
+  if (!def || !q || q.cap_days == null) return { text: name, disabled: false };
+  const remain = Math.round((q.remain_days || 0) * 10) / 10;
+  if (q.blocked) return { text: name + '（額度已用完）', disabled: true };
+  if (q.basis === 'event') return { text: name + '（每次上限 ' + q.cap_days + ' 日）', disabled: false };
+  if (def.code === 'parental') return { text: name + '（剩 ' + (Math.round(remain / 30 * 10) / 10) + ' 個月）', disabled: false };   // 育嬰留停以月計
+  return { text: name + '（剩 ' + remain + ' 日）', disabled: false };
+}
+// manager.html:659–673：期限規則（婚假 3 個月內、陪產假前後 15 日內…；與後端 payLeaveWindowCheck 同一套，改這裡兩邊都要改）。
+// 以事件日為基準：婚假＝結婚登記日、陪產假＝分娩日。事件日沒登記就不擋、只提示。
+export function windowCheck(def, events, empId, leaveDate) {
+  if (!def || def.window_days == null) return { ok: true };
+  const ev = ((events && events[empId]) || {})[def.code];
+  if (!ev) return { ok: true, note: def.name + ' 有期限規定，但還沒登記事件日，系統無法檢查' };
+  const from = addDaysStr(ev, -(Number(def.window_before) || 0));
+  const to = addDaysStr(from, Number(def.window_days) || 0);
+  const toMax = def.window_max == null ? null : addDaysStr(from, Number(def.window_max));
+  if (leaveDate < from) return { ok: false, msg: def.name + ' 最早只能從 ' + from + ' 開始請（事件日 ' + ev + '）' };
+  if (leaveDate <= to) return { ok: true };
+  if (toMax && leaveDate <= toMax) return { ok: true, note: def.name + ' 已超過 ' + to + ' 的期限，需雇主同意才可延至 ' + toMax };
+  return { ok: false, msg: def.name + ' 請畢期限是 ' + to + (toMax ? '（經同意最多延至 ' + toMax + '）' : '') + '，已超過' };
+}
 
 // manager.html:1956–1959：員工專屬打卡連結（各店頁面檔名不同）
 export function clockLink(clockStore, key) {

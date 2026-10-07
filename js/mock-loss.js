@@ -59,6 +59,7 @@ export function lossMock(action, me, b, db) {
     if (!Array.isArray(b.records) || !b.records.length) return fail('BAD_INPUT', '登記資料格式不正確');
     const clean = [];
     for (const r of b.records) { const c = cleanRec(r, store); if (typeof c === 'string') return fail('BAD_INPUT', c); clean.push(c); }
+    if (window.__E2E_LOSS_CLASH) { window.__E2E_LOSS_CLASH = false; return ok({ accepted: [], duplicated: clean.map(c => c.id) }); }   // e2e 用：模擬 id 撞到別店的紀錄（回 duplicated 但本店沒有這筆）
     const accepted = [], duplicated = [];
     for (const c of clean) { if (records.some(r => r.id === c.id)) duplicated.push(c.id); else { records.push(c); accepted.push(c.id); } }
     return ok({ accepted, duplicated });

@@ -20,7 +20,7 @@ export function renderAdd(ctx) {
     <div id="lsErr" class="err" role="alert"></div>
     <form id="lsForm" autocomplete="off" novalidate>
       <div class="fld"><label for="lsDate">日期</label><input id="lsDate" type="date" required></div>
-      <div class="fld ls-acwrap"><label for="lsName">品名</label><input id="lsName" type="text" placeholder="輸入品名，會自動帶出成本表的品項" autocomplete="off"><ul id="lsAc" class="ls-ac" hidden></ul></div>
+      <div class="fld ls-acwrap"><label for="lsName">品名</label><input id="lsName" type="text" maxlength="60" placeholder="輸入品名，會自動帶出成本表的品項" autocomplete="off"><ul id="lsAc" class="ls-ac" hidden></ul></div>
       <div class="ls-two"><div class="fld"><label for="lsCat">品類</label><select id="lsCat">${opts(S.categories, '選品類', D.cat)}</select></div>
         <div class="fld"><label for="lsUnit">單位</label><input id="lsUnit" type="text" readonly placeholder="—"></div></div>
       <div class="ls-two"><div class="fld"><label for="lsQty">耗損量</label><input id="lsQty" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0"></div>
@@ -145,7 +145,13 @@ export function renderAdd(ctx) {
     try {
       if (fresh) { const d = await call('saveItem', { item: fresh }); S.items = d.items || S.items; item = findItem(name) || fresh; }
       const rec = makeRecord(Object.assign({ id: p.id }, input), item, p.at);
-      await call('addLoss', { records: [rec] });          // 重複（duplicated）也算成功：同一個 id 已經記進去了
+      const res = await call('addLoss', { records: [rec] });
+      // 重複（duplicated）通常是「上一次其實已經記進去了」（逾時重按，同一個 id），算成功；但 id 是全域唯一鍵，撞到別店的 id 時
+      // 這筆其實沒存。所以回 duplicated 時要到本店當天的紀錄確認那個 id 真的在，不在就不能顯示「已登記」。
+      if (res && Array.isArray(res.duplicated) && res.duplicated.includes(rec.id)) {
+        const mine = ((await call('listLoss', { from: rec.日期, to: rec.日期 })).records || []);
+        if (!mine.some(r => r.id === rec.id)) { S.pending = null; throw Object.assign(new Error('編號衝突，這筆沒有存進去。請按「送出登記」再送一次（會換新編號）。'), { code: 'ID_CLASH' }); }
+      }
       S.pending = null;
       Object.assign(D, { name: '', cat: '', unit: '', cost: '', qty: '', reason: '', note: '', memo: '' });
       if (!el.isConnected) return;

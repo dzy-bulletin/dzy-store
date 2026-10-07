@@ -1,7 +1,7 @@
 // 核定工時：照原系統 ~/mala-clock-in/manager.html 搬。日期列（前一天／後一天／今天）、本月待核定提醒、員工卡（收合展開、時段、
 // 核定時數即時算、休息、假別、出差、遲到分鐘）、送出核定。外觀換成營運系統風格，規則與文案不改。
 import { confirmBox } from '../../js/ui.js';
-import { S, call, brk, h, failBar } from './state.js';
+import { S, call, brk, h, failBar, loadLeave, staleLeave } from './state.js';
 import * as C from './calc.js';
 
 export function renderApprove(ctx) {
@@ -89,7 +89,9 @@ export function renderApprove(ctx) {
 
   if (S.pend) drawPending();
   loadPending();
-  loadDay(S.date);
+  // 假別清單與額度要在畫員工卡之前到（原頁也是先 loadLeaveOptions 再 loadDay）；失敗不擋人，退回內建清單
+  if (S.leave) loadDay(S.date);
+  else { box.innerHTML = '<div class="card du-center" id="duLoading">載入中…</div>'; loadLeave().then(() => { if (live()) loadDay(S.date); }); }
 }
 
 function renderEmployees(box, date, employees) {
@@ -187,7 +189,15 @@ function buildCard(emp, date) {
 
   // ---- 請假註記／出差／遲到分鐘 ----
   const leaveSel = h('select', 'du-leave', null, { 'aria-label': '請假註記' });
-  ['無'].concat(C.LEAVE_TYPES).forEach(t => { const o = h('option', null, t); o.value = t === '無' ? '' : t; leaveSel.append(o); });
+  const LO = S.leave;                               // payroll_leave_options 的回應；null＝拿不到，用內建清單、沒有額度與期限檢查
+  [''].concat(C.leaveNames(LO)).forEach(t => {
+    const o = h('option', null, t || '無'); o.value = t;
+    if (t && LO) {                                  // 額度用完就反灰選不了；已經選過這個假別的既有紀錄，即使現在超額也要能顯示，否則重開頁掉值（manager.html:1184–1207）
+      const def = C.leaveDefOf(LO, t), v = C.leaveOptionView(t, def, def ? C.quotaOf(LO, String(emp.emp_id), def.code) : null);
+      o.textContent = v.text; o.disabled = v.disabled && String(emp.leave_type || '') !== t;
+    }
+    leaveSel.append(o);
+  });
   if (emp.leave_type && ![...leaveSel.options].some(o => o.value === emp.leave_type)) { const o = h('option', null, emp.leave_type); o.value = emp.leave_type; leaveSel.append(o); }   // 既有紀錄的假別不在清單內也要能顯示，否則重開頁掉值
   leaveSel.value = emp.leave_type || '';
   const leaveHours = h('input', 'du-leave-hours', null, { type: 'number', step: '0.25', min: '0', placeholder: '時數', 'aria-label': '假別時數' });
@@ -249,6 +259,17 @@ function buildCard(emp, date) {
   const say = (cls, text) => { result.className = 'du-result ' + cls; result.hidden = false; result.textContent = text; };
 
   submit.onclick = async () => {
+    // 硬擋（Eason 2026-08-22「硬擋，不給送出」，manager.html:1296–1320）：額度用完、期限過了的假別不給送出。
+    // 下拉的 disabled 只擋滑鼠，程式指定仍設得進去，所以送出前用同一份資料再判一次；原本就選著這個假別的既有紀錄放行，否則已超額的人連重送核定都做不了
+    if (leaveSel.value && LO && String(emp.leave_type || '') !== leaveSel.value) {
+      const d0 = C.leaveDefOf(LO, leaveSel.value), q0 = d0 ? C.quotaOf(LO, String(emp.emp_id), d0.code) : null;
+      if (d0) {
+        const wc = C.windowCheck(d0, LO.events, String(emp.emp_id), date);
+        if (!wc.ok) return say('bad', '✕ ' + wc.msg + '，無法送出。確有需要請聯絡 Eason。');
+        if (wc.note && !await confirmBox(wc.note + '\n\n仍要送出嗎？', '送出')) return;
+      }
+      if (q0 && q0.blocked) return say('bad', '✕ ' + emp.name + ' 的「' + leaveSel.value + '」額度已用完（上限 ' + q0.cap_days + ' 日，已用 ' + (Math.round((q0.used_days || 0) * 10) / 10) + ' 日），無法送出。確有需要請聯絡 Eason 調整假別設定。');
+    }
     const periods = []; let half = false;
     periodRows.querySelectorAll('.du-prow').forEach(r => {
       const s = r.querySelector('.p-start').value, e = r.querySelector('.p-end').value;
@@ -278,6 +299,7 @@ function buildCard(emp, date) {
     try {
       const res = await call('mgr_approve', { date: approveDate, emp_id: emp.emp_id, periods, late_min: lateIn.value, leave_type: leaveSel.value, leave_hours: leaveSel.value ? leaveHours.value : '' });
       delete S.dayCache[approveDate];
+      if (leaveSel.value || emp.leave_type) staleLeave();      // 有請假的核定會動到額度，下次進核定頁重抓
       say('ok', '✓ 已核定 ' + res.approved_hours + ' 小時・' + res.status_text + C.leaveSuffix(res.leave_type, res.leave_hours) + '（' + res.manager_name + '）');
       setBadge(res, res.leave_type, res.leave_hours);
       card.__pending = false;

@@ -20,7 +20,7 @@ export default {
   tabs: [{ id: 'todo', label: '待辦' }, { id: 'new', label: '開單' }, { id: 'query', label: '查單' }],
   render(ctx) {
     const key = ctx.session.token || ctx.session.code;
-    if (S.key !== key) resetState(key);                  // 換了登入就重來，不留上一個人的單
+    if (S.key !== key) resetState(key, ctx.session.code);                  // 換了登入就重來，不留上一個人的單
     if (S.tab !== ctx.tab) { S.tab = ctx.tab; S.docNo = ''; S.doc = null; S.mode = ''; }   // 換分頁就離開詳情
     if (ctx.tab !== 'new') S.editNo = '';
     const draw = () => {

@@ -16,6 +16,15 @@ let vendorSel = '', vendorOther = '';
 let sending = false;
 let lastOk = '';          // 剛送出成功的提示，回到上傳頁還看得到
 let thumbUrls = [];       // 「我的貨單」裡建立的縮圖網址，換頁時一併釋放
+let sessKey = null;       // 目前這些狀態屬於哪一次登入（比照收支登記）：換了登入就全部清掉，不留上一家店的廠商清單與待送照片
+
+function resetFor(key) {
+  if (sessKey === key) return;
+  staged.forEach(s => URL.revokeObjectURL(s.url));
+  releaseThumbs();
+  staged = []; batchCid = null; vendors = null; vendorSel = vendorOther = ''; lastOk = ''; sending = false;
+  sessKey = key;
+}
 
 function uuid4() {
   if (crypto.randomUUID) return crypto.randomUUID().toLowerCase();
@@ -69,8 +78,9 @@ async function renderUpload(ctx) {
   }
   drawVendors();
   if (!vendors) {
-    api('POST', '/m/purchase/vendors', {}).then(list => { vendors = list; if (!vendors.length) vendorSel = '__other'; }, () => { vendors = []; vendorSel = '__other'; })
-      .then(() => { if (el.isConnected) drawVendors(); });
+    const k = sessKey;      // 讀取途中若換了登入，回來的是上一家店的清單，丟掉
+    api('POST', '/m/purchase/vendors', {}).then(list => { if (sessKey !== k) return; vendors = list; if (!vendors.length) vendorSel = '__other'; }, () => { if (sessKey !== k) return; vendors = []; vendorSel = '__other'; })
+      .then(() => { if (el.isConnected && sessKey === k) drawVendors(); });
   }
   sel.onchange = () => { vendorSel = sel.value; other.hidden = sel.value !== '__other'; msg(''); };
   other.oninput = () => { vendorOther = other.value; };
@@ -189,5 +199,5 @@ async function renderMine(ctx) {
 export default {
   id: 'purchase',
   tabs: [{ id: 'upload', label: '上傳' }, { id: 'mine', label: '我的貨單' }],
-  render(ctx) { return ctx.tab === 'mine' ? renderMine(ctx) : renderUpload(ctx); },
+  render(ctx) { resetFor(ctx.session.token || ctx.session.code); return ctx.tab === 'mine' ? renderMine(ctx) : renderUpload(ctx); },
 };
