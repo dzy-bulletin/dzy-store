@@ -12,12 +12,14 @@ export function renderImport(ctx) {
   const el = ctx.el;
   el.innerHTML = `<div class="card" id="invImport"><h2>從舊版匯入</h2>
     <p class="hint">舊版庫存 app 存在手機裡，換手機或清快取就沒了。把舊版「匯出資料」存下來的 JSON 檔匯進來，就能接著用。步驟請看操作手冊「庫存盤點」。</p>
-    <div class="fld"><label for="invFile">選擇舊版匯出檔（.json）</label><input id="invFile" type="file" accept=".json,application/json"></div>
+    <div class="fld"><label>舊版匯出檔（.json）</label><input id="invFile" type="file" accept=".json,application/json" hidden><div class="row"><button class="btn ghost" id="invFileBtn" type="button">選擇檔案</button><span class="hint" id="invFileName" style="margin:0"></span></div></div>
     <div class="fld mt"><label for="invText">或把檔案內容貼在這裡</label><textarea id="invText" rows="6" placeholder='{"products": {…}, "cartItems": {…} …}' spellcheck="false"></textarea></div>
     <div class="row mt"><button class="btn" id="invPreview" type="button">預覽</button></div><div class="err" id="invImpErr" role="alert"></div><div id="invImpBox"></div></div>`;
   const err = el.querySelector('#invImpErr'), box = el.querySelector('#invImpBox'), text = el.querySelector('#invText');
+  el.querySelector('#invFileBtn').onclick = () => el.querySelector('#invFile').click();
   el.querySelector('#invFile').onchange = e => {
     const f = e.target.files[0]; if (!f) return;
+    el.querySelector('#invFileName').textContent = f.name;
     const rd = new FileReader(); rd.onload = () => { text.value = String(rd.result); err.textContent = ''; box.innerHTML = ''; }; rd.onerror = () => { err.textContent = '這個檔案讀不到，換一個再試'; }; rd.readAsText(f);
   };
   const parse = () => { try { return JSON.parse(text.value); } catch (e) { err.textContent = '這不是正確的 JSON 檔（可能複製不完整），請重新匯出或重新選檔'; return undefined; } };

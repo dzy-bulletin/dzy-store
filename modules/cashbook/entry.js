@@ -60,7 +60,7 @@ export function renderEntry(ctx) {
     <div class="fld"><label for="cbAmount">金額</label><input id="cbAmount" type="number" inputmode="numeric" min="1" step="1" placeholder="0"></div>
     <div class="fld"><label>單據</label><div class="cb-seg" id="cbInv"><button type="button" data-inv="0">收據／無發票</button><button type="button" data-inv="1">統一發票</button></div></div>
     <div class="cb-tax" id="cbTax"></div>
-    <div class="fld"><label for="cbPhoto">收據照片</label><input id="cbPhoto" type="file" accept="image/*" capture="environment"><div class="hint" id="cbPhotoNote"></div></div>
+    <div class="fld"><label>收據照片</label><input id="cbPhoto" type="file" accept="image/*" capture="environment" hidden><input id="cbPhotoPick" type="file" accept="image/*" hidden><div class="row"><button class="btn ghost" id="cbPhotoCam" type="button">拍收據</button><button class="btn ghost" id="cbPhotoAlbum" type="button">從相簿選</button></div><div class="hint" id="cbPhotoNote"></div></div>
     <button class="btn wide mt" id="cbSubmit" type="button" data-busy="送出中">送出這一筆</button>
     <button class="btn ghost wide mt" id="cbClear" type="button">清空重填</button>
   </div>`;
@@ -107,7 +107,7 @@ export function renderEntry(ctx) {
   function drawPhoto() { $('cbPhotoNote').textContent = D.photoBase64 ? `已附收據照片（約 ${Math.round(D.photoBase64.length * 0.75 / 1024)} KB）` : ''; }
   function clearForm(keepDate) {
     Object.assign(D, blankDraft(), { date: keepDate ? D.date : todayISO(), subject: D.subject });
-    $('cbDate').value = D.date; $('cbName').value = ''; $('cbAmount').value = ''; $('cbPhoto').value = '';
+    $('cbDate').value = D.date; $('cbName').value = ''; $('cbAmount').value = ''; $('cbPhoto').value = ''; $('cbPhotoPick').value = '';
     $('cbHint').textContent = ''; $('cbHint').className = 'hint';
     drawInv(); drawChips(); drawTax(); drawPhoto(); drawLock();
   }
@@ -131,8 +131,10 @@ export function renderEntry(ctx) {
     if (chip.dataset.subject) { $('cbSubject').value = chip.dataset.subject; D.subject = chip.dataset.subject; }
     applyMemory(); drawChips(); $('cbAmount').focus();
   };
-  $('cbPhoto').onchange = () => {
-    const file = $('cbPhoto').files[0]; D.photoBase64 = ''; drawPhoto();
+  $('cbPhotoCam').onclick = () => $('cbPhoto').click();
+  $('cbPhotoAlbum').onclick = () => $('cbPhotoPick').click();
+  $('cbPhoto').onchange = $('cbPhotoPick').onchange = e => {
+    const file = e.target.files[0]; D.photoBase64 = ''; drawPhoto();
     if (!file) return;
     compress(file).then(b64 => { D.photoBase64 = b64; if (el.isConnected) drawPhoto(); })
       .catch(() => showMsg('cbErr', '這張照片讀不到，換一張或先不拍。'));
