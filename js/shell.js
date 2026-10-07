@@ -6,7 +6,7 @@ import { esc, busy, setMsg, applyUi } from './ui.js';
 import { applyTheme } from './theme.js';
 
 const app = document.getElementById('app');
-let UI = { systemName: '門市營運系統', logoUrl: '', colors: {}, cards: [], banner: '' };
+let UI = { systemName: '鼎兆元｜門市營運系統', logoUrl: '', colors: {}, cards: [], banner: '' };
 let renderToken = 0;
 
 export function currentUi() { return UI; }

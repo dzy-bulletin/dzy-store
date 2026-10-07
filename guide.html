@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>門市操作手冊</title>
+<title>鼎兆元｜門市營運系統・操作手冊</title>
 <link rel="stylesheet" href="css/tokens.css">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -26,7 +26,9 @@ li{margin:4px 0;overflow-wrap:anywhere}
 .warn{background:#fdf0ee;border-left:4px solid var(--red);padding:10px 12px;border-radius:0 7px 7px 0;font-size:14.5px;margin:10px 0}
 .btn{display:inline-block;background:var(--head);border-radius:5px;padding:0 7px;font-weight:700;white-space:nowrap}
 code{background:var(--head);border-radius:4px;padding:0 5px;font-weight:700}
-.shot{border:1px dashed var(--line);border-radius:8px;color:var(--muted);font-size:13px;text-align:center;padding:14px;margin:10px 0}
+.shot{margin:14px 0;text-align:center}
+.shot img{display:block;width:100%;max-width:390px;height:auto;margin:0 auto;border:1px solid var(--line);border-radius:10px;background:#fff}
+.shot figcaption{color:var(--muted);font-size:13px;margin-top:5px}
 footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
 </style>
 </head>
@@ -56,7 +58,8 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
     <li>用 000000 登入，再照上面的步驟設定新密碼。</li>
   </ol>
   <div class="tip">連續輸入錯誤 5 次，帳號會暫時鎖住 15 分鐘。請等一下再試，或請管理者幫你解鎖。</div>
-  <div class="shot">（登入畫面圖：之後補上）</div>
+  <figure class="shot"><img src="img/guide/01-login.jpg" width="780" height="1688" loading="lazy" alt="登入畫面：門市代號與密碼欄、登入鈕"><figcaption>登入畫面</figcaption></figure>
+  <figure class="shot"><img src="img/guide/02-change-password.jpg" width="780" height="1688" loading="lazy" alt="第一次登入的強制改密碼畫面"><figcaption>第一次登入：設定自己的新密碼</figcaption></figure>
 </section>
 
 <section id="home"><h2>二、首頁</h2>
@@ -75,7 +78,8 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
     <li><b>值班核定</b>：主管核定同仁的上下班工時、管理裝置與名冊。</li>
   </ul>
   <p>如果左側欄少了某個系統，表示你們店還沒開這項功能，請洽管理者。</p>
-  <div class="shot">（首頁圖：之後補上）</div>
+  <figure class="shot"><img src="img/guide/03-home.jpg" width="780" height="1854" loading="lazy" alt="首頁的待辦與異常，依系統分組"><figcaption>首頁：待辦與異常</figcaption></figure>
+  <figure class="shot"><img src="img/guide/04-sidebar.jpg" width="780" height="128" loading="lazy" alt="手機上方的系統列"><figcaption>手機上方是系統列，左右滑動可看到全部系統</figcaption></figure>
 </section>
 
 <section id="purchase"><h2>三、貨單辨識</h2>
@@ -93,7 +97,8 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
   <p>切到 <b>我的貨單</b>，可以看到最近送出的貨單和處理狀況。按 <span class="btn">看照片</span> 可以看你傳的照片。如果總部退回，會寫上原因，照原因重新拍一張再上傳。</p>
   <h3>網路不好怎麼辦</h3>
   <p>送出時如果顯示連不上，先<b>不要關掉頁面</b>，等網路好一點再按一次送出。系統會認得是同一張，不會重複上傳。</p>
-  <div class="shot">（貨單辨識圖：之後補上）</div>
+  <figure class="shot"><img src="img/guide/05-purchase-upload.jpg" width="780" height="1688" loading="lazy" alt="貨單辨識上傳頁：選廠商、拍照、送出"><figcaption>上傳：選廠商、拍照、送出</figcaption></figure>
+  <figure class="shot"><img src="img/guide/06-purchase-mine.jpg" width="780" height="1688" loading="lazy" alt="我的貨單清單與處理狀況"><figcaption>我的貨單：看處理狀況</figcaption></figure>
 </section>
 
 <section id="cashbook"><h2>四、收支登記</h2>
@@ -135,7 +140,9 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
     <li>鎖錯了或需要補記，可以按 <span class="btn">解除鎖定</span>，或洽管理者。</li>
   </ol>
   <div class="warn">鎖定前請確認當月每一筆都已記完，也都核對過。</div>
-  <div class="shot">（收支登記圖：之後補上）</div>
+  <figure class="shot"><img src="img/guide/07-cashbook-entry.jpg" width="780" height="2290" loading="lazy" alt="收支登記的記帳表單"><figcaption>記帳</figcaption></figure>
+  <figure class="shot"><img src="img/guide/08-cashbook-list.jpg" width="780" height="1688" loading="lazy" alt="收支明細與當月合計"><figcaption>明細</figcaption></figure>
+  <figure class="shot"><img src="img/guide/09-cashbook-close.jpg" width="780" height="1688" loading="lazy" alt="月結分頁與鎖定按鈕"><figcaption>月結</figcaption></figure>
 </section>
 
 <section id="duty"><h2>五、值班核定</h2>
@@ -170,7 +177,10 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
   <h3>公告</h3>
   <p>切到 <b>公告</b>：輸入內容（最多 120 字），需要時選「顯示到」的日期（留空＝一直顯示），按 <span class="btn">發布公告</span>，同仁打卡頁最上方就會看到。下面的清單可以按 <span class="btn">下架</span>，之後也能按 <span class="btn">重新顯示</span>。</p>
   <div class="warn">連續輸入錯誤核定通行碼 5 次，會暫時鎖住 15 分鐘。</div>
-  <div class="shot">（值班核定圖：之後補上）</div>
+  <figure class="shot"><img src="img/guide/10-duty-approve.jpg" width="780" height="3114" loading="lazy" alt="核定工時：同仁卡片與送出核定"><figcaption>核定工時</figcaption></figure>
+  <figure class="shot"><img src="img/guide/11-duty-device.jpg" width="780" height="1688" loading="lazy" alt="裝置核准"><figcaption>裝置核准</figcaption></figure>
+  <figure class="shot"><img src="img/guide/12-duty-roster.jpg" width="780" height="1688" loading="lazy" alt="員工名冊"><figcaption>員工名冊</figcaption></figure>
+  <figure class="shot"><img src="img/guide/13-duty-notice.jpg" width="780" height="1688" loading="lazy" alt="公告發布"><figcaption>公告</figcaption></figure>
 </section>
 
 <section id="transfer"><h2>六、門市調撥</h2>
@@ -195,6 +205,9 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
     <li><b>刪除</b>：草稿和已出貨的單，由調出的店刪除；單不會消失，會標成「已刪除」。<b>已簽收的單要刪除，請洽會計。</b></li>
   </ul>
   <div class="tip">看到「這家店還沒有設定調撥節點」或「門市調撥尚未開通」，是管理者還沒設定好，請通知管理者。</div>
+  <figure class="shot"><img src="img/guide/14-transfer-todo.jpg" width="780" height="1688" loading="lazy" alt="門市調撥待辦：等你簽收、草稿、在路上的貨"><figcaption>待辦</figcaption></figure>
+  <figure class="shot"><img src="img/guide/15-transfer-new.jpg" width="780" height="3082" loading="lazy" alt="開單表單"><figcaption>開單</figcaption></figure>
+  <figure class="shot"><img src="img/guide/16-transfer-query.jpg" width="780" height="1688" loading="lazy" alt="查單"><figcaption>查單</figcaption></figure>
 </section>
 
 <section id="loss"><h2>七、耗損登記</h2>
@@ -222,7 +235,9 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
   <h3>成本設定</h3>
   <p>切到 <b>成本設定</b> 分頁：填品名、品類、單位、單位成本按 <span class="btn">儲存品項</span> 新增；搜尋後按 <span class="btn">修改</span> 可以改成本；不再使用的品項按 <span class="btn">停用</span>（停用後不會出現在登記的提示，也能再啟用）。</p>
   <div class="warn">改單位成本只影響<b>之後</b>登記的金額，過去的紀錄金額不會變。墨竹亭的成本表是四家店共用的，改一家全部一起生效。</div>
-  <div class="shot">（耗損登記圖：之後補上）</div>
+  <figure class="shot"><img src="img/guide/17-loss-add.jpg" width="780" height="2462" loading="lazy" alt="耗損登記表單與今天這幾筆"><figcaption>登記</figcaption></figure>
+  <figure class="shot"><img src="img/guide/18-loss-stat.jpg" width="780" height="2580" loading="lazy" alt="耗損統計與排行"><figcaption>統計</figcaption></figure>
+  <figure class="shot"><img src="img/guide/19-loss-items.jpg" width="780" height="2008" loading="lazy" alt="成本設定品項清單"><figcaption>成本設定</figcaption></figure>
 </section>
 
 <section id="inventory"><h2>八、庫存盤點</h2>
@@ -256,7 +271,12 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
     <li>匯入完成後，到 <b>攤車庫存／現場庫存</b> 檢查數字。匯入前新版裡的資料會先備份在 <b>歷史</b>（標「匯入前備份」），搬錯了可以去查看；不放心的話，舊版 app 的資料也還在。</li>
   </ol>
   <div class="warn">匯入會<b>整包覆蓋</b>這家店目前的商品、價格、門檻與盤點，不是合併。只在第一次搬資料時做就好，之後請直接用新版盤點。</div>
-  <div class="shot">（庫存盤點圖：之後補上）</div>
+  <figure class="shot"><img src="img/guide/20-inventory-cart.jpg" width="780" height="2550" loading="lazy" alt="攤車庫存盤點"><figcaption>攤車庫存</figcaption></figure>
+  <figure class="shot"><img src="img/guide/21-inventory-stock.jpg" width="780" height="2758" loading="lazy" alt="現場庫存盤點"><figcaption>現場庫存</figcaption></figure>
+  <figure class="shot"><img src="img/guide/22-inventory-price.jpg" width="780" height="3400" loading="lazy" alt="商品價格與偏低偏高門檻"><figcaption>商品價格</figcaption></figure>
+  <figure class="shot"><img src="img/guide/23-inventory-print.jpg" width="780" height="3400" loading="lazy" alt="列印與匯出頁"><figcaption>列印與匯出</figcaption></figure>
+  <figure class="shot"><img src="img/guide/24-inventory-history.jpg" width="780" height="1688" loading="lazy" alt="盤點歷史"><figcaption>歷史</figcaption></figure>
+  <figure class="shot"><img src="img/guide/25-inventory-import.jpg" width="780" height="1688" loading="lazy" alt="從舊版匯入"><figcaption>從舊版匯入</figcaption></figure>
 </section>
 
 <section id="help"><h2>九、遇到問題</h2>
@@ -267,7 +287,7 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
     <li><b>登入一段時間後被登出</b>：這是正常的，重新登入即可，沒送出的資料請重新輸入。</li>
   </ul>
 </section>
-<footer>門市營運系統・門市版操作手冊</footer>
+<footer>鼎兆元｜門市營運系統・門市版操作手冊</footer>
 </div>
 </body>
 </html>

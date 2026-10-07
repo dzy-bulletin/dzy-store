@@ -10,7 +10,7 @@ const KEY = 'dzystore_mockdb';
 // e2e 注入的資料（window.__E2E_DATA，由測試每次隨機產生）；沒有就用下面內建預設，示範模式不受影響。
 const E2E = () => (typeof window !== 'undefined' && window.__E2E_DATA) || {};
 const clone = x => JSON.parse(JSON.stringify(x));
-const DB_VERSION = 3;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
+const DB_VERSION = 4;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
 const MODS = ['purchase', 'cashbook', 'duty', 'transfer', 'loss', 'inventory'];
 const LABELS = { purchase: '貨單辨識', cashbook: '收支登記', duty: '值班核定', transfer: '門市調撥', loss: '耗損登記', inventory: '庫存盤點' };
 const hex = n => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -36,7 +36,7 @@ function fresh() {
       ADMIN: { code: 'ADMIN', name: '系統管理者', brand: 'hq', role: 'admin', active: true, pw: o('ADMIN', 'pw', 'admin-test-1234'), must: false, fails: 0, lockUntil: 0, features: [...MODS], duty: '' },
     },
     sessions: {}, audit: [], slips: seedSlips(), alias: {}, vault: {},
-    ui: { systemName: '門市營運系統', logoUrl: '', colors: { red: '#E8380D', black: '#231815' },
+    ui: { systemName: '鼎兆元｜門市營運系統', logoUrl: '', colors: { red: '#E8380D', black: '#231815' },
       cards: MODS.map((id, i) => ({ id, label: LABELS[id], visible: true, order: i + 1 })), banner: '' },
   };
   (E2E().extraAccounts || []).forEach(x => { db.accounts[x.code] = { code: x.code, name: x.name, brand: x.brand, role: 'store', active: true, pw: '000000', must: true, fails: 0, lockUntil: 0, features: [...x.features], duty: '' }; });
@@ -74,6 +74,7 @@ function route(method, p, q, b, token) {
       log(a.code, 'auth', 'login', false, '密碼錯誤'); return fail('AUTH', '代號或密碼不對');
     }
     a.fails = 0;
+    if (b.password === '000000') a.must = true;   // 與伺服器一致：用預設密碼登入一律強制改
     const t = { token: hex(32), expiresAt: new Date(Date.now() + 12 * 3600e3).toISOString(), code: a.code, duty: false };
     db.sessions[t.token] = t; log(a.code, 'auth', 'login', true);
     return ok(pub(a, t));
@@ -244,7 +245,7 @@ function admin(method, p, q, b, me) {
     if (ids.length !== 6 || new Set(ids).size !== 6 || !MODS.every(m => ids.includes(m))) return fail('BAD_INPUT', '首頁卡片要六張齊全、不能重複');
     if (b.logoUrl && !/^(https:\/\/[^/]|\/[^/]|data:image\/(png|jpeg|webp);base64,)/.test(b.logoUrl)) return fail('BAD_INPUT', 'Logo 網址要以 https:// 開頭、或是 / 開頭的站內路徑（不能是 //），或 png／jpeg／webp 的內嵌圖片');
     if ((b.banner || '').length > 300) return fail('BAD_INPUT', '公告橫幅最多 300 字');
-    db.ui = { systemName: String(b.systemName || '').trim() || '門市營運系統', logoUrl: b.logoUrl || '', colors: b.colors,
+    db.ui = { systemName: String(b.systemName || '').trim() || '鼎兆元｜門市營運系統', logoUrl: b.logoUrl || '', colors: b.colors,
       cards: (b.cards || []).map(c => ({ id: c.id, label: c.label, visible: !!c.visible, order: c.order })), banner: b.banner || '' };
     log(me.code, 'admin', 'ui', true); return ok();
   }
