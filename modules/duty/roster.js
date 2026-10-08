@@ -14,7 +14,11 @@ export function renderRoster(ctx) {
     <div class="card" id="rosterCard"><h2>同仁異動</h2>
     <p class="hint">同仁離職就在這裡設為離職，他<b>立刻無法打卡</b>、也不再出現在核定清單；<b>過去的打卡紀錄與已核定的工時都會保留</b>。設錯可以按恢復。</p>
     <div class="row"><select id="reSelect" class="grow" aria-label="選擇同仁"><option value="">選擇同仁…</option></select><button type="button" class="btn du-danger" id="reBtn" disabled>設為離職</button></div>
-    <div class="du-msg" id="reResult" hidden></div><div id="reInactive"></div></div>`;
+    <div class="du-msg" id="reResult" hidden></div><div id="reInactive"></div></div>
+    <div id="duLineFail"></div>
+    <div class="card" id="lineBindCard"><h2>LINE 綁定紀錄</h2>
+    <p class="hint">同仁第一次用 LINE「鼎兆元打卡」打卡時，要<b>人在店裡</b>並輸入全名才能綁定。下面是最近 30 天的紀錄；<b>不是本人綁的請立刻按「解除」</b>，那位同仁下次打卡要重新輸入全名。</p>
+    <div class="du-msg" id="lbResult" hidden></div><div id="lbList"></div></div>`;
   const live = () => el.isConnected;
   const q = s => el.querySelector(s);
   const aeBox = q('#aeResult'), reBox = q('#reResult'), sel = q('#reSelect'), reBtn = q('#reBtn'), gone = q('#reInactive');
@@ -61,6 +65,32 @@ export function renderRoster(ctx) {
     setActive(empId, false, reBtn);
   };
 
+  // ---- LINE 綁定紀錄（照原頁 manager.html initLineBinds）----
+  const lbList = q('#lbList'), lbBox = q('#lbResult');
+  const LB_TYPE = { bind_name: '輸入全名綁定', bind_auto: '跨店同名（本人確認）', bind: '用打卡連結綁定' };
+  const lbWhen = iso => { const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/); return m ? Number(m[2]) + '/' + Number(m[3]) + ' ' + m[4] + ':' + m[5] : ''; };
+  function drawBinds(items) {
+    if (!items.length) { lbList.innerHTML = '<p class="hint">最近 30 天沒有人綁定或解除。</p>'; return; }
+    lbList.innerHTML = items.map(it => {
+      const type = String(it.type || '');
+      const label = type.indexOf('unbind_by:') === 0 ? '由 ' + esc(type.slice(10)) + ' 解除' : esc(LB_TYPE[type] || type);
+      const stale = type.indexOf('bind') === 0 && !it.still_bound ? '・已不是目前綁定' : '';
+      const btn = it.still_bound ? `<button type="button" class="btn sm ghost lb-unbind" data-emp="${esc(it.emp_id)}" data-name="${esc(it.name)}">解除</button>` : '';
+      return `<div class="du-item"><span class="du-item-body">${esc(it.name)}（${esc(it.emp_id)}）<span class="du-when">${esc(lbWhen(it.ts))}・${label}${stale}</span></span>${btn}</div>`;
+    }).join('');
+    lbList.querySelectorAll('.lb-unbind').forEach(b => b.onclick = async () => {
+      const name = b.dataset.name;
+      if (!await confirmBox('要解除「' + name + '」的 LINE 綁定嗎？\n\n解除後他下次用 LINE 打卡要重新輸入全名綁定（要人在店裡）。\n不影響他原本的打卡連結，也不影響過去的打卡紀錄。', '解除綁定')) return;
+      b.disabled = true; b.textContent = '處理中…';
+      try { await call('mgr_line_unbind', { emp_id: b.dataset.emp }); show(lbBox, '✓ 已解除 <b>' + esc(name) + '</b> 的 LINE 綁定'); loadBinds(); }
+      catch (e) { show(lbBox, '✕ ' + esc(e.message || '解除失敗，請再試一次'), true); b.disabled = false; b.textContent = '解除'; }
+    });
+  }
+  function loadBinds() {
+    call('mgr_line_binds').then(r => { if (!live()) return; q('#duLineFail').innerHTML = ''; drawBinds(r.items || []); },
+      e => { if (live()) failBar(q('#duLineFail'), 'LINE 綁定紀錄', e, loadBinds); });
+  }
+
   // ---- 新進同仁 ----
   const nameIn = q('#aeName'), aeBtn = q('#aeBtn');
   async function create() {
@@ -87,4 +117,5 @@ export function renderRoster(ctx) {
   aeBtn.onclick = create;
   nameIn.onkeydown = e => { if (e.key === 'Enter') create(); };
   load();
+  loadBinds();
 }

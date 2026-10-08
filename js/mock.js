@@ -10,7 +10,7 @@ const KEY = 'dzystore_mockdb';
 // e2e 注入的資料（window.__E2E_DATA，由測試每次隨機產生）；沒有就用下面內建預設，示範模式不受影響。
 const E2E = () => (typeof window !== 'undefined' && window.__E2E_DATA) || {};
 const clone = x => JSON.parse(JSON.stringify(x));
-const DB_VERSION = 4;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
+const DB_VERSION = 5;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
 const MODS = ['purchase', 'cashbook', 'duty', 'transfer', 'loss', 'inventory'];
 const LABELS = { purchase: '貨單辨識', cashbook: '收支登記', duty: '值班核定', transfer: '門市調撥', loss: '耗損登記', inventory: '庫存盤點' };
 const hex = n => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -407,7 +407,7 @@ const DUTY_FAKE_D = {
 const fakeOf = emp => ((E2E().duty || {}).fake || DUTY_FAKE_D)[emp];
 function dutyDb() {
   const E = E2E().duty;
-  if (!db.duty && E) db.duty = { brk: [...E.brk], faults: [], calls: {}, approved: {}, leave: {}, roster: clone(E.roster), devices: clone(E.devices), notices: clone(E.notices) };
+  if (!db.duty && E) db.duty = { brk: [...E.brk], faults: [], calls: {}, approved: {}, leave: {}, roster: clone(E.roster), devices: clone(E.devices), notices: clone(E.notices), binds: clone(E.binds || []) };
   if (!db.duty) db.duty = {
     brk: ['12:00', '13:00'], faults: [], calls: {}, approved: {}, leave: {},
     roster: [{ emp_id: 'E01', name: '王小明', active: true, created_by: '', removed_at: '', removed_by: '' }, { emp_id: 'E02', name: '李小華', active: true, created_by: '', removed_at: '', removed_by: '' },
@@ -416,6 +416,7 @@ function dutyDb() {
     devices: [{ emp_id: 'E02', name: '李小華', device_id: 'dev-aaaa-bbbbcc112233', count: 2, first_ts: '2026-10-06T08:55:00+08:00', last_ts: '2026-10-06T17:01:00+08:00', max_distance_m: 35, all_within_range: true },
       { emp_id: 'E04', name: '林小美', device_id: 'dev-dddd-eeee99887766', count: 1, first_ts: '2026-10-06T09:10:00+08:00', last_ts: '2026-10-06T09:10:00+08:00', max_distance_m: 420, all_within_range: false }],
     notices: [{ id: 'N1', text: '舊公告：10/1 起請準時打卡。', active: false, ends_on: '', expired: false, created_at: '2026-09-30T10:00:00+08:00', created_by: '門市營運系統' }],
+    binds: [{ ts: '2026-10-08T09:02:00+08:00', emp_id: 'E01', name: '王小明', uid: 'U-mock-1', type: 'bind_name' }],
   };
   return db.duty;
 }
@@ -487,6 +488,18 @@ function dutyDo(d, action, b) {
     const [g] = d.devices.splice(i, 1); return ok({ emp_id: g.emp_id, approve: !!b.approve, changed: g.count });
   }
   if (action === 'mgr_roster') return ok({ roster: d.roster.map(r => ({ ...r })), manager_name: MGR });
+  if (action === 'mgr_line_binds') {   // 與打卡後端 Liff.js handleMgrLineBinds_ 同形狀：新的在前、still_bound
+    const bound = {}; (d.binds || []).forEach(x => { if (String(x.type).indexOf('bind') === 0) bound[x.emp_id] = x.uid; else delete bound[x.emp_id]; });
+    return ok({ days: 30, items: (d.binds || []).map(x => ({ ts: x.ts, emp_id: x.emp_id, name: x.name, type: x.type,
+      still_bound: String(x.type).indexOf('bind') === 0 && bound[x.emp_id] === x.uid })).reverse() });
+  }
+  if (action === 'mgr_line_unbind') {
+    const last = [...(d.binds || [])].reverse().find(x => x.emp_id === String(b.emp_id || ''));
+    if (!last || String(last.type).indexOf('bind') !== 0) return ok({ already: true });
+    if (!d.binds) d.binds = [];
+    d.binds.push({ ts: new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 19) + '+08:00', emp_id: last.emp_id, name: last.name, uid: last.uid, type: 'unbind_by:' + MGR });
+    return ok({});
+  }
   if (action === 'mgr_add_employee') {
     const name = String(b.name || '').trim();
     if (!name) return fail('BAD_INPUT', '請輸入同仁姓名');
