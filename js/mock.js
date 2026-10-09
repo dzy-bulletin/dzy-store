@@ -10,7 +10,7 @@ const KEY = 'dzystore_mockdb';
 // e2e 注入的資料（window.__E2E_DATA，由測試每次隨機產生）；沒有就用下面內建預設，示範模式不受影響。
 const E2E = () => (typeof window !== 'undefined' && window.__E2E_DATA) || {};
 const clone = x => JSON.parse(JSON.stringify(x));
-const DB_VERSION = 5;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
+const DB_VERSION = 6;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
 const MODS = ['purchase', 'cashbook', 'duty', 'transfer', 'loss', 'inventory'];
 const LABELS = { purchase: '貨單辨識', cashbook: '收支登記', duty: '值班核定', transfer: '門市調撥', loss: '耗損登記', inventory: '庫存盤點' };
 const hex = n => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -431,12 +431,18 @@ function defaultReqs() {
     { id: 'R2', created_at: at(-1, '19:20'), emp_id: 'E01', name: '王小明', kind: 'ot', date: taipeiDay(-1), leave_type: '', start: '17:00', end: '19:00', hours: 2, miss_type: '', reason: '晚上客人多，店長請我留下來幫忙', attach_id: 'att-pdf-R2', status: 'pending' },
     { id: 'R3', created_at: at(-1, '09:40'), emp_id: 'E04', name: '林小美', kind: 'miss', date: taipeiDay(-2), leave_type: '', start: '10:00', end: '18:00', hours: null, miss_type: 'both', reason: '在店門口按打卡一直說不在範圍內', attach_id: '', status: 'pending',
       punches: [{ type: 'in', hm: '09:58', status: 'rejected_out_of_range', distance_m: 860, accuracy_m: 1414 }, { type: 'out', hm: '18:03', status: 'rejected_out_of_range', distance_m: 640, accuracy_m: 900 }] },
+    // 出差單（2026-10-09）：leave_type＝出差、reason＝'地點：…；事由：…'
+    { id: 'R4', created_at: at(-1, '21:05'), emp_id: 'E02', name: '李小華', kind: 'trip', date: taipeiDay(-1), leave_type: '出差', start: '', end: '', hours: 8, miss_type: '', reason: '地點：台中央廚；事由：支援月初盤點', attach_id: '', status: 'pending' },
   ];
 }
 function reqSummary(r) {     // Requests.gs reqSummary_
   const md = parseInt(r.date.slice(5, 7), 10) + '/' + parseInt(r.date.slice(8, 10), 10);
   if (r.kind === 'leave') return md + ' ' + r.leave_type + (r.start ? ' ' + r.start + '–' + r.end : ' 整天') + ' ' + Number(r.hours) + ' 小時';
   if (r.kind === 'ot') return md + ' 加班 ' + r.start + '–' + r.end + '（' + Number(r.hours) + ' 小時）';
+  if (r.kind === 'trip') {
+    const m = /^地點：(.*?)；事由：/.exec(r.reason || ''), place = m ? m[1] : '';
+    return md + ' 出差' + (r.start ? ' ' + r.start + '–' + r.end : ' 整天') + ' ' + Number(r.hours) + ' 小時' + (place ? '（地點：' + place + '）' : '');
+  }
   const parts = [];
   if (r.miss_type === 'in' || r.miss_type === 'both') parts.push('上班 ' + r.start);
   if (r.miss_type === 'out' || r.miss_type === 'both') parts.push('下班 ' + r.end);
@@ -537,6 +543,20 @@ function dutyDo(d, action, b) {
     if (r.status !== 'pending') return fail('BAD_INPUT', r.status === 'cancelled' ? '同仁已經取消這筆申請' : '這筆已經處理過了');
     r.status = decision === 'approve' ? 'approved' : 'rejected'; r.decided_at = new Date().toISOString(); r.decided_by = MGR; r.reject_reason = decision === 'reject' ? reason : '';
     return ok({ id: r.id, status: r.status });
+  }
+  if (action === 'mgr_req_decide_batch') {      // Requests.gs handleMgrReqDecideBatch_：只能核准、最多 30 筆，不是審核中的略過並說原因
+    if (String(b.decision || '') !== 'approve') return fail('BAD_INPUT', '批次只能核准；退回請一筆一筆處理');
+    const ids = (Array.isArray(b.ids) ? b.ids.map(String) : []).filter((x, i, a) => x && a.indexOf(x) === i);
+    if (!ids.length) return fail('BAD_INPUT', '請先勾選要核准的申請');
+    if (ids.length > 30) return fail('BAD_INPUT', '一次最多核准 30 筆');
+    const done = [], skipped = [], now = new Date().toISOString();
+    ids.forEach(id => {
+      const r = d.reqs.find(x => String(x.id) === id);
+      if (!r) return skipped.push({ id, reason: '找不到這筆申請' });
+      if (r.status !== 'pending') return skipped.push({ id, reason: r.status === 'cancelled' ? '同仁已經取消這筆申請' : '這筆已經處理過了' });
+      r.status = 'approved'; r.decided_at = now; r.decided_by = MGR; r.reject_reason = ''; done.push(id);
+    });
+    return ok({ done, skipped });
   }
   if (action === 'mgr_req_day') {
     const date = String(b.date || '');

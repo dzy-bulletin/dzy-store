@@ -343,6 +343,11 @@ function buildCard(emp, date) {
           leaveSel.value = r.leave_type || ''; syncLeave();
           leaveHours.value = (r.hours === 0 || r.hours) ? r.hours : '';
           if (!r.start) { periodRows.textContent = ''; periodRows.append(periodRow(null, refresh)); }
+        } else if (r.kind === 'trip') {
+          // 出差（2026-10-09，照 manager.html）：只填「出差」＋時數，時段不動——出差時數與上班時段相加；整天出差本來就可以沒有時段
+          if (![...leaveSel.options].some(o => o.value === '出差')) { const o = h('option', null, '出差'); o.value = '出差'; leaveSel.append(o); }
+          leaveSel.value = '出差'; syncLeave();
+          leaveHours.value = (r.hours === 0 || r.hours) ? r.hours : '';
         } else if (r.kind === 'miss') {
           const full = C.missPeriods(emp.segments, r);
           if (full.length) {

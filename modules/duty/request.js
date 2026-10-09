@@ -1,9 +1,10 @@
-// 申請審核（2026-10-09）：同仁從 LINE 送的加班／請假／忘打卡申請，主管在這裡核准或退回。
+// 申請審核（2026-10-09）：同仁從 LINE 送的加班／請假／出差／忘打卡申請，主管在這裡核准或退回。
+// 批次核准（2026-10-09 第二批）：勾選＋全選＋「核准勾選的 N 筆」→ mgr_req_decide_batch（只能核准；退回要理由，一筆一筆退）。
 // 照 ~/mala-clock-in manager.html（feature/requests-qr）的 loadPendingRequests／buildReqItem 搬，文案不改；外觀換成營運系統風格。
 // 核准申請「不會」直接寫入核定：只是讓那天的核定頁先幫主管填好，主管核定那天時確認送出才算數（見 approve.js 的 __applyReq）。
 import { confirmBox } from '../../js/ui.js';
 import { S, call, h, failBar, setReqBadge } from './state.js';
-import { tsLabel, shortDate, punchEvidence, REQ_KIND_LABEL } from './calc.js';
+import { tsLabel, shortDate, punchEvidence, REQ_KIND_LABEL, REQ_BATCH_MAX } from './calc.js';
 
 export function renderRequest(ctx) {
   const el = ctx.el;
@@ -18,18 +19,70 @@ export function renderRequest(ctx) {
       if (!items.length) { box.append(h('div', 'card du-center', '目前沒有待審的申請。')); return; }
       const card = h('div', 'du-rq-list');
       const title = h('div', 'du-rq-title', '待審申請 ' + items.length + ' 筆（最舊的在上面）');
-      card.append(title);
+      card.append(title, buildBatchBar(card, title));
       items.forEach(it => card.append(buildItem(it, card, title)));
       box.append(card);
+      syncBatch(card);
     }, e => { if (!el.isConnected) return; box.innerHTML = ''; const c = h('div', 'card'); box.append(c); failBar(c, '待審申請', e, load); });
   }
   load();
 }
 
+// 待審數字：標題、分頁徽章（單筆與批次共用）
+function refreshTitle(card, title) {
+  const left = card.querySelectorAll('.du-rq-acts').length;
+  title.textContent = left ? '待審申請 ' + left + ' 筆（最舊的在上面）' : '待審申請都處理完了';
+  setReqBadge(left);
+  const bar = card.querySelector('.du-rq-batch'); if (bar && !left) bar.hidden = true;
+}
+function syncBatch(card) {
+  const picks = [...card.querySelectorAll('.du-rq-pick')], on = picks.filter(x => x.checked).length;
+  const all = card.querySelector('.du-rq-all'), btn = card.querySelector('.du-rq-batchgo');
+  if (!all || !btn) return;
+  all.checked = picks.length > 0 && on === picks.length;
+  all.indeterminate = on > 0 && on < picks.length;
+  btn.textContent = '核准勾選的 ' + on + ' 筆';
+  btn.disabled = on === 0;
+}
+function buildBatchBar(card, title) {
+  const wrap = h('div', 'du-rq-batchwrap');
+  const bar = h('div', 'du-rq-batch'), lab = h('label');
+  const all = h('input', 'du-rq-all', null, { type: 'checkbox', 'aria-label': '全選待審申請' });
+  lab.append(all, document.createTextNode('全選'));
+  const btn = h('button', 'du-rq-batchgo btn', '核准勾選的 0 筆', { type: 'button' }); btn.disabled = true;
+  const msg = h('div', 'du-rq-msg'); msg.setAttribute('role', 'status');
+  bar.append(lab, btn); wrap.append(bar, msg);
+  all.onchange = () => { card.querySelectorAll('.du-rq-pick').forEach(x => { x.checked = all.checked; }); syncBatch(card); };
+  btn.onclick = async () => {
+    const els = [...card.querySelectorAll('.du-rq')].filter(el => { const c = el.querySelector('.du-rq-pick'); return c && c.checked; });
+    if (!els.length) return;
+    if (els.length > REQ_BATCH_MAX) { msg.className = 'du-rq-msg bad'; msg.textContent = '一次最多核准 ' + REQ_BATCH_MAX + ' 筆，請少勾幾筆'; return; }
+    const list = els.map(el => '・' + el.__req.name + '：' + el.__req.summary).join('\n');
+    if (!await confirmBox('核准以下 ' + els.length + ' 筆申請？\n' + list + '\n\n核准後，那幾天的核定會先幫你填好，你核定那天時確認送出才算數。', '核准 ' + els.length + ' 筆')) return;
+    btn.disabled = all.disabled = true; msg.className = 'du-rq-msg'; msg.textContent = '送出中…';
+    try {
+      const r = await call('mgr_req_decide_batch', { ids: els.map(el => el.__req.id), decision: 'approve' });
+      const done = Array.isArray(r.done) ? r.done.map(String) : [], skipped = Array.isArray(r.skipped) ? r.skipped : [];
+      els.forEach(el => {
+        const it = el.__req;
+        if (done.indexOf(String(it.id)) >= 0) { el.__markDone('✓ 已核准：' + it.name + ' ' + it.summary); delete S.dayCache[it.date]; return; }
+        const sk = skipped.filter(x => String(x.id) === String(it.id))[0];
+        if (sk) el.__markDone('— 略過：' + it.name + ' ' + it.summary + '（' + sk.reason + '）');
+      });
+      msg.textContent = skipped.length ? '已核准 ' + done.length + ' 筆，略過 ' + skipped.length + ' 筆（已被處理過）' : '';
+    } catch (e) { msg.className = 'du-rq-msg bad'; msg.textContent = '✕ ' + (e.message || '沒有成功，請再試一次'); }
+    all.disabled = false;
+    refreshTitle(card, title); syncBatch(card);
+  };
+  return wrap;
+}
+
 function buildItem(it, card, title) {
-  const el = h('div', 'du-rq'); el.dataset.reqId = String(it.id);
+  const el = h('div', 'du-rq'); el.dataset.reqId = String(it.id); el.__req = it;
   const l1 = h('div', 'du-rq-l1'), who = h('span', 'du-rq-who');
-  who.append(h('span', 'du-rq-kind ' + (REQ_KIND_LABEL[it.kind] ? it.kind : ''), REQ_KIND_LABEL[it.kind] || it.kind), h('span', 'du-rq-name', it.name));
+  const pick = h('input', 'du-rq-pick', null, { type: 'checkbox', 'aria-label': '勾選 ' + it.name + ' ' + it.summary });
+  pick.onchange = () => syncBatch(card);
+  who.append(pick,h('span', 'du-rq-kind ' + (REQ_KIND_LABEL[it.kind] ? it.kind : ''), REQ_KIND_LABEL[it.kind] || it.kind), h('span', 'du-rq-name', it.name));
   l1.append(who, h('span', 'du-rq-date', shortDate(it.date)));
   el.append(l1, h('div', 'du-rq-l2', it.summary + (it.reason ? '\n原因：' + it.reason : '') + '\n送出：' + tsLabel(it.created_at)));
   const ev = punchEvidence(it);
@@ -76,15 +129,12 @@ function buildItem(it, card, title) {
     ok.disabled = no.disabled = true; say('', '送出中…');
     try {
       await call('mgr_req_decide', body);
-      el.textContent = '';
-      el.classList.add('done');
-      el.append(h('div', 'du-rq-l2', (decision === 'approve' ? '✓ 已核准：' : '✕ 已退回：') + it.name + ' ' + it.summary));
-      const left = card.querySelectorAll('.du-rq-acts').length;
-      title.textContent = left ? '待審申請 ' + left + ' 筆（最舊的在上面）' : '待審申請都處理完了';
-      setReqBadge(left);
+      el.__markDone((decision === 'approve' ? '✓ 已核准：' : '✕ 已退回：') + it.name + ' ' + it.summary);
+      refreshTitle(card, title); syncBatch(card);
       if (decision === 'approve') delete S.dayCache[it.date];     // 那天的核定頁要重抓才看得到預填
     } catch (e) { ok.disabled = no.disabled = false; say('bad', '✕ ' + (e.message || '沒有成功，請再試一次')); }
   }
+  el.__markDone = text => { el.textContent = ''; el.classList.add('done'); el.append(h('div', 'du-rq-l2', text)); };   // 單筆與批次共用
   ok.onclick = () => decide('approve'); no.onclick = () => decide('reject');
   return el;
 }

@@ -158,7 +158,9 @@ export function clockLink(clockStore, key) {
 }
 
 // ---- 加班請假／忘打卡申請（2026-10-09，照 ~/mala-clock-in manager.html feature/requests-qr 的 punchEvidence／__applyReq）----
-export const REQ_KIND_LABEL = { leave: '請假', ot: '加班', miss: '忘打卡' };
+export const REQ_KIND_LABEL = { leave: '請假', ot: '加班', trip: '出差', miss: '忘打卡' };   // 出差 2026-10-09 加入
+// 批次核准一次最多幾筆（與打卡後端 Requests.gs REQ_BATCH_MAX 同）
+export const REQ_BATCH_MAX = 30;
 // 'yyyy-mm-dd' → 'm/d'
 export function shortDate(d) { d = String(d || ''); return parseInt(d.slice(5, 7), 10) + '/' + parseInt(d.slice(8, 10), 10); }
 // 待審申請的「當天打卡紀錄」證據；沒有 punches（日期還沒到）回空字串

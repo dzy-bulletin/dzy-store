@@ -270,6 +270,13 @@ select{min-height:44px}
 .du-rq-kind.leave{background:#e8f0fb;color:#2b4f9a}
 .du-rq-kind.ot{background:#fff4d6;color:#8a6100}
 .du-rq-kind.miss{background:#fdf0ee;color:var(--bad)}
+.du-rq-kind.trip{background:#e2f3ef;color:#1f6b5a}
+/* 批次核准（2026-10-09）：每筆一個勾選框＋上方全選與「核准勾選的 N 筆」 */
+.du-rq-batch{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:#f7f2ef;border-radius:9px;padding:8px 10px;margin:6px 0 4px}
+.du-rq-batch[hidden]{display:none}
+.du-rq-batch label{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;cursor:pointer;min-height:44px}
+.du-rq-batch .btn{min-height:44px}
+.du-rq-batch input,.du-rq-pick{width:22px;height:22px;margin:0;flex:none;accent-color:var(--red);cursor:pointer}
 .du-rq-date{flex:none;font-size:13px;color:var(--muted)}
 .du-rq-l2{font-size:13px;color:#5a504a;margin:4px 0 8px;line-height:1.6;white-space:pre-line;overflow-wrap:anywhere}
 .du-rq-evid{background:#f7f2ef;border-radius:8px;padding:7px 9px;font-size:12.5px;color:#5a463f;line-height:1.6;margin:0 0 8px;white-space:pre-line;overflow-wrap:anywhere}
