@@ -60,7 +60,8 @@ function frame(s, inner, nav, opts) {
   }
   applyTheme(s ? s.brand : null, UI.logoUrl);
   const lb = document.getElementById('logoutBtn');
-  if (lb) lb.onclick = async () => { await logout(); location.hash = '#/'; render(); };
+  // 登出後整頁重新載入：上一個帳號還沒回來的請求、各模組暫存的資料一起清掉，換別店登入不會看到上一店的東西（2026-10-10 Codex 審查）
+  if (lb) lb.onclick = async () => { await logout(); location.hash = '#/'; location.reload(); };
   return app.querySelector('main') || app.querySelector('.login-view');
 }
 

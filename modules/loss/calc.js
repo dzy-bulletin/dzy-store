@@ -115,6 +115,7 @@ export const money = n => '$' + r2(Number(n)).toLocaleString('zh-TW', { maximumF
 
 const CSV_COLS = ['id', '日期', '店別', '品類', '品名', '耗損量', '單位', '單位成本', '金額', '原因', '原因說明', '備註', '建立時間'];
 export function csv(records) {
-  const esc = v => { v = v == null ? '' : String(v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  // 文字開頭是 = + - @ 補一個空白，避免 Excel 把品名、備註當公式（同庫存匯出；2026-10-10 Codex 審查）。數字欄（負數）不動
+  const esc = v => { const num = typeof v === 'number'; v = v == null ? '' : String(v); if (!num && /^[=+\-@\t\r]/.test(v)) v = ' ' + v; return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
   return '﻿' + [CSV_COLS.join(','), ...records.map(r => CSV_COLS.map(c => esc(r[c])).join(','))].join('\r\n');   // BOM：Excel 開才不亂碼
 }
