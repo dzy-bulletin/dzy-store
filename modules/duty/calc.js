@@ -156,3 +156,38 @@ export function clockLink(clockStore, key) {
   const page = clockStore ? 'clock-' + clockStore + '.html' : 'clock.html';
   return 'https://eason0728.github.io/mala-clock-in/' + page + '?k=' + key;
 }
+
+// ---- 加班請假／忘打卡申請（2026-10-09，照 ~/mala-clock-in manager.html feature/requests-qr 的 punchEvidence／__applyReq）----
+export const REQ_KIND_LABEL = { leave: '請假', ot: '加班', miss: '忘打卡' };
+// 'yyyy-mm-dd' → 'm/d'
+export function shortDate(d) { d = String(d || ''); return parseInt(d.slice(5, 7), 10) + '/' + parseInt(d.slice(8, 10), 10); }
+// 待審申請的「當天打卡紀錄」證據；沒有 punches（日期還沒到）回空字串
+export function punchEvidence(it) {
+  if (!it.punches) return '';
+  if (!it.punches.length) return '當天打卡紀錄：沒有任何打卡';
+  return '當天打卡紀錄：\n' + it.punches.map(p => {
+    const bad = String(p.status || '').indexOf('rejected_') === 0;
+    return p.hm + ' ' + (p.type === 'in' ? '上班' : '下班') + (bad ? '（被擋'
+      + (p.status === 'rejected_out_of_range' ? '：離店 ' + p.distance_m + 'm' + (p.accuracy_m != null ? '、定位誤差 ±' + p.accuracy_m + 'm' : '') : '') + '）'
+      : p.status === 'pending_device_approval' ? '（待核准裝置）' : ' ✓');
+  }).join('\n') + (it.kind === 'miss' && it.punches.some(p => p.status === 'rejected_out_of_range' && p.accuracy_m >= 500)
+    ? '\n→ 有按但被擋，而且定位誤差很大＝多半是手機定位失準，申請時間合理' : '');
+}
+// 打卡時間照參考時數的規則取整到 15 分（上班進位、下班捨去）
+export function round15(hm, up) {
+  if (!hm) return hm;
+  let m = hhmmToMin(hm); if (m === null) return hm;
+  m = up ? Math.ceil(m / 15) * 15 : Math.floor(m / 15) * 15; m = m % 1440;
+  return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+}
+// 忘打卡預填：當天打卡段（取整）＋申請補的那一邊；只有上下班都齊的段才成為時段列。回 [{start,end}]（空陣列＝不動畫面）
+export function missPeriods(segments, r) {
+  const segs = (segments || []).map(x => ({ in: round15(x.in, true), out: round15(x.out, false) }));
+  if (r.miss_type === 'both') segs.push({ in: r.start, out: r.end });
+  else if (r.miss_type === 'out') { const o = segs.filter(x => x.in && !x.out).pop(); if (o) o.out = r.end; else segs.push({ in: null, out: r.end }); }
+  else { const q = segs.filter(x => x.out && !x.in)[0]; if (q) q.in = r.start; else segs.push({ in: r.start, out: null }); }
+  return segs.filter(x => x.in && x.out).map(x => ({ start: x.in, end: x.out }));
+}
+// 打卡 QR 掃描後開的 LINE 打卡頁
+export const QR_LIFF = 'https://liff.line.me/2011292256-QFXEwFh4';
+export const qrUrl = token => QR_LIFF + '?qr=' + encodeURIComponent(token);

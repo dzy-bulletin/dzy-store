@@ -407,7 +407,7 @@ const DUTY_FAKE_D = {
 const fakeOf = emp => ((E2E().duty || {}).fake || DUTY_FAKE_D)[emp];
 function dutyDb() {
   const E = E2E().duty;
-  if (!db.duty && E) db.duty = { brk: [...E.brk], faults: [], calls: {}, approved: {}, leave: {}, roster: clone(E.roster), devices: clone(E.devices), notices: clone(E.notices), binds: clone(E.binds || []) };
+  if (!db.duty && E) db.duty = { brk: [...E.brk], faults: [], calls: {}, approved: {}, leave: {}, roster: clone(E.roster), devices: clone(E.devices), notices: clone(E.notices), binds: clone(E.binds || []), reqs: clone(E.reqs || []) };
   if (!db.duty) db.duty = {
     brk: ['12:00', '13:00'], faults: [], calls: {}, approved: {}, leave: {},
     roster: [{ emp_id: 'E01', name: '王小明', active: true, created_by: '', removed_at: '', removed_by: '' }, { emp_id: 'E02', name: '李小華', active: true, created_by: '', removed_at: '', removed_by: '' },
@@ -418,7 +418,43 @@ function dutyDb() {
     notices: [{ id: 'N1', text: '舊公告：10/1 起請準時打卡。', active: false, ends_on: '', expired: false, created_at: '2026-09-30T10:00:00+08:00', created_by: '門市營運系統' }],
     binds: [{ ts: '2026-10-08T09:02:00+08:00', emp_id: 'E01', name: '王小明', uid: 'U-mock-1', type: 'bind_name' }],
   };
+  if (!db.duty.reqs) db.duty.reqs = defaultReqs();     // 舊瀏覽器留的假資料沒有申請：補上示範申請（不必整包重建）
   return db.duty;
+}
+// 加班請假／忘打卡申請的示範資料（對照 ~/mala-clock-in apps-script/Requests.gs）：請假附圖片、加班附 PDF、忘打卡的打卡被擋且定位誤差很大
+function defaultReqs() {
+  const at = (n, hm) => taipeiDay(n) + 'T' + hm + ':00+08:00';
+  return [
+    { id: 'R1', created_at: at(-1, '07:12'), emp_id: 'E03', name: '陳大文', kind: 'leave', date: taipeiDay(-1), leave_type: '病假', start: '', end: '', hours: 8, miss_type: '', reason: '發燒去看醫生，附診斷證明', attach_id: 'att-img-R1', status: 'pending' },
+    { id: 'R2', created_at: at(-1, '19:20'), emp_id: 'E01', name: '王小明', kind: 'ot', date: taipeiDay(-1), leave_type: '', start: '17:00', end: '19:00', hours: 2, miss_type: '', reason: '晚上客人多，店長請我留下來幫忙', attach_id: 'att-pdf-R2', status: 'pending' },
+    { id: 'R3', created_at: at(-1, '09:40'), emp_id: 'E04', name: '林小美', kind: 'miss', date: taipeiDay(-2), leave_type: '', start: '10:00', end: '18:00', hours: null, miss_type: 'both', reason: '在店門口按打卡一直說不在範圍內', attach_id: '', status: 'pending',
+      punches: [{ type: 'in', hm: '09:58', status: 'rejected_out_of_range', distance_m: 860, accuracy_m: 1414 }, { type: 'out', hm: '18:03', status: 'rejected_out_of_range', distance_m: 640, accuracy_m: 900 }] },
+  ];
+}
+function reqSummary(r) {     // Requests.gs reqSummary_
+  const md = parseInt(r.date.slice(5, 7), 10) + '/' + parseInt(r.date.slice(8, 10), 10);
+  if (r.kind === 'leave') return md + ' ' + r.leave_type + (r.start ? ' ' + r.start + '–' + r.end : ' 整天') + ' ' + Number(r.hours) + ' 小時';
+  if (r.kind === 'ot') return md + ' 加班 ' + r.start + '–' + r.end + '（' + Number(r.hours) + ' 小時）';
+  const parts = [];
+  if (r.miss_type === 'in' || r.miss_type === 'both') parts.push('上班 ' + r.start);
+  if (r.miss_type === 'out' || r.miss_type === 'both') parts.push('下班 ' + r.end);
+  return md + ' 忘打卡補登（' + parts.join('、') + '）';
+}
+const reqPublic = r => ({ id: r.id, created_at: r.created_at, emp_id: r.emp_id, name: r.name, kind: r.kind, date: r.date, leave_type: r.leave_type || '', start: r.start || '', end: r.end || '',
+  hours: r.hours ?? null, miss_type: r.miss_type || '', reason: r.reason || '', has_attach: !!r.attach_id, status: r.status, decided_at: r.decided_at || '', decided_by: r.decided_by || '',
+  reject_reason: r.reject_reason || '', summary: reqSummary(r) });
+// 示範附件：圖片用 canvas 畫一張「示範附件」；PDF 給一小段 PDF 檔頭（只是讓下載連結出得來）
+function mockAttach(id) {
+  if (/pdf/.test(id)) return { mime: 'application/pdf', data: btoa('%PDF-1.4\n% mock attachment ' + id + '\n%%EOF\n') };
+  let data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
+  try {
+    const c = document.createElement('canvas'); c.width = 480; c.height = 300; const g = c.getContext('2d');
+    g.fillStyle = '#fffdf6'; g.fillRect(0, 0, 480, 300); g.strokeStyle = '#c9b9a8'; g.lineWidth = 6; g.strokeRect(8, 8, 464, 284);
+    g.fillStyle = '#231815'; g.font = 'bold 34px sans-serif'; g.fillText('診斷證明書（示範）', 60, 110);
+    g.font = '22px sans-serif'; g.fillStyle = '#6b524a'; g.fillText('附件編號 ' + id, 60, 170); g.fillText('示範模式的假附件', 60, 210);
+    const u = c.toDataURL('image/png'); if (u.indexOf('data:image/png;base64,') === 0) data = u.slice(22);
+  } catch (e) {}
+  return { mime: 'image/png', data };
 }
 function dutyHas(emp, date) { const f = fakeOf(emp); return !!f && (f.segs.length > 0 || !!f.attempts); }
 function duty(action, me, s, b) {
@@ -480,6 +516,41 @@ function dutyDo(d, action, b) {
   }
   if (action === 'payroll_leave_options') {      // 薪酬假別表＋額度＋期限事件日；e2e 可把 d.leaveOpts 換成自己的（含 blocked、window_days、events）
     return ok(clone(d.leaveOpts || { ok: true, store: 'SSLGF', ym: taipeiDay().slice(0, 7), day_hours: 8, types: MOCK_LEAVES.map((n, i) => ({ code: 'lt' + i, name: n })), quotas: {}, events: {} }));
+  }
+  if (action === 'mgr_req_pending') {
+    const items = d.reqs.filter(r => r.status === 'pending').sort((x, y) => (x.created_at < y.created_at ? -1 : 1)).map(r => {
+      const o = reqPublic(r); o.attach_id = r.attach_id || '';
+      if (r.date <= today) o.punches = clone(r.punches || []);   // 還沒到的日期沒有打卡可看
+      return o;
+    });
+    return ok({ items });
+  }
+  if (action === 'mgr_req_decide') {
+    const decision = String(b.decision || '');
+    if (decision !== 'approve' && decision !== 'reject') return fail('BAD_INPUT', '核准或退回的選項不對，請重新整理。');
+    const reason = String(b.reason ?? '').trim().slice(0, 100);
+    if (decision === 'reject' && !reason) return fail('BAD_INPUT', '退回要寫理由');
+    const r = d.reqs.find(x => String(x.id) === String(b.id || ''));
+    if (!r) return fail('NOT_FOUND', '找不到這筆申請');
+    if (r.status !== 'pending') return fail('BAD_INPUT', r.status === 'cancelled' ? '同仁已經取消這筆申請' : '這筆已經處理過了');
+    r.status = decision === 'approve' ? 'approved' : 'rejected'; r.decided_at = new Date().toISOString(); r.decided_by = MGR; r.reject_reason = decision === 'reject' ? reason : '';
+    return ok({ id: r.id, status: r.status });
+  }
+  if (action === 'mgr_req_day') {
+    const date = String(b.date || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return fail('BAD_INPUT', '日期格式不對。');
+    const by_emp = {};
+    d.reqs.filter(r => r.date === date && r.status === 'approved').forEach(r => { (by_emp[r.emp_id] = by_emp[r.emp_id] || []).push(reqPublic(r)); });
+    return ok({ date, by_emp });
+  }
+  if (action === 'mgr_qr_token') {               // 店別代碼由伺服器依打卡對照填：示範店＝光復（'' → gk）
+    const now = Date.now(), win = Math.floor(now / 30000);
+    return ok({ token: 'gk~' + win + '~2~' + hex(8), expires_in: 30000 - (now % 30000), manager: MGR });
+  }
+  if (action === 'line_hub_attach_get') {
+    const id = String(b.attach_id || '');
+    if (!id || !d.reqs.some(r => r.attach_id === id)) return fail('NOT_FOUND', '找不到這筆資料，請重新整理。');
+    return ok(mockAttach(id));
   }
   if (action === 'mgr_pending_devices') return ok({ pending: d.devices.map(x => ({ ...x })) });
   if (action === 'mgr_device_decision') {

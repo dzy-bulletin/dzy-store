@@ -3,15 +3,17 @@
 import { confirmBox } from '../../js/ui.js';
 import { S, call, brk, h, failBar, loadLeave, staleLeave } from './state.js';
 import * as C from './calc.js';
+import { qrButton } from './qr.js';
 
 export function renderApprove(ctx) {
   const el = ctx.el;
-  el.innerHTML = `<div class="du-datebar"><button type="button" class="btn ghost du-nav" id="duPrev" aria-label="前一天">‹</button>
+  el.innerHTML = `<div id="duQrSlot"></div><div class="du-datebar"><button type="button" class="btn ghost du-nav" id="duPrev" aria-label="前一天">‹</button>
     <input type="date" id="duDate" aria-label="日期"><button type="button" class="btn ghost du-nav" id="duNext" aria-label="後一天">›</button>
     <button type="button" class="btn ghost" id="duToday">今天</button></div>
     <div id="duPend"></div><div id="duDayBox"></div>`;
   const dateIn = el.querySelector('#duDate'), pendEl = el.querySelector('#duPend'), box = el.querySelector('#duDayBox');
   const live = () => el.isConnected;
+  el.querySelector('#duQrSlot').append(qrButton(el));      // 打卡 QR（同仁定位抓不到時給他掃），日期列上方
 
   // ---------- 本月待核定提醒（manager.html:1604–1745）：沒有待核定＝整塊不畫 ----------
   function loadPending() {
@@ -80,6 +82,18 @@ export function renderApprove(ctx) {
   function drawDay(date, employees) {
     S.date = date; dateIn.value = date;
     renderEmployees(box, date, employees);
+    applyDayRequests(date);
+  }
+  // 那天已核准的加班請假／忘打卡申請 → 對應同仁卡片顯示並預填（不快取：主管剛核准完切過來要看得到）。失敗就安靜略過，不擋核定。
+  function applyDayRequests(date) {
+    const tok = S.dayTok;
+    call('mgr_req_day', { date }).then(res => {
+      if (tok !== S.dayTok || S.date !== date || !live() || !res || !res.by_emp) return;
+      Object.keys(res.by_emp).forEach(id => {
+        const card = [].filter.call(box.querySelectorAll('.du-card'), c => c.dataset.empId === String(id))[0];
+        if (card && card.__applyReq) card.__applyReq(res.by_emp[id]);
+      });
+    }, () => {});
   }
 
   dateIn.onchange = () => { if (dateIn.value) loadDay(dateIn.value); };
@@ -314,6 +328,40 @@ function buildCard(emp, date) {
   card.__pending = !emp.approved;
   card.__hasPunch = !!(emp.segments && emp.segments.length) || emp.attempts > 0;
   card.__setExpanded = setExpanded;
+
+  // ---- 已核准的申請（2026-10-09，照 manager.html __applyReq）：還沒核定就幫主管預填；已核定過不覆蓋，改給一顆「依申請重新填」。
+  //      預填只是畫面上的值，主管按送出核定才算數（核准申請本身不寫入核定）。加班只顯示、不預填。
+  card.__applyReq = reqs => {
+    if (!reqs || !reqs.length || card.__reqApplied) return;
+    card.__reqApplied = true;
+    const rbox = h('div', 'du-reqbox' + (emp.approved ? ' warn' : ''), reqs.map(r => '✓ 已核准的申請：' + r.summary + '（' + r.decided_by + ' 核准）').join('\n'));
+    let tag = null;
+    function fill() {
+      reqs.forEach(r => {
+        if (r.kind === 'leave') {
+          if (r.leave_type && ![...leaveSel.options].some(o => o.value === r.leave_type)) { const o = h('option', null, r.leave_type); o.value = r.leave_type; leaveSel.append(o); }
+          leaveSel.value = r.leave_type || ''; syncLeave();
+          leaveHours.value = (r.hours === 0 || r.hours) ? r.hours : '';
+          if (!r.start) { periodRows.textContent = ''; periodRows.append(periodRow(null, refresh)); }
+        } else if (r.kind === 'miss') {
+          const full = C.missPeriods(emp.segments, r);
+          if (full.length) {
+            periodRows.textContent = '';
+            full.forEach(p => periodRows.append(periodRow(p, refresh)));
+            if (!tag) { tag = h('span', 'du-fromreq', '來自申請'); periodRows.parentNode.insertBefore(tag, periodRows); }
+          }
+        }
+      });
+      refresh();
+    }
+    const fillable = reqs.some(r => r.kind !== 'ot');
+    if (fillable && emp.approved) {
+      const b = h('button', 'du-reqfill', '這天已核定過，依申請重新填', { type: 'button' });
+      b.onclick = () => { fill(); b.remove(); rbox.append(h('div', null, '已依申請填好，確認後按送出核定。')); };
+      rbox.append(b);
+    } else if (fillable) fill();
+    periodRows.parentNode.insertBefore(rbox, tag || periodRows);    // 順序：申請說明 → 來自申請 → 時段
+  };
   head.onclick = () => setExpanded(body.hidden);
   head.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(body.hidden); } };
   return card;

@@ -92,17 +92,33 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--gold);outline-of
 .modal-bg{position:fixed;inset:0;background:rgba(35,24,21,.5);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
 .modal{background:#fff;border-radius:12px;padding:20px;max-width:380px;width:100%}
 .modal p{margin-bottom:14px}
+/* 手機：側邊欄改成「上排品牌＋使用者、下排七格圖示選單」——每一格都看得到，不用左右滑找目前在哪 */
 @media (max-width:860px){
   .app{flex-direction:column}
-  .sidebar{width:100%;height:auto;position:static;flex-direction:row;align-items:center;overflow-x:auto;overflow-y:hidden}
-  .brand{padding:12px 14px;flex:none;white-space:nowrap}.brand .bs{display:none}.logos .lg,.logos .txt{width:36px;height:36px}.nav-label{display:none}
-  #nav{flex-direction:row;padding:0 10px;gap:4px;flex:none}
-  #nav a{white-space:nowrap;padding:9px 13px;width:auto;font-size:15px}
-  .side-user{margin-top:0;border-top:0;border-left:1px solid var(--sidebar-line);padding:8px 12px;flex-wrap:nowrap;flex:none}
-  .side-user .av,.side-user .rl{display:none}.side-user .su-main{flex:none}.su-act{flex-basis:auto}.su-act a,.su-act button{white-space:nowrap}
-  .topbar{padding:16px 16px 4px}nav.tabs{padding:0 6px}.main-wrap main{padding:12px 16px 60px}
+  .sidebar{width:100%;height:auto;position:static;overflow:visible;display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-areas:"brand user" "nav nav";align-items:center}
+  .brand{grid-area:brand;padding:10px 14px;min-width:0}.brand .bt{font-size:15px;white-space:nowrap}.brand .bs{display:none}
+  .brand .logos .lg,.brand .logos .txt{width:34px;height:34px;border-radius:9px}
+  .nav-label{display:none}
+  #nav{grid-area:nav;flex-direction:row;padding:0 6px 8px;gap:2px}
+  #nav a{position:relative;flex:1 1 0;min-width:0;flex-direction:column;justify-content:center;gap:3px;padding:7px 2px 6px;border-radius:10px;font-size:12px;font-weight:700;line-height:1.15;text-align:center;white-space:nowrap;letter-spacing:-.02em}
+  #nav a.on{box-shadow:none}
+  #nav a .ic{width:auto;height:22px;font-size:19px}
+  .sidebar nav a .badge{position:absolute;top:2px;left:calc(50% + 6px);margin:0;min-width:18px;height:18px;line-height:18px;font-size:11px;padding:0 5px;border-radius:9px}
+  .side-user{grid-area:user;margin:0;border:0;padding:8px 12px 8px 0;flex-wrap:nowrap;justify-content:flex-end;gap:8px;min-width:0}
+  .side-user .av,.side-user .rl{display:none}
+  .side-user .su-main{flex:0 1 auto;text-align:right}
+  .side-user .nm{font-size:12.5px;color:var(--side-txt);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .su-act{flex:none;flex-basis:auto;gap:6px}.su-act a,.su-act button{white-space:nowrap;padding:7px 10px;min-height:34px;display:inline-flex;align-items:center}
+  .topbar{padding:14px 16px 2px}.topbar h1,.topbar .page-title{font-size:21px}
+  nav.tabs{padding:0 6px;margin-top:8px}.main-wrap main{padding:12px 16px 60px}
 }
-@media (max-width:480px){main{padding:14px 12px 60px}.card{padding:14px}nav.tabs a{padding:12px 15px}}
+@media (max-width:400px){
+  #nav a{font-size:11.5px}
+  #nav:has(#adminLink) a{font-size:10.5px;letter-spacing:-.05em}
+}
+@media (max-width:480px){main{padding:14px 12px 60px}.card{padding:14px}nav.tabs a{padding:12px 12px;flex:1 0 auto;text-align:center}}
+/* 值班核定 5 個分頁（2026-10-09 加「申請審核」）在 400 寬以下要排得下；要放在上一行之後才蓋得過 */
+@media (max-width:400px){nav.tabs a{padding:12px 6px}}
 /* 貨單辨識 */
 .step{display:flex;align-items:center;gap:9px}
 .step b{width:24px;height:24px;border-radius:50%;background:var(--red);color:#fff;font-size:13px;display:inline-flex;align-items:center;justify-content:center;flex:none}
@@ -242,6 +258,43 @@ select{min-height:44px}
 .du-subtitle{margin:16px 0 6px;font-size:12.5px;font-weight:700;color:var(--muted)}
 .du-item{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;padding:9px 0;border-top:1px solid var(--line)}
 .du-item.off{opacity:.6}
+
+/* 申請審核（2026-10-09）*/
+.du-rq-list{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.du-rq-title{font-weight:900;font-size:14.5px;margin-bottom:4px}
+.du-rq{border-top:1px solid var(--line);padding:12px 0 10px}
+.du-rq.done{opacity:.75}
+.du-rq-l1{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:900;font-size:15px}
+.du-rq-who{display:flex;align-items:center;gap:8px;min-width:0;overflow-wrap:anywhere}
+.du-rq-kind{flex:none;font-size:12px;font-weight:700;padding:2px 9px;border-radius:20px;background:#eef1f4;color:#556}
+.du-rq-kind.leave{background:#e8f0fb;color:#2b4f9a}
+.du-rq-kind.ot{background:#fff4d6;color:#8a6100}
+.du-rq-kind.miss{background:#fdf0ee;color:var(--bad)}
+.du-rq-date{flex:none;font-size:13px;color:var(--muted)}
+.du-rq-l2{font-size:13px;color:#5a504a;margin:4px 0 8px;line-height:1.6;white-space:pre-line;overflow-wrap:anywhere}
+.du-rq-evid{background:#f7f2ef;border-radius:8px;padding:7px 9px;font-size:12.5px;color:#5a463f;line-height:1.6;margin:0 0 8px;white-space:pre-line;overflow-wrap:anywhere}
+.du-rq-reason{width:100%;margin:0 0 8px;min-height:44px;font-size:16px}
+.du-rq-acts{display:flex;gap:8px;flex-wrap:wrap}
+.du-rq-acts .btn{flex:1;min-height:44px;min-width:84px}
+.du-rq-msg{font-size:13px;margin-top:6px;font-weight:700}
+.du-rq-msg.bad{color:var(--bad)}
+.du-rq-img{max-width:100%;border-radius:8px;margin-top:8px;display:block}
+.du-rq-file{display:inline-block;margin-top:8px;font-weight:700;color:var(--red)}
+.du-reqbox{margin-top:10px;background:#e6f3ea;color:#1a5a33;border-radius:8px;padding:8px 10px;font-size:13px;line-height:1.6;white-space:pre-line;overflow-wrap:anywhere}
+.du-reqbox.warn{background:#fff4d6;color:#6b4c00}
+.du-reqfill{display:block;margin-top:6px;font:inherit;font-size:13px;font-weight:700;padding:8px 12px;min-height:40px;border-radius:8px;border:1px solid #a15a00;background:#fff;color:#a15a00;cursor:pointer;white-space:normal}
+.du-fromreq{display:inline-block;margin-top:8px;font-size:11.5px;font-weight:700;color:var(--ok);background:#e6f3ea;border-radius:6px;padding:1px 8px}
+/* 打卡 QR：面板用 display:flex，⚠ 一定要配 [hidden]{display:none}，否則關掉後透明面板蓋住整頁按鈕 */
+.du-qr-open{width:100%;min-height:44px;margin-bottom:12px;font-weight:700}
+.du-qr-bg{position:fixed;inset:0;background:rgba(20,10,8,.86);z-index:60;display:flex;align-items:center;justify-content:center;padding:16px}
+.du-qr-bg[hidden]{display:none}
+.du-qr-panel{background:#fff;color:var(--black);border-radius:16px;padding:18px;width:100%;max-width:360px;text-align:center}
+.du-qr-panel h3{margin:0 0 4px;font-size:18px}
+.du-qr-sub{font-size:13px;color:#6b524a;line-height:1.6;white-space:pre-line;text-align:left}
+.du-qr-box{margin:14px auto 8px;width:250px;max-width:100%;min-height:250px;display:flex;align-items:center;justify-content:center;overflow-wrap:anywhere;font-size:12px}
+.du-qr-box img,.du-qr-box canvas{max-width:100%;height:auto}
+.du-qr-count{font-size:13px;color:var(--muted);min-height:1.4em}
+.du-qr-close{margin-top:12px;width:100%;min-height:44px}
 .du-item-body{flex:1;min-width:0;overflow-wrap:anywhere}
 .du-when{display:block;font-size:12px;color:var(--muted)}
 .du-textarea{width:100%;resize:vertical;font-size:16px}

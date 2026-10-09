@@ -3,6 +3,7 @@ import { renderApprove } from './approve.js';
 import { renderDevice } from './device.js';
 import { renderRoster } from './roster.js';
 import { renderNotice } from './notice.js';
+import { renderRequest } from './request.js';
 import { api } from '../../js/api.js';
 import { busy, setMsg } from '../../js/ui.js';
 
@@ -13,14 +14,14 @@ const setFlag = v => { try { if (v) sessionStorage.setItem(KEY, v); else session
 
 export default {
   id: 'duty',
-  tabs: [{ id: 'approve', label: '核定工時' }, { id: 'device', label: '裝置核准' }, { id: 'roster', label: '員工名冊' }, { id: 'notice', label: '公告' }],
+  tabs: [{ id: 'approve', label: '核定工時' }, { id: 'request', label: '申請審核' }, { id: 'device', label: '裝置核准' }, { id: 'roster', label: '員工名冊' }, { id: 'notice', label: '公告' }],
   locked: () => flag() !== '1',
   renderGate(ctx) { flag() === 'm' ? changeForm(ctx) : unlockForm(ctx); },
   render(ctx) {
     const key = ctx.session.token || ctx.session.code;
     if (S.key !== key) reset(key);                      // 換了登入就重來，不留上一個人的資料
     S.rerender = ctx.rerender;
-    ({ approve: renderApprove, device: renderDevice, roster: renderRoster, notice: renderNotice }[ctx.tab] || renderApprove)(ctx);
+    ({ approve: renderApprove, request: renderRequest, device: renderDevice, roster: renderRoster, notice: renderNotice }[ctx.tab] || renderApprove)(ctx);
   },
 };
 
