@@ -1,7 +1,7 @@
 // 瀏覽器內假後端（?mode=mock）。實作 plan.md「共用契約」全部端點，資料存 localStorage（dzystore_mockdb），
 // 方便重整後仍在；清掉該 key 即回到初始。
 // ⚠ 以下密碼只是測試用，不是真密碼：
-//   TEST1 / store-test-1234（門市 mala，值班核定密碼 1234；duty 為空字串＝預設 0000，第一次要改）   TEST2 / store-test-1234（門市 mzt，功能全開）   ADMIN / admin-test-1234（管理者 hq）
+//   TEST1 / store-test-1234（門市 mala，出勤核定密碼 1234；duty 為空字串＝預設 0000，第一次要改）   TEST2 / store-test-1234（門市 mzt，功能全開）   ADMIN / admin-test-1234（管理者 hq）
 import { lossMock, lossAlias } from './mock-loss.js';
 import { transferMock, transferHome, TRANSFER_NODES, DEFAULT_TRANSFER_ALIAS } from './mock-transfer.js';   // 門市調撥假後端（獨立檔）
 import { LEAVE_TYPES as MOCK_LEAVES } from '../modules/duty/calc.js';   // 假別名稱沿用內建清單，假後端的「薪酬假別表」預設就是這些
@@ -10,9 +10,9 @@ const KEY = 'dzystore_mockdb';
 // e2e 注入的資料（window.__E2E_DATA，由測試每次隨機產生）；沒有就用下面內建預設，示範模式不受影響。
 const E2E = () => (typeof window !== 'undefined' && window.__E2E_DATA) || {};
 const clone = x => JSON.parse(JSON.stringify(x));
-const DB_VERSION = 6;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
+const DB_VERSION = 7;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
 const MODS = ['purchase', 'cashbook', 'duty', 'transfer', 'loss', 'inventory'];
-const LABELS = { purchase: '貨單辨識', cashbook: '收支登記', duty: '值班核定', transfer: '門市調撥', loss: '耗損登記', inventory: '庫存盤點' };
+const LABELS = { purchase: '貨單辨識', cashbook: '收支登記', duty: '出勤核定', transfer: '門市調撥', loss: '耗損登記', inventory: '庫存盤點' };
 const hex = n => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(b => b.toString(16).padStart(2, '0')).join('');
 const ok = data => ({ ok: true, data: data === undefined ? {} : data });
 const fail = (error, message) => ({ ok: false, error, message });
@@ -109,8 +109,8 @@ function route(method, p, q, b, token) {
   if (method === 'POST' && m) {
     if (!MODS.includes(m[1]) || !me.features.includes(m[1])) return fail('FORBIDDEN', '這家店沒有開通這個功能');
     if ((db.fail || []).includes(m[1] + '/' + m[2])) return fail('UPSTREAM', '伺服器暫時沒有回應，請稍後再試');   // e2e 用：db.fail = ['模組/動作'] 讓那個動作失敗
-    if (m[1] === 'duty' && s.dutyMust) return fail('DUTY_MUST_CHANGE', '請先把值班核定通行碼改成自己的');
-    if (m[1] === 'duty' && !s.duty) return fail('FORBIDDEN', '請先輸入值班核定通行碼');
+    if (m[1] === 'duty' && s.dutyMust) return fail('DUTY_MUST_CHANGE', '請先把出勤核定通行碼改成自己的');
+    if (m[1] === 'duty' && !s.duty) return fail('FORBIDDEN', '請先輸入出勤核定通行碼');
     if (m[1] === 'purchase') return purchase(m[2], me, b);
     if (m[1] === 'cashbook') return cashbook(m[2], me, b);
     if (m[1] === 'duty') return duty(m[2], me, s, b);
@@ -132,7 +132,7 @@ function homeFor(me) {
   const has = id => me.features.includes(id);
   const bad = id => (db.homeFaults || []).includes(id);
   const items = [], errors = [];
-  const ERR = { duty: '值班核定暫時讀不到', purchase: '貨單辨識暫時讀不到', cashbook: '收支登記暫時讀不到' };
+  const ERR = { duty: '出勤核定暫時讀不到', purchase: '貨單辨識暫時讀不到', cashbook: '收支登記暫時讀不到' };
   const add = (module, level, text, count, link) => items.push({ module, level, text, count, link });
   if (has('duty')) {
     if (bad('duty')) errors.push({ module: 'duty', message: ERR.duty });
@@ -391,7 +391,7 @@ function cbDo(cb, action, store, b) {
 }
 function me_name(store) { return (db.accounts[store] && db.accounts[store].name) || store; }
 
-// ---------- 值班核定（對照 ~/mala-gas/mala-clock-in/程式碼.js 的 mgr_* 與伺服器 server/proxy/duty.js 的錯誤白話）----------
+// ---------- 出勤核定（對照 ~/mala-gas/mala-clock-in/程式碼.js 的 mgr_* 與伺服器 server/proxy/duty.js 的錯誤白話）----------
 // 假資料：E01 王小明（班 08:00–17:00、天天有打卡）E02 李小華（班 09:00–12:00、天天有打卡但遲到）E03 陳大文（休假沒打卡）
 // E04 林小美（只有未入帳嘗試）。TEST1 這家店的休息帶 12:00–13:00（像央廚）；把 db.duty.brk 設成 ['',''] 就是沒有休息帶（像光復）。
 // e2e 可用 localStorage 的 dzystore_mock_today（yyyy-mm-dd）把「今天」固定住，日期相關的測試才不會隨執行日漂移

@@ -1,11 +1,11 @@
 import { esc, busy, setMsg, fmtTime } from '../js/ui.js';
 
-// 門市對照：每個門市帳號對應哪一家打卡店別（值班核定要連到打卡系統的哪一店）
+// 門市對照：每個門市帳號對應哪一家打卡店別（出勤核定要連到打卡系統的哪一店）
 export default async function view({ el, api }) {
   let d;
   try { d = await api('GET', '/admin/alias'); } catch (e) { el.innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
   el.innerHTML = `<div class="card"><h2>門市對照</h2>
-    <p class="hint">打卡店別：每個門市帳號要連到打卡系統的哪一家店，沒設定的店值班核定進不去。調撥節點：門市調撥要連到哪個節點。耗損系統店別：墨竹亭四家店選對應店別（共用 mzt-loss 的品項表）；小辛辣等沒對應的選「無」，資料存在營運系統自己的資料庫。</p><div id="alMsg" role="alert" class="err"></div>
+    <p class="hint">打卡店別：每個門市帳號要連到打卡系統的哪一家店，沒設定的店出勤核定進不去。調撥節點：門市調撥要連到哪個節點。耗損系統店別：墨竹亭四家店選對應店別（共用 mzt-loss 的品項表）；小辛辣等沒對應的選「無」，資料存在營運系統自己的資料庫。</p><div id="alMsg" role="alert" class="err"></div>
     <div class="scroll"><table id="aliasTable"><thead><tr><th>代號</th><th>店名</th><th>打卡店別</th><th>調撥節點</th><th>耗損系統店別</th></tr></thead><tbody>
     ${d.aliases.map(a => `<tr data-code="${esc(a.code)}"><td><b>${esc(a.code)}</b></td><td>${esc(a.name)}</td><td>
       <select class="aliasSel" aria-label="${esc(a.code)} 打卡店別"><option value="__none"${a.value === null ? ' selected' : ''}>無</option>

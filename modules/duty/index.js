@@ -27,7 +27,7 @@ export default {
 };
 
 function unlockForm(ctx) {
-  ctx.el.innerHTML = `<div class="card" style="max-width:420px"><h2>值班核定</h2>
+  ctx.el.innerHTML = `<div class="card" style="max-width:420px"><h2>出勤核定</h2>
     <p class="hint">請輸入這家店的核定密碼。本次登入期間只需輸入一次。第一次使用的核定密碼是 0000。</p>
     <form id="dutyForm"><div class="fld"><label for="dutyPw">核定密碼</label><input id="dutyPw" type="password" autocomplete="off"></div>
     <div class="row mt"><button class="btn" id="dutyBtn" type="submit">進入</button></div><div id="dutyErr" class="err" role="alert"></div></form></div>`;
