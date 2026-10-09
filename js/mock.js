@@ -140,6 +140,8 @@ function homeFor(me) {
       const d = dutyDb();
       const n = new Set(dutyDo(d, 'mgr_pending_approvals', {}).data.items.map(x => x.date)).size;
       if (n) add('duty', 'todo', `本月還有 ${n} 天沒核定`, n, '#/duty/approve');
+      const nq = dutyDo(d, 'mgr_req_pending', {}).data.items.length;
+      if (nq) add('duty', 'todo', `${nq} 筆加班請假申請待審`, nq, '#/duty/request');
       if (d.devices.length) add('duty', 'todo', `${d.devices.length} 支新手機等核准`, d.devices.length, '#/duty/device');
     }
   }

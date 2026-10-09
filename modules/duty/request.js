@@ -2,7 +2,7 @@
 // 照 ~/mala-clock-in manager.html（feature/requests-qr）的 loadPendingRequests／buildReqItem 搬，文案不改；外觀換成營運系統風格。
 // 核准申請「不會」直接寫入核定：只是讓那天的核定頁先幫主管填好，主管核定那天時確認送出才算數（見 approve.js 的 __applyReq）。
 import { confirmBox } from '../../js/ui.js';
-import { S, call, h, failBar } from './state.js';
+import { S, call, h, failBar, setReqBadge } from './state.js';
 import { tsLabel, shortDate, punchEvidence, REQ_KIND_LABEL } from './calc.js';
 
 export function renderRequest(ctx) {
@@ -14,6 +14,7 @@ export function renderRequest(ctx) {
       if (!el.isConnected) return;
       box.innerHTML = '';
       const items = Array.isArray(r.items) ? r.items : [];
+      setReqBadge(items.length);
       if (!items.length) { box.append(h('div', 'card du-center', '目前沒有待審的申請。')); return; }
       const card = h('div', 'du-rq-list');
       const title = h('div', 'du-rq-title', '待審申請 ' + items.length + ' 筆（最舊的在上面）');
@@ -80,6 +81,7 @@ function buildItem(it, card, title) {
       el.append(h('div', 'du-rq-l2', (decision === 'approve' ? '✓ 已核准：' : '✕ 已退回：') + it.name + ' ' + it.summary));
       const left = card.querySelectorAll('.du-rq-acts').length;
       title.textContent = left ? '待審申請 ' + left + ' 筆（最舊的在上面）' : '待審申請都處理完了';
+      setReqBadge(left);
       if (decision === 'approve') delete S.dayCache[it.date];     // 那天的核定頁要重抓才看得到預填
     } catch (e) { ok.disabled = no.disabled = false; say('bad', '✕ ' + (e.message || '沒有成功，請再試一次')); }
   }

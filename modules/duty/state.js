@@ -7,7 +7,7 @@ export const S = { key: null, meta: { clockStore: '', label: '', breakStart: '',
 
 export function reset(key) {
   S.key = key; S.meta = { clockStore: '', label: '', breakStart: '', breakEnd: '' }; S.date = null; S.dayCache = {}; S.dayTok++;
-  S.pend = null; S.pendAll = false; S.focusEmp = null; S.leave = null; S.leaveP = null;
+  S.pend = null; S.pendAll = false; S.focusEmp = null; S.leave = null; S.leaveP = null; S.reqCount = 0; S.reqAt = 0;
 }
 
 // 呼叫 /m/duty/<action>；回應裡的 meta（店別與休息帶）順手記下。核定通行碼失效（後台重設、換了登入）就退回輸入畫面。
@@ -21,6 +21,20 @@ export async function call(action, body) {
     else if (e.code === 'DUTY_MUST_CHANGE') { try { sessionStorage.setItem(FLAG, 'm'); } catch (x) {} if (S.rerender) S.rerender(); }
     throw e;
   }
+}
+
+// 「申請審核」分頁名稱旁的待審筆數（2026-10-09）。在申請審核分頁讀到清單、或核准／退回後直接更新；在其他分頁則背景問一次（60 秒內不重問）。
+export function setReqBadge(n) {
+  S.reqCount = n; S.reqAt = Date.now();
+  const a = document.querySelector('nav.tabs a[data-tab="request"]');
+  if (!a) return;
+  a.querySelectorAll('.badge').forEach(b => b.remove());
+  if (n > 0) { const i = document.createElement('i'); i.className = 'badge'; i.textContent = String(n); i.setAttribute('aria-label', n + ' 筆待審'); a.append(i); }
+}
+export function refreshReqBadge() {
+  if (S.reqAt && Date.now() - S.reqAt < 60000) return setReqBadge(S.reqCount || 0);
+  const k = S.key;
+  call('mgr_req_pending').then(r => { if (S.key === k) setReqBadge(Array.isArray(r && r.items) ? r.items.length : 0); }, () => {});
 }
 
 export const brk = () => ({ start: S.meta.breakStart, end: S.meta.breakEnd });

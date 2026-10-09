@@ -351,3 +351,6 @@ a.todo-row:hover{border-color:var(--pink);box-shadow:0 2px 8px rgba(35,24,21,.08
 .todo-empty{color:var(--muted);font-size:14px;padding:6px 0}
 .sidebar nav a .badge{margin-left:auto;min-width:22px;height:22px;padding:0 6px;border-radius:11px;background:var(--brand);color:var(--brand-ink);font-style:normal;font-size:12.5px;font-weight:900;line-height:22px;text-align:center}
 .sidebar nav a .badge.err{background:var(--bad);color:#fff}
+
+/* 申請審核分頁的待審筆數（2026-10-09） */
+nav.tabs a .badge{display:inline-block;margin-left:5px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--red);color:#fff;font-style:normal;font-size:11.5px;font-weight:900;line-height:18px;text-align:center;vertical-align:1px}

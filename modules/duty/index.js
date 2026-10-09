@@ -1,4 +1,4 @@
-import { S, reset } from './state.js';
+import { S, reset, refreshReqBadge } from './state.js';
 import { renderApprove } from './approve.js';
 import { renderDevice } from './device.js';
 import { renderRoster } from './roster.js';
@@ -22,6 +22,7 @@ export default {
     if (S.key !== key) reset(key);                      // 換了登入就重來，不留上一個人的資料
     S.rerender = ctx.rerender;
     ({ approve: renderApprove, request: renderRequest, device: renderDevice, roster: renderRoster, notice: renderNotice }[ctx.tab] || renderApprove)(ctx);
+    if (ctx.tab !== 'request') refreshReqBadge();      // 申請審核分頁自己讀清單時會更新，不重複問
   },
 };
 
