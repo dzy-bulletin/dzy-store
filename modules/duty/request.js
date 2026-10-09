@@ -3,15 +3,16 @@
 // 照 ~/mala-clock-in manager.html（feature/requests-qr）的 loadPendingRequests／buildReqItem 搬，文案不改；外觀換成營運系統風格。
 // 核准申請「不會」直接寫入核定：只是讓那天的核定頁先幫主管填好，主管核定那天時確認送出才算數（見 approve.js 的 __applyReq）。
 import { confirmBox } from '../../js/ui.js';
-import { S, call, h, failBar, setReqBadge } from './state.js';
-import { tsLabel, shortDate, punchEvidence, REQ_KIND_LABEL, REQ_BATCH_MAX } from './calc.js';
+import { S, call, h, failBar, setReqBadge, loadLeave } from './state.js';
+import { tsLabel, shortDate, punchEvidence, compBalanceNote, REQ_KIND_LABEL, REQ_BATCH_MAX } from './calc.js';
 
 export function renderRequest(ctx) {
   const el = ctx.el;
   el.innerHTML = '<div id="duReqBox"><div class="card du-center">載入中…</div></div>';
   const box = el.querySelector('#duReqBox');
   function load() {
-    call('mgr_req_pending').then(r => {
+    // 補休申請要附餘額：假別額度和待審清單一起抓；額度抓不到不擋人，只是不顯示餘額（原頁同）
+    Promise.all([call('mgr_req_pending'), loadLeave()]).then(([r]) => {
       if (!el.isConnected) return;
       box.innerHTML = '';
       const items = Array.isArray(r.items) ? r.items : [];
@@ -84,7 +85,7 @@ function buildItem(it, card, title) {
   pick.onchange = () => syncBatch(card);
   who.append(pick,h('span', 'du-rq-kind ' + (REQ_KIND_LABEL[it.kind] ? it.kind : ''), REQ_KIND_LABEL[it.kind] || it.kind), h('span', 'du-rq-name', it.name));
   l1.append(who, h('span', 'du-rq-date', shortDate(it.date)));
-  el.append(l1, h('div', 'du-rq-l2', it.summary + (it.reason ? '\n原因：' + it.reason : '') + '\n送出：' + tsLabel(it.created_at)));
+  el.append(l1, h('div', 'du-rq-l2', it.summary + (it.reason ? '\n原因：' + it.reason : '') + compBalanceNote(S.leave, it) + '\n送出：' + tsLabel(it.created_at)));
   const ev = punchEvidence(it);
   if (ev) el.append(h('div', 'du-rq-evid', ev));
 

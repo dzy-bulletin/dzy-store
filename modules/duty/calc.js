@@ -129,6 +129,11 @@ export function quotaOf(opts, empId, code) {
 }
 // manager.html:1184–1206：下拉選項的文字與是否反灰（額度用完）。曆年制與每子女制才擋；婚喪產檢是「每次事件」，標每次上限
 export function leaveOptionView(name, def, q) {
+  if (q && q.comp) {                                // 補休（manager.html:1256–1260）：只有正職、只能用已定案月份換到的餘額，以小時計
+    if (!q.allowed) return { text: name + '（只有正職）', disabled: true };
+    if (!(q.balance_h > 0)) return { text: name + '（沒有餘額）', disabled: true };
+    return { text: name + '（剩 ' + q.balance_h + ' 小時）', disabled: false };
+  }
   if (!def || !q || q.cap_days == null) return { text: name, disabled: false };
   const remain = Math.round((q.remain_days || 0) * 10) / 10;
   if (q.blocked) return { text: name + '（額度已用完）', disabled: true };
@@ -193,3 +198,11 @@ export function missPeriods(segments, r) {
 // 打卡 QR 掃描後開的 LINE 打卡頁
 export const QR_LIFF = 'https://liff.line.me/2011292256-QFXEwFh4';
 export const qrUrl = token => QR_LIFF + '?qr=' + encodeURIComponent(token);
+
+// manager.html:1849–1856：補休申請附上這位同仁目前的補休餘額（薪酬後端算的；查不到就不顯示）
+export function compBalanceNote(opts, it) {
+  if (!it || it.kind !== 'leave' || it.leave_type !== '補休' || !opts || !Array.isArray(opts.types)) return '';
+  const def = leaveDefOf(opts, '補休'), q = def ? quotaOf(opts, String(it.emp_id), def.code) : null;
+  if (!q || !q.comp) return '';
+  return '\n補休餘額：' + (q.allowed ? q.balance_h + ' 小時' + (Number(it.hours) > q.balance_h ? '（不夠）' : '') : '計時同仁沒有補休');
+}
