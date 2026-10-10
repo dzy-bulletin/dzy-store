@@ -10,9 +10,9 @@ const KEY = 'dzystore_mockdb';
 // e2e 注入的資料（window.__E2E_DATA，由測試每次隨機產生）；沒有就用下面內建預設，示範模式不受影響。
 const E2E = () => (typeof window !== 'undefined' && window.__E2E_DATA) || {};
 const clone = x => JSON.parse(JSON.stringify(x));
-const DB_VERSION = 7;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
-const MODS = ['purchase', 'cashbook', 'duty', 'transfer', 'loss', 'inventory'];
-const LABELS = { purchase: '貨單辨識', cashbook: '收支登記', duty: '出勤核定', transfer: '門市調撥', loss: '耗損登記', inventory: '庫存盤點' };
+const DB_VERSION = 8;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
+const MODS = ['purchase', 'cashbook', 'duty', 'transfer', 'loss', 'inventory', 'board'];
+const LABELS = { purchase: '貨單辨識', cashbook: '收支登記', duty: '出勤核定', transfer: '門市調撥', loss: '耗損登記', inventory: '庫存盤點', board: '叫貨看板' };
 const hex = n => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(b => b.toString(16).padStart(2, '0')).join('');
 const ok = data => ({ ok: true, data: data === undefined ? {} : data });
 const fail = (error, message) => ({ ok: false, error, message });
@@ -25,6 +25,18 @@ function seedSlips() {   // 測試注入的貨單：hours_ago＝幾小時前上�
     return { id: `S${day}-${String(byDay[day]).padStart(4, '0')}`, client_id: 'seed-' + hex(8), store: x.store, status: x.status, vendor_name: x.vendor_name,
       uploaded_at: at.toISOString(), photo_count: x.photo_count, return_reason: x.return_reason };
   });
+}
+// 叫貨看板假後端：回一頁假看板（真的由伺服器代登入 Worker 拿）。e2e 可用 __E2E_DATA.board = { unset: ['代號'] } 模擬沒設定帳密
+function boardMock(action, me, b, db) {
+  if (action !== 'view') return fail('NOT_FOUND', '找不到這個功能');
+  if ((((E2E().board || {}).unset) || []).includes(me.code)) return fail('FORBIDDEN', '這家店的叫貨看板帳號還沒設定，請聯絡管理者');
+  db.boardN = (db.boardN || 0) + 1;
+  const html = `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>叫貨看板</title>
+    <style>body{font-family:-apple-system,"PingFang TC",sans-serif;margin:0;padding:16px;background:#f4f5f7;color:#0f172a}table{border-collapse:collapse;width:100%;background:#fff}td,th{border:1px solid #e2e8f0;padding:8px;text-align:left}</style></head>
+    <body><h1 id="bdMockTitle">${String(me.name).replace(/[<>&"]/g, c => `&#${c.charCodeAt(0)};`)}・叫貨看板（假資料）</h1><p id="bdMockN">第 ${db.boardN} 次讀取</p>
+    <table><tr><th>品項</th><th>本期使用</th><th>建議訂貨</th></tr><tr><td>雞腿排</td><td>42</td><td>45</td></tr><tr><td>燃麵</td><td>120</td><td>130</td></tr></table>
+    <script>document.body.dataset.js='ok'</script></body></html>`;
+  return ok({ html, at: new Date().toISOString() });
 }
 function fresh() {
   const A = E2E().accounts || {}, o = (c, k, d) => (A[c] && A[c][k] !== undefined ? A[c][k] : d);
@@ -117,6 +129,7 @@ function route(method, p, q, b, token) {
     if (m[1] === 'transfer') return transferMock(m[2], me, b, db);
     if (m[1] === 'inventory') return invMock(m[2], me, b, db);
     if (m[1] === 'loss') return lossMock(m[2], me, b, db);
+    if (m[1] === 'board') return boardMock(m[2], me, b, db);
     return fail('NOT_FOUND', '還在搬移中，暫時請用原本的系統');
   }
   if (p.startsWith('/admin/')) {
@@ -224,7 +237,9 @@ function admin(method, p, q, b, me) {
       ...lossAlias.info(db),
       vault: stores.map(([, label, name]) => ({ name, label, set: !!db.vault[name], updatedAt: db.vault[name] || null })),
       transferNodes: TRANSFER_NODES.map(n => ({ code: n.code, name: n.name, short: n.short })),
-      transferVault: TRANSFER_NODES.map(n => ({ name: 'transfer:' + n.code, label: n.name, set: !!db.vault['transfer:' + n.code], updatedAt: db.vault['transfer:' + n.code] || null })) });
+      transferVault: TRANSFER_NODES.map(n => ({ name: 'transfer:' + n.code, label: n.name, set: !!db.vault['transfer:' + n.code], updatedAt: db.vault['transfer:' + n.code] || null })),
+      boardVault: [{ name: 'board:_', label: '全部門市共用', set: true, updatedAt: '2026-10-11T02:00:00.000Z' }].concat(Object.values(db.accounts).filter(a => a.role === 'store').sort((x, y) => x.code.localeCompare(y.code))   // 假後端：共用已設；__E2E_DATA.board.unset 列的店當作連共用都用不到
+        .map(a => { const no = (((E2E().board || {}).unset) || []).includes(a.code); return { name: 'board:' + a.code, label: a.name, set: false, shared: !no, store: { MZTGF: '光復', MZTZS: '金山', MZTLZL: '六張犁', TEST2: '光復' }[a.code] || null, updatedAt: null }; })) });
   }
   if (method === 'POST' && p === '/admin/alias') {
     const a = acc(); if (!a) return fail('NOT_FOUND', '找不到這個帳號');
@@ -244,7 +259,7 @@ function admin(method, p, q, b, me) {
     const hexc = /^#[0-9a-fA-F]{6}$/;
     if (!b.colors || !hexc.test(b.colors.red) || !hexc.test(b.colors.black)) return fail('BAD_INPUT', '顏色格式不正確');
     const ids = (b.cards || []).map(c => c.id);
-    if (ids.length !== 6 || new Set(ids).size !== 6 || !MODS.every(m => ids.includes(m))) return fail('BAD_INPUT', '首頁卡片要六張齊全、不能重複');
+    if (ids.length !== MODS.length || new Set(ids).size !== MODS.length || !MODS.every(m => ids.includes(m))) return fail('BAD_INPUT', `首頁卡片要 ${MODS.length} 張齊全、不能重複`);
     if (b.logoUrl && !/^(https:\/\/[^/]|\/[^/]|data:image\/(png|jpeg|webp);base64,)/.test(b.logoUrl)) return fail('BAD_INPUT', 'Logo 網址要以 https:// 開頭、或是 / 開頭的站內路徑（不能是 //），或 png／jpeg／webp 的內嵌圖片');
     if ((b.banner || '').length > 300) return fail('BAD_INPUT', '公告橫幅最多 300 字');
     db.ui = { systemName: String(b.systemName || '').trim() || '鼎兆元｜門市營運系統', logoUrl: b.logoUrl || '', colors: b.colors,

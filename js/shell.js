@@ -24,7 +24,7 @@ function route() {
 }
 export function go(hash) { if (location.hash === hash) render(); else location.hash = hash; }
 
-const NAV_ICONS = { home: '🏠', purchase: '🧾', cashbook: '💰', duty: '🕒', transfer: '🔄', loss: '🗑️', inventory: '📦', admin: '⚙️' };
+const NAV_ICONS = { home: '🏠', purchase: '🧾', cashbook: '💰', duty: '🕒', transfer: '🔄', loss: '🗑️', inventory: '📦', board: '📋', admin: '⚙️' };
 // 左側深色側邊欄（外觀正本 ~/mala-clock-in/payroll.html .sidebar）：品牌→首頁→有開的系統→（管理者）後台管理→使用者區
 function sidebarHtml(s, cur) {
   const feats = new Set(s.features || []);
@@ -170,7 +170,7 @@ async function viewModule(s, id, tab, tok) {
   const cur = mod.tabs.some(t => t.id === tab) ? tab : mod.tabs[0].id;
   if (cur !== tab) return history.replaceState(null, '', `#/${id}/${cur}`), render();
   const locked = mod.locked && mod.locked();
-  const main = frame(s, `${bannerHtml()}<div id="modBody"></div>`, locked ? '' : tabsHtml(id, mod.tabs, cur), { cur: id, title: labelOf(reg) });
+  const main = frame(s, `${bannerHtml()}<div id="modBody"></div>`, locked || mod.tabs.length < 2 ? '' : tabsHtml(id, mod.tabs, cur), { cur: id, title: labelOf(reg) });
   const ctx = { el: main.querySelector('#modBody'), tab: cur, session: s, api, rerender: render };
   if (locked) mod.renderGate(ctx); else mod.render(ctx);
 }

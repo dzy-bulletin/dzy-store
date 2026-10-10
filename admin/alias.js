@@ -24,6 +24,11 @@ export default async function view({ el, api }) {
     <div class="scroll"><table id="vaultTrTable"><thead><tr><th>節點</th><th>名稱</th><th>狀態</th><th>更新時間</th></tr></thead><tbody>
     ${(d.transferVault || []).map(v => `<tr data-vault="${esc(v.name)}"><td>${esc(v.label)}</td><td><code>${esc(v.name)}</code></td>
       <td><span class="tag ${v.set ? 'ok' : 'bad'}">${v.set ? '已設' : '未設'}</span></td><td>${v.updatedAt ? esc(fmtTime(v.updatedAt)) : '—'}</td></tr>`).join('')}
+    </tbody></table></div></div>
+    <div class="card"><h2>叫貨看板帳密代管狀態</h2><p class="hint">登入叫貨看板用的帳號密碼，由管理者在公司 Mac mini 終端機輸入，這裡只顯示「已設／未設」。board:_ 是全部門市共用的一組（總部帳號）：用它的店只看得到看板上自己那一區（「看板店別」）；看板店別空白的店看不到。某家店另存 board:門市代號 就改用它自己的帳號、看到的就是那個帳號的畫面。</p>
+    <div class="scroll"><table id="vaultBdTable"><thead><tr><th>門市</th><th>名稱</th><th>看板店別</th><th>狀態</th><th>更新時間</th></tr></thead><tbody>
+    ${(d.boardVault || []).map(v => `<tr data-vault="${esc(v.name)}"><td>${esc(v.label)}</td><td><code>${esc(v.name)}</code></td><td>${v.name === 'board:_' ? '—' : esc(v.store || '（無）')}</td>
+      <td><span class="tag ${v.set || v.shared ? 'ok' : 'bad'}">${v.set ? '已設' : v.shared ? '用共用' : '未設'}</span></td><td>${v.updatedAt ? esc(fmtTime(v.updatedAt)) : '—'}</td></tr>`).join('')}
     </tbody></table></div></div>`;
   el.querySelectorAll('.lossSel').forEach(sel => {
     sel.onchange = async () => {

@@ -92,7 +92,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--gold);outline-of
 .modal-bg{position:fixed;inset:0;background:rgba(35,24,21,.5);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
 .modal{background:#fff;border-radius:12px;padding:20px;max-width:380px;width:100%}
 .modal p{margin-bottom:14px}
-/* 手機：側邊欄改成「上排品牌＋使用者、下排七格圖示選單」——每一格都看得到，不用左右滑找目前在哪 */
+/* 手機：側邊欄改成「上排品牌＋使用者、下排八格圖示選單（2026-10-11 加叫貨看板）」——每一格都看得到，不用左右滑找目前在哪 */
 @media (max-width:860px){
   .app{flex-direction:column}
   .sidebar{width:100%;height:auto;position:static;overflow:visible;display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-areas:"brand user" "nav nav";align-items:center}
@@ -114,7 +114,8 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--gold);outline-of
 }
 @media (max-width:400px){
   #nav a{font-size:11.5px}
-  #nav:has(#adminLink) a{font-size:10.5px;letter-spacing:-.05em}
+  #nav:has(> a:nth-of-type(8)) a{font-size:10.5px;letter-spacing:-.05em}
+  #nav:has(> a:nth-of-type(9)) a{font-size:9.5px}
 }
 @media (max-width:480px){main{padding:14px 12px 60px}.card{padding:14px}nav.tabs a{padding:12px 12px;flex:1 0 auto;text-align:center}}
 /* 出勤核定 5 個分頁（2026-10-09 加「申請審核」）在 400 寬以下要排得下；要放在上一行之後才蓋得過 */

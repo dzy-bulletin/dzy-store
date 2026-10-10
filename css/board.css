@@ -1,0 +1,4 @@
+/* 叫貨看板：上方一條更新時間＋重新整理，下面 iframe 撐滿 */
+.bd-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.bd-bar .hint{margin:0}
+.bd-frame{display:block;width:100%;min-height:420px;border:1px solid var(--line);border-radius:10px;background:#fff}
