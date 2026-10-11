@@ -2,18 +2,26 @@
 import { api } from '../../js/api.js';
 
 const FLAG = 'dzystore_dutyok';
-export const S = { key: null, meta: { clockStore: '', label: '', breakStart: '', breakEnd: '' }, date: null, dayCache: {}, dayTok: 0,
+// 管理者（2026-10-11 Eason：看得到所有門市、也能代核）：asStore＝正在看的門市代號，每次呼叫自動帶上；stores＝各店總覽讀到的門市清單。
+export const S = { key: null, admin: false, asStore: '', asName: '', stores: null, meta: { clockStore: '', label: '', breakStart: '', breakEnd: '' }, date: null, dayCache: {}, dayTok: 0,
   pend: null, pendAll: false, focusEmp: null, rerender: null, leave: null, leaveP: null };
 
 export function reset(key) {
-  S.key = key; S.meta = { clockStore: '', label: '', breakStart: '', breakEnd: '' }; S.date = null; S.dayCache = {}; S.dayTok++;
+  S.key = key; S.asStore = ''; S.asName = ''; S.stores = null; S.meta = { clockStore: '', label: '', breakStart: '', breakEnd: '' }; S.date = null; S.dayCache = {}; S.dayTok++;
   S.pend = null; S.pendAll = false; S.focusEmp = null; S.leave = null; S.leaveP = null; S.reqCount = 0; S.reqAt = 0;
+}
+
+// 管理者換門市：清掉上一家店的資料（日期、核定快取、假別額度、待審數），只保留門市清單
+export function setStore(code, name) {
+  const stores = S.stores;
+  reset(S.key);
+  S.stores = stores; S.asStore = code || ''; S.asName = name || '';
 }
 
 // 呼叫 /m/duty/<action>；回應裡的 meta（店別與休息帶）順手記下。核定通行碼失效（後台重設、換了登入）就退回輸入畫面。
 export async function call(action, body) {
   try {
-    const r = await api('POST', '/m/duty/' + action, body || {});
+    const r = await api('POST', '/m/duty/' + action, S.asStore ? Object.assign({}, body || {}, { asStore: S.asStore }) : (body || {}));
     if (r && r.meta) S.meta = r.meta;
     return r;
   } catch (e) {
@@ -32,6 +40,7 @@ export function setReqBadge(n) {
   if (n > 0) { const i = document.createElement('i'); i.className = 'badge'; i.textContent = String(n); i.setAttribute('aria-label', n + ' 筆待審'); a.append(i); }
 }
 export function refreshReqBadge() {
+  if (S.admin && !S.asStore) return;
   if (S.reqAt && Date.now() - S.reqAt < 60000) return setReqBadge(S.reqCount || 0);
   const k = S.key;
   call('mgr_req_pending').then(r => { if (S.key === k) setReqBadge(Array.isArray(r && r.items) ? r.items.length : 0); }, () => {});

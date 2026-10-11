@@ -370,3 +370,14 @@ nav.tabs a .badge{display:inline-block;margin-left:5px;min-width:18px;height:18p
 /* 出勤核定比對班表（自動排班，2026-10-11）：灰字一行；差超過 15 分鐘的橘色小標只是提醒 */
 .du-plan{font-size:12px;color:var(--muted);margin-top:2px}
 .du-planflag{display:inline-block;margin-left:6px;padding:0 6px;border-radius:10px;background:#fff3e0;color:#b26a00;font-weight:700;font-size:11px}
+/* 出勤核定：管理者各店總覽與門市切換（2026-10-11） */
+.du-ov-tbl th,.du-ov-tbl td{padding:10px 8px;border-bottom:1px solid var(--line,#eee);text-align:left;vertical-align:middle}
+.du-ov-tbl .num{text-align:center;white-space:nowrap}
+.du-ov-go{border:0;border-radius:11px;background:var(--red);color:#fff;font-weight:900;font-size:13px;padding:3px 10px;cursor:pointer}
+.du-ov-zero{color:var(--ok)}
+.du-ov-bad{color:var(--muted);font-size:12px}
+.du-store-bar{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin-bottom:14px}
+.du-store-bar label{font-weight:700;font-size:13px}
+.du-store-bar select{min-width:200px;max-width:100%}
+.du-ov-back{font-size:13px;margin-left:auto}
+@media (max-width:480px){.du-ov-tbl th,.du-ov-tbl td{padding:8px 4px;font-size:12.5px}.du-ov-tbl .du-hint{display:none}.du-ov-back{margin-left:0}}

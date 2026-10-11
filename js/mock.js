@@ -171,7 +171,7 @@ function homeFor(me) {
   const items = [], errors = [];
   const ERR = { duty: '出勤核定暫時讀不到', purchase: '貨單辨識暫時讀不到', cashbook: '收支登記暫時讀不到' };
   const add = (module, level, text, count, link) => items.push({ module, level, text, count, link });
-  if (has('duty')) {
+  if (has('duty') && me.role !== 'admin') {    // 管理者沒有自己的打卡對照：真後端回 FORBIDDEN＝不適用，首頁不列（各店狀況在出勤核定 › 各店總覽）
     if (bad('duty')) errors.push({ module: 'duty', message: ERR.duty });
     else {
       const d = dutyDb();
@@ -510,6 +510,15 @@ function mockAttach(id) {
 }
 function dutyHas(emp, date) { const f = fakeOf(emp); return !!f && (f.segs.length > 0 || !!f.attempts); }
 function duty(action, me, s, b) {
+  // 管理者（2026-10-11）：admin_stores 列門市；其他動作要帶 asStore。示範模式各店共用同一份假出勤資料。
+  if (me.role === 'admin') {
+    if (action === 'admin_stores') return ok({ stores: Object.values(db.accounts).filter(a => a.role === 'store' && a.active).map(a => ({ code: a.code, name: a.name, label: a.name })) });
+    const want = typeof b.asStore === 'string' ? b.asStore.trim().toUpperCase() : '';
+    if (!want) return fail('BAD_INPUT', '請先選一家門市');
+    const acc = db.accounts[want];
+    if (!acc || acc.role !== 'store' || !acc.active) return fail('NOT_FOUND', '找不到這家門市，請重新整理');
+    b = Object.assign({}, b); delete b.asStore;
+  }
   const d = dutyDb();
   d.calls[action] = (d.calls[action] || 0) + 1;
   const fi = d.faults.findIndex(f => f.action === action);

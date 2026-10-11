@@ -173,10 +173,11 @@ async function viewModule(s, id, tab, tok) {
   if (!reg || !(s.features || []).includes(id) || (cardOf(id) && !cardOf(id).visible)) return go('#/');
   const mod = (await reg.load()).default;
   if (tok !== renderToken) return;
-  const cur = mod.tabs.some(t => t.id === tab) ? tab : mod.tabs[0].id;
+  const tabs = mod.tabsFor ? mod.tabsFor(s) : mod.tabs;   // 依角色不同分頁（出勤核定：管理者多「各店總覽」）
+  const cur = tabs.some(t => t.id === tab) ? tab : tabs[0].id;
   if (cur !== tab) return history.replaceState(null, '', `#/${id}/${cur}`), render();
   const locked = mod.locked && mod.locked();
-  const main = frame(s, `${bannerHtml()}<div id="modBody"></div>`, locked || mod.tabs.length < 2 ? '' : tabsHtml(id, mod.tabs, cur), { cur: id, title: labelOf(reg) });
+  const main = frame(s, `${bannerHtml()}<div id="modBody"></div>`, locked || tabs.length < 2 ? '' : tabsHtml(id, tabs, cur), { cur: id, title: labelOf(reg) });
   const ctx = { el: main.querySelector('#modBody'), tab: cur, session: s, api, rerender: render };
   if (locked) mod.renderGate(ctx); else mod.render(ctx);
 }

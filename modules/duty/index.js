@@ -1,4 +1,5 @@
 import { S, reset, refreshReqBadge } from './state.js';
+import { renderOverview, storeBar } from './overview.js';
 import { renderApprove } from './approve.js';
 import { renderDevice } from './device.js';
 import { renderRoster } from './roster.js';
@@ -12,15 +13,26 @@ const KEY = 'dzystore_dutyok';
 const flag = () => { try { return sessionStorage.getItem(KEY) || ''; } catch (e) { return ''; } };
 const setFlag = v => { try { if (v) sessionStorage.setItem(KEY, v); else sessionStorage.removeItem(KEY); } catch (e) {} };
 
+const TABS = [{ id: 'approve', label: '核定工時' }, { id: 'request', label: '申請審核' }, { id: 'device', label: '裝置核准' }, { id: 'roster', label: '員工名冊' }, { id: 'notice', label: '公告' }];
+
 export default {
   id: 'duty',
-  tabs: [{ id: 'approve', label: '核定工時' }, { id: 'request', label: '申請審核' }, { id: 'device', label: '裝置核准' }, { id: 'roster', label: '員工名冊' }, { id: 'notice', label: '公告' }],
+  tabs: TABS,
+  // 管理者多一個「各店總覽」放第一格（2026-10-11 Eason）；其餘分頁要先選門市，畫面上方有門市切換
+  tabsFor: s => (s && s.role === 'admin' ? [{ id: 'overview', label: '各店總覽' }, ...TABS] : TABS),
   locked: () => flag() !== '1',
   renderGate(ctx) { flag() === 'm' ? changeForm(ctx) : unlockForm(ctx); },
   render(ctx) {
     const key = ctx.session.token || ctx.session.code;
     if (S.key !== key) reset(key);                      // 換了登入就重來，不留上一個人的資料
     S.rerender = ctx.rerender;
+    S.admin = ctx.session.role === 'admin';
+    if (S.admin) {
+      if (ctx.tab === 'overview') return renderOverview(ctx);
+      const body = storeBar(ctx);                       // 還沒選門市：只畫選單與說明
+      if (!body) return;
+      ctx = Object.assign({}, ctx, { el: body });
+    }
     ({ approve: renderApprove, request: renderRequest, device: renderDevice, roster: renderRoster, notice: renderNotice }[ctx.tab] || renderApprove)(ctx);
     if (ctx.tab !== 'request') refreshReqBadge();      // 申請審核分頁自己讀清單時會更新，不重複問
   },
