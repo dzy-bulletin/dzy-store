@@ -34,6 +34,8 @@ export function renderBoard(ctx) {
   if (!S.day || !D.dates.includes(S.day)) S.day = D.dates.includes(D.today) ? D.today : D.dates[0];
   const pub = D.meta.publication;
   const bday = (st, d) => st.birthday && st.birthday.slice(5) === d.slice(5);
+  // 六日、同仁生日各有底色（Eason 2026-10-12）
+  const isWe = (d) => { const w = weekday(d); return w === 0 || w === 6; };
 
   const ratioCls = (r) => (r == null || !target ? '' : r < target ? ' low' : ' good');
   // 當天總人數（Eason 2026-10-11：不分班別，只看當天幾個人上班）；需要人數＝各班最少人數加總
@@ -86,24 +88,24 @@ export function renderBoard(ctx) {
         const lv = iss.length ? iss.sort((a, b) => LV_RANK[a.level] - LV_RANK[b.level])[0].level : '';
         const pin = (D.pins[st.emp_id] || {})[d];
         const sel = S.sel && S.sel.emp === st.emp_id && S.sel.date === d;
-        return `<td class="sc-c ${x.cls}${lv ? ' i-' + lv : ''}${sel ? ' sel' : ''}${pin ? ' pin' : ''}" data-emp="${esc(st.emp_id)}" data-date="${d}" title="${esc(iss.map((r) => r.msg).join('\n'))}" ${x.color ? `style="--sc-shift:${esc(x.color)}"` : ''}>${esc(x.t)}${bday(st, d) ? '<i class="sc-bd" title="生日">生日</i>' : ''}</td>`;
+        return `<td class="sc-c ${x.cls}${isWe(d) ? ' we' : ''}${bday(st, d) ? ' bd' : ''}${lv ? ' i-' + lv : ''}${sel ? ' sel' : ''}${pin ? ' pin' : ''}" data-emp="${esc(st.emp_id)}" data-date="${d}" title="${esc(iss.map((r) => r.msg).join('\n'))}" ${x.color ? `style="--sc-shift:${esc(x.color)}"` : ''}>${esc(x.t)}${bday(st, d) ? '<i class="sc-bd" title="生日">生日</i>' : ''}</td>`;
       }).join('');
       return `<tr><th class="sc-name" scope="row">${esc(st.name)}</th>${tds}</tr>`;
     }).join('');
     const cnt = `<tr class="sc-cnt"><th scope="row">當天人數</th>${D.dates.map((d) => {
       const n = dayTotal(d), need = dayNeed(d);
-      return `<td class="${need && n < need ? 'short' : ''}" title="${need ? `至少要 ${need} 人` : '沒有設人數'}">${n}${need ? '/' + need : ''}</td>`;
+      return `<td class="${need && n < need ? 'short' : ''}${isWe(d) ? ' we' : ''}" title="${need ? `至少要 ${need} 人` : '沒有設人數'}">${n}${need ? '/' + need : ''}</td>`;
     }).join('')}</tr>`;
     body = `<div class="card sc-gridcard"><div class="scroll"><table class="sc-grid">
       <thead><tr><th class="sc-name">同仁</th>${th}</tr></thead>
       <tbody>${rows}${cnt}</tbody></table></div></div>`;
   } else {
     const d = S.day, hol = D.holidays.days[d];
-    const chips = D.dates.map((x) => `<button type="button" class="sc-daychip${x === d ? ' on' : ''}${(byDay[x] || []).length ? ' warn' : ''}" data-day="${x}">${md(x)}<small>${WD[weekday(x)]}</small></button>`).join('');
+    const chips = D.dates.map((x) => `<button type="button" class="sc-daychip${x === d ? ' on' : ''}${isWe(x) ? ' we' : ''}${(byDay[x] || []).length ? ' warn' : ''}" data-day="${x}">${md(x)}<small>${WD[weekday(x)]}</small></button>`).join('');
     const list = staff.filter((st) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date)).map((st) => {
       const c = (D.days[st.emp_id] || {})[d], x = cellText(c, shifts), iss = byCell[st.emp_id + '|' + d] || [];
       const s = c && c.shift_id ? shifts[c.shift_id] : null;
-      return `<button type="button" class="sc-drow ${x.cls}${iss.length ? ' i-' + iss.sort((a, b) => LV_RANK[a.level] - LV_RANK[b.level])[0].level : ''}" data-emp="${esc(st.emp_id)}" data-date="${d}">
+      return `<button type="button" class="sc-drow ${x.cls}${bday(st, d) ? ' bd' : ''}${iss.length ? ' i-' + iss.sort((a, b) => LV_RANK[a.level] - LV_RANK[b.level])[0].level : ''}" data-emp="${esc(st.emp_id)}" data-date="${d}">
         <span class="sc-dn">${esc(st.name)}${bday(st, d) ? ' <i class="sc-bd">生日</i>' : ''}</span><span class="sc-dv">${esc(x.t)}${s ? `<small>${esc(s.start)}–${esc(s.end)}</small>` : ''}</span>
         ${iss.length ? `<span class="sc-dmsg">${esc(iss.map((i) => i.msg).join('；'))}</span>` : ''}</button>`;
     }).join('');
