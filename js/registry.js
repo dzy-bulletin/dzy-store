@@ -7,6 +7,7 @@ export const MODULES = [
   { id: 'loss',      label: '耗損登記', desc: '耗損登記與品項',   load: () => import('../modules/loss/index.js') },
   { id: 'inventory', label: '庫存盤點', desc: '盤點與歷史',       load: () => import('../modules/inventory/index.js') },
   { id: 'board',     label: '叫貨看板', desc: '墨竹亭總部叫貨看板', load: () => import('../modules/board/index.js') },
+  { id: 'schedule',  label: '自動排班', desc: '四週變形排班、LINE 班表', load: () => import('../modules/schedule/index.js') },
 ];
 export const ADMIN_TABS = [
   { id: 'accounts', label: '帳號' }, { id: 'features', label: '功能開關' }, { id: 'duty', label: '出勤核定密碼' }, { id: 'alias', label: '門市對照' },

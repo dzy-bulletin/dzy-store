@@ -4,6 +4,8 @@ import { confirmBox } from '../../js/ui.js';
 import { S, call, brk, h, failBar, loadLeave, staleLeave } from './state.js';
 import * as C from './calc.js';
 import { qrButton } from './qr.js';
+import { api } from '../../js/api.js';
+import { comparePlan } from '../schedule/compare.js';
 
 export function renderApprove(ctx) {
   const el = ctx.el;
@@ -83,6 +85,22 @@ export function renderApprove(ctx) {
     S.date = date; dateIn.value = date;
     renderEmployees(box, date, employees);
     applyDayRequests(date);
+    applyDayPlan(date);
+  }
+  // 自動排班的班表（2026-10-11）：每人加一行「班表：早班 10:00–19:00」，打卡跟班表差超過 15 分鐘標橘色。只提示，不擋核定。
+  // 這家店沒開自動排班、或讀不到，就安靜略過。
+  function applyDayPlan(date) {
+    if (!((ctx.session && ctx.session.features) || []).includes('schedule')) return;
+    const tok = S.dayTok;
+    api('POST', '/m/schedule/dayPlan', { date }).then(res => {
+      if (tok !== S.dayTok || S.date !== date || !live() || !res || !res.plan) return;
+      const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);   // 台北今天
+      box.querySelectorAll('.du-card').forEach(card => {
+        const r = comparePlan(res.plan[card.dataset.empId], card.__segments, { past: date <= today });
+        if (!r || !card.__showPlan) return;
+        card.__showPlan(r);
+      });
+    }, () => {});
   }
   // 那天已核准的加班請假／忘打卡申請 → 對應同仁卡片顯示並預填（不快取：主管剛核准完切過來要看得到）。失敗就安靜略過，不擋核定。
   function applyDayRequests(date) {
@@ -153,6 +171,7 @@ function periodRow(p, onChange) {
 function buildCard(emp, date) {
   const br = brk();
   const card = h('div', 'du-card'); card.dataset.empId = String(emp.emp_id);
+  card.__segments = emp.segments || [];
 
   // ---- 頭部（收合時看得到：姓名、班別、打卡摘要、精簡徽章）----
   const nameEl = h('div', 'du-name', emp.name);
@@ -168,6 +187,12 @@ function buildCard(emp, date) {
   const head = h('div', 'du-head', null, { role: 'button', tabindex: '0', 'aria-expanded': 'false' });
   const hmain = h('div', 'du-hmain'); hmain.append(nameEl, punchEl);
   head.append(hmain, mini, chev);
+  card.__showPlan = (r) => {                                  // 自動排班比對（只提示）
+    const old = hmain.querySelector('.du-plan'); if (old) old.remove();
+    const line = h('div', 'du-plan', r.text);
+    r.flags.forEach(f => line.append(h('span', 'du-planflag', f)));
+    hmain.append(line);
+  };
   const body = h('div', 'du-body'); body.hidden = true;
   card.append(head, body);
 

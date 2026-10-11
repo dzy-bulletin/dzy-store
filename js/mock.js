@@ -10,9 +10,9 @@ const KEY = 'dzystore_mockdb';
 // e2e 注入的資料（window.__E2E_DATA，由測試每次隨機產生）；沒有就用下面內建預設，示範模式不受影響。
 const E2E = () => (typeof window !== 'undefined' && window.__E2E_DATA) || {};
 const clone = x => JSON.parse(JSON.stringify(x));
-const DB_VERSION = 8;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
-const MODS = ['purchase', 'cashbook', 'duty', 'transfer', 'loss', 'inventory', 'board'];
-const LABELS = { purchase: '貨單辨識', cashbook: '收支登記', duty: '出勤核定', transfer: '門市調撥', loss: '耗損登記', inventory: '庫存盤點', board: '叫貨看板' };
+const DB_VERSION = 9;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
+const MODS = ['purchase', 'cashbook', 'duty', 'transfer', 'loss', 'inventory', 'board', 'schedule'];
+const LABELS = { purchase: '貨單辨識', cashbook: '收支登記', duty: '出勤核定', transfer: '門市調撥', loss: '耗損登記', inventory: '庫存盤點', board: '叫貨看板', schedule: '自動排班' };
 const hex = n => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(b => b.toString(16).padStart(2, '0')).join('');
 const ok = data => ({ ok: true, data: data === undefined ? {} : data });
 const fail = (error, message) => ({ ok: false, error, message });
@@ -69,7 +69,7 @@ function log(code, module, action, okk, error) { db.audit.unshift({ at: new Date
 export async function handle(method, path, body, token) {
   await new Promise(r => setTimeout(r, 60));
   db = null; load(); body = body || {};
-  const r = route(method, path.split('?')[0], path.includes('?') ? new URLSearchParams(path.split('?')[1]) : new URLSearchParams(), body, token);
+  const r = await route(method, path.split('?')[0], path.includes('?') ? new URLSearchParams(path.split('?')[1]) : new URLSearchParams(), body, token);   // 自動排班假後端是 async（要讀假日表），等它做完才存
   save();
   return r;
 }
@@ -130,6 +130,7 @@ function route(method, p, q, b, token) {
     if (m[1] === 'inventory') return invMock(m[2], me, b, db);
     if (m[1] === 'loss') return lossMock(m[2], me, b, db);
     if (m[1] === 'board') return boardMock(m[2], me, b, db);
+    if (m[1] === 'schedule') return import('./mock-schedule.js').then(x => x.schedule(m[2], me, b, db, s));   // 用到才載入（排班計算檔案多，放在開頁就載會拉長每一頁的載入時間，WebKit 換頁時更容易打斷其他假資料的讀取）
     return fail('NOT_FOUND', '還在搬移中，暫時請用原本的系統');
   }
   if (p.startsWith('/admin/')) {

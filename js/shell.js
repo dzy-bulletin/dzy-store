@@ -24,7 +24,7 @@ function route() {
 }
 export function go(hash) { if (location.hash === hash) render(); else location.hash = hash; }
 
-const NAV_ICONS = { home: '🏠', purchase: '🧾', cashbook: '💰', duty: '🕒', transfer: '🔄', loss: '🗑️', inventory: '📦', board: '📋', admin: '⚙️' };
+const NAV_ICONS = { home: '🏠', purchase: '🧾', cashbook: '💰', duty: '🕒', transfer: '🔄', loss: '🗑️', inventory: '📦', board: '📋', schedule: '📅', admin: '⚙️' };
 // 左側深色側邊欄（外觀正本 ~/mala-clock-in/payroll.html .sidebar）：品牌→首頁→有開的系統→（管理者）後台管理→使用者區
 function sidebarHtml(s, cur) {
   const feats = new Set(s.features || []);
