@@ -1,6 +1,6 @@
 // 從舊版匯入：把舊版（手機裡 eason0728.github.io/mala）「匯出資料」存下的 JSON 貼上或選檔，先預覽、確認後整包覆蓋這家店的資料。
 // 覆蓋前伺服器會先把目前的整包存成一筆「匯入前備份」歷史，匯錯了可以到「歷史」找回。
-import { esc } from '../../js/ui.js';
+import { esc, confirmBox } from '../../js/ui.js';
 import { api } from '../../js/api.js';
 import { S, flushNow, reload, track } from './state.js';
 import { fmt } from './calc.js';
@@ -36,7 +36,7 @@ export function renderImport(ctx) {
         <div class="row mt"><button class="btn" id="invConfirm" type="button">確認匯入（覆蓋目前資料）</button></div>`;
       box.querySelector('#invConfirm').onclick = async b => {
         const btn = b.currentTarget;
-        if (!confirm('匯入後會覆蓋這家店目前所有資料（商品設定、攤車庫存、現場庫存）。\n覆蓋前會先備份一份到「歷史」。確定繼續？')) return;
+        if (!(await confirmBox('匯入後會覆蓋這家店目前所有資料（商品設定、攤車庫存、現場庫存）。\n覆蓋前會先備份一份到「歷史」。確定繼續？', '確認匯入'))) return;
         btn.disabled = true;
         try {
           const done = await track('import', () => api('POST', '/m/inventory/importLegacy', { data, confirm: true }));

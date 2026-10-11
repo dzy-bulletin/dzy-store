@@ -122,8 +122,10 @@ export function renderBoard(ctx) {
     const st = D.staff.find((x) => x.emp_id === S.sel.emp);
     const c = (D.days[S.sel.emp] || {})[S.sel.date] || {};
     const cur = c.shift_id ? 'S:' + c.shift_id + (c.day_type === 'H' ? ':H' : '') : c.day_type === 'L' ? 'L:' + c.leave : c.day_type || '';
-    const opts = activeShifts.map((s) => `<option value="S:${esc(s.id)}">${esc(s.name)} ${esc(s.start)}–${esc(s.end)}</option>`).join('')
-      + activeShifts.map((s) => `<option value="S:${esc(s.id)}:H">${esc(s.name)}（休息日出勤）</option>`).join('')
+    const otOpts = activeShifts.map((s) => `<option value="S:${esc(s.id)}:H">${esc(s.name)}（休息日出勤）</option>`).join('');
+    // 休息日加班只能改回休息日或換一個休息日出勤的班（伺服器同樣擋，Eason 2026-10-11）
+    const opts = c.day_type === 'H' && c.shift_id ? otOpts + '<option value="H">休息日</option>'
+      : activeShifts.map((s) => `<option value="S:${esc(s.id)}">${esc(s.name)} ${esc(s.start)}–${esc(s.end)}</option>`).join('') + otOpts
       + '<option value="R">例假</option><option value="H">休息日</option><option value="L:特">特休</option><option value="L:補">補休</option>'
       + (D.holidays.days[S.sel.date] ? '<option value="L:國">國定假日放假</option>' : '') + '<option value="CLEAR">清空</option>';
     const iss = byCell[S.sel.emp + '|' + S.sel.date] || [];

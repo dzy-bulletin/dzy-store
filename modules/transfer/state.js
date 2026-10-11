@@ -44,7 +44,8 @@ export function call(action, body) {
 }
 
 // 品項記憶依使用次數多→少排（後端已排好，這裡再保險一次；次數一樣維持後端順序）
-export const sortMem = list => list.map((m, i) => [m, i]).sort((a, b) => (b[0].uses || 0) - (a[0].uses || 0) || a[1] - b[1]).map(x => x[0]);
+// 品名一律轉字串：Apps Script 讀回純數字品名（例如 500）會是 Number，打字比對時 toLowerCase 會丟錯（2026-10-11 審查，同 cashbook/memory.js 的坑）
+export const sortMem = list => list.filter(m => m && m.name != null).map(m => ({ ...m, name: String(m.name) })).map((m, i) => [m, i]).sort((a, b) => (b[0].uses || 0) - (a[0].uses || 0) || a[1] - b[1]).map(x => x[0]);
 
 export async function loadBoot() {
   const d = await call('bootstrap', {});

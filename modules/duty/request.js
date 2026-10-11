@@ -104,8 +104,12 @@ function buildItem(it, card, title) {
         if (/^image\/(png|jpe?g|gif|webp|heic|heif)$/i.test(mime)) {
           const img = h('img', 'du-rq-img', null, { alt: it.name + ' 的申請附件' }); img.src = 'data:' + mime + ';base64,' + data; el.append(img);
         } else {
-          const a = h('a', 'du-rq-file', '下載附件（PDF）', { download: 'attachment.pdf' });
-          a.href = 'data:' + (mime === 'application/pdf' ? mime : 'application/octet-stream') + ';base64,' + data; el.append(a);
+          // 依實際格式給檔名與文字；不認得的格式不假裝成 PDF（2026-10-11 審查）
+          const KNOWN = { 'application/pdf': ['pdf', 'PDF'], 'application/msword': ['doc', 'Word'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['docx', 'Word'],
+            'application/vnd.ms-excel': ['xls', 'Excel'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['xlsx', 'Excel'] };
+          const k = KNOWN[String(mime).toLowerCase()];
+          const a = h('a', 'du-rq-file', k ? `下載附件（${k[1]}）` : '下載附件（格式無法預覽，下載後用對應的程式開）', { download: 'attachment.' + (k ? k[0] : 'bin') });
+          a.href = 'data:' + (k ? mime : 'application/octet-stream') + ';base64,' + data; el.append(a);
         }
       } catch (e) { at.disabled = false; at.textContent = '附件讀不到，再試一次'; }
     };

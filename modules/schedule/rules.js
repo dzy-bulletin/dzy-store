@@ -28,6 +28,8 @@ const hm = (m) => { const h = Math.floor(m / 60), r = m % 60; return r ? `${h} �
 const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
 
 /** 某人某天適用的身分條款（依 from_date 生效） */
+export const FT_OT_MAX = 2;                                            // 正職休息日加班每期上限（天）
+
 export function termAt(terms, emp, date) {
   let t = null;
   for (const x of (terms[emp] || [])) if (x.from_date <= date && (!t || x.from_date >= t.from_date)) t = x;
@@ -116,8 +118,9 @@ export function checkPeriod(ctx) {
   for (const st of ctx.staff) {
     const e = st.emp_id, who = st.name;
     const mine = ctx.days[e] || {};
-    const t0 = termAt(ctx.terms, e, start);
     const inPeriod = dates.filter(d => employed(st, d));
+    // 制度別看「這期在職第一天」的身分：期中才報到、身分從報到日起算時，期首那天沒有身分，不能因此整段跳過檢查（2026-10-11 審查）
+    const t0 = inPeriod.length ? termAt(ctx.terms, e, inPeriod[0]) : null;
     if (!inPeriod.length) {
       for (const d of dates) if (mine[d] && mine[d].shift_id) add('C6', 'block', e, d, `${who} ${md(d)} 不在職（到職 ${st.hire_date || '—'}、離職 ${st.leave_date || '—'}），不能排班`);
       continue;
@@ -193,6 +196,9 @@ export function checkPeriod(ctx) {
         const rh = inPeriod.filter(d => mine[d] && (mine[d].day_type === 'R' || mine[d].day_type === 'H')).length;
         if (rh < needRH) add('F2', 'block', e, start, `${who} 這期${fullPeriod ? '' : `（在職 ${inPeriod.length} 天）`}例假加休息日只有 ${rh} 天，至少要 ${needRH} 天`);
       }
+      // 休息日加班每人每期最多 2 天：自動排班自己守，手動排超過只提醒（2026-10-11 Eason 審查決定 3）
+      const otDays = inPeriod.filter(d => mine[d] && mine[d].day_type === 'H' && mine[d].shift_id);
+      if (otDays.length > FT_OT_MAX) add('F8', 'warn', e, otDays[FT_OT_MAX], `${who} 這期排了 ${otDays.length} 天休息日加班，超過每期 ${FT_OT_MAX} 天（要付加班費）`);
       const normal = dates.reduce((a, d) => a + (mine[d] && mine[d].day_type === 'W' ? Math.min(mins[d].work, FT_DAY_NORMAL) : 0), 0);
       if (normal > PERIOD_NORMAL) add('F5', 'info', e, end, `${who} 這期正常工時 ${hm(normal)}，超過 160 小時的部分要付加班費`);
       const credit = dates.reduce((a, d) => a + mins[d].normal + (mine[d] && mine[d].day_type === 'L' ? LEAVE_MIN : 0), 0);

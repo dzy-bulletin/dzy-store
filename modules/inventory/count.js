@@ -1,6 +1,6 @@
 // 攤車庫存／現場庫存（同一份邏輯，照正本 684–927 行）：每個分類一張卡，裡面是盤點列（品名、規格、數量、金額），
 // 底下用下拉選商品加一列；可改分類名稱、刪分類、一鍵清除數量。輸入只改記憶體＋標記待存，3 秒後自動存（見 state.js）。
-import { esc } from '../../js/ui.js';
+import { esc, confirmBox } from '../../js/ui.js';
 import { S, zoneItems, zoneCats, addLine, delLine, clearQty, touch, flushNow, track, paintStatus } from './state.js';
 import { api } from '../../js/api.js';
 import { findProduct, itemValue, fmt, grandTotal } from './calc.js';
@@ -64,13 +64,20 @@ export function renderZone(ctx, zone) {
     const inp = e.target, rowEl = inp.closest('.inv-row'); if (!rowEl) return;
     const sec = secOf(inp), item = zoneItems(zone)[catOf(inp)].find(i => i.id === rowEl.dataset.id); if (!item) return;
     const f = inp.dataset.f;
-    if (f === 'qty') item.qty = parseFloat(inp.value) || 0;                 // 810 updateInvQty
-    else if (f === 'spec') item.spec = parseFloat(inp.value) || 1;          // 823 updateInvMeta
+    const v = parseFloat(inp.value);
+    // 數量不收負數、規格要大於 0：伺服器會整批退回，一格錯整區都存不進去（2026-10-11 審查）
+    if (f === 'qty') { if (v < 0) inp.value = '0'; item.qty = v > 0 ? v : 0; }             // 810 updateInvQty
+    else if (f === 'spec') { if (!(v > 0)) return; item.spec = v; }                         // 823 updateInvMeta；打到一半（0、0.）先不改，離開欄位時還原
     else return;
     touch(zone, item.id); refresh(sec, rowEl);
   });
   zoneEl.addEventListener('change', e => {
     const inp = e.target;
+    if (inp.dataset.f === 'spec') {
+      const rowEl = inp.closest('.inv-row'), item = rowEl && zoneItems(zone)[catOf(inp)].find(i => i.id === rowEl.dataset.id);
+      if (item && !(parseFloat(inp.value) > 0)) inp.value = item.spec;
+      return;
+    }
     if (inp.dataset.f === 'name') {
       const rowEl = inp.closest('.inv-row'), item = zoneItems(zone)[catOf(inp)].find(i => i.id === rowEl.dataset.id);
       if (item) { item.name = inp.value; touch(zone, item.id); }
@@ -93,7 +100,7 @@ export function renderZone(ctx, zone) {
       delLine(zone, sec.dataset.cat, b.closest('.inv-row').dataset.id); redrawSec(sec); snack('已刪除品項');
     } else if (act === 'delcat') {
       const cat = sec.dataset.cat;
-      if (!confirm(`確定刪除「${cat}」分類？\n分類內所有品項將一併刪除，此動作無法復原。`)) return;
+      if (!(await confirmBox(`確定刪除「${cat}」分類？\n分類內所有品項將一併刪除，此動作無法復原。`, '刪除'))) return;   // 不用原生 confirm()：LINE 內嵌瀏覽器不可靠（2026-10-11 審查）
       await saveCats(zoneCats(zone).filter(c => c !== cat), []);
     }
   });
@@ -114,10 +121,10 @@ export function renderZone(ctx, zone) {
     if (zoneCats(zone).includes(nn)) { inp.value = '【' + old + '】'; snack('分類已存在'); return; }
     if (await saveCats(zoneCats(zone).map(c => (c === old ? nn : c)), [{ from: old, to: nn }])) snack('已重新命名：' + nn);
   }
-  el.querySelector('[data-act=clear]').onclick = () => {
+  el.querySelector('[data-act=clear]').onclick = async () => {
     const n = Object.values(zoneItems(zone)).reduce((c, arr) => c + (arr || []).filter(i => parseFloat(i.qty) > 0).length, 0);
     if (!n) { snack(LABEL[zone] + '目前沒有數量可清除'); return; }
-    if (!confirm(`確定清除「${LABEL[zone]}」全部 ${n} 筆數量？\n（品項與規格會保留，只把數量歸零）`)) return;
+    if (!(await confirmBox(`確定清除「${LABEL[zone]}」全部 ${n} 筆數量？\n（品項與規格會保留，只把數量歸零）`, '清除'))) return;
     clearQty(zone); renderZone(ctx, zone); snack('已清除' + LABEL[zone] + '數量');
   };
   el.querySelector('[data-act=addcat]').onclick = async () => {

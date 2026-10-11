@@ -6,7 +6,7 @@
 //       → 3 逐日配對（先滿足最少人數，用增廣路徑做二分圖配對）→ 4 修復（同週對調休假日）→ 5 整期檢查，沒有「擋」才回傳
 import { periodDates, addDays } from './period.js';
 import { shiftMinutes, gapMinutes } from './hours.js';
-import { checkPeriod, termAt, employed, MIN_GAP } from './rules.js';
+import { checkPeriod, termAt, employed, MIN_GAP, FT_OT_MAX } from './rules.js';
 
 const DAY_MAX = 12 * 60, REPAIR_MAX = 200;
 const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
@@ -71,6 +71,25 @@ function priorRun(ctx, e, start) {
   return run;
 }
 
+/** 期中到職／離職的正職：各週休假數，加總＝檢查規則 F2 的 ceil(在職天數×8/28)（2026-10-11 審查：原本每週各自四捨五入，28 個報到日有 12 個排不出來）。
+ *  整週給 2 天，不滿一週的按比例取整數，差額依餘數大小補到不滿一週的那幾週（不超過該週在職天數）。整期在職或計時回 null（照原本每週算）。 */
+function ftPartialQuota(ctx, st, dates) {
+  const inP = dates.filter(d => employed(st, d));
+  if (!inP.length || inP.length === 28 || (termAt(ctx.terms, st.emp_id, inP[0]) || {}).kind !== 'ft') return null;
+  const lens = [0, 1, 2, 3].map(w => dates.slice(w * 7, w * 7 + 7).filter(d => employed(st, d)).length);
+  const raw = lens.map(n => (n === 7 ? 2 : 2 * n / 7));
+  const q = raw.map(Math.floor);
+  let left = Math.ceil(inP.length * 8 / 28) - q.reduce((a, b) => a + b, 0);
+  const order = [0, 1, 2, 3].filter(w => lens[w] > 0 && lens[w] < 7).sort((a, b) => (raw[b] - q[b]) - (raw[a] - q[a]) || a - b);
+  while (left > 0) {
+    const w = order.find(i => q[i] < lens[i]) ?? [0, 1, 2, 3].find(i => q[i] < lens[i]);
+    if (w === undefined) break;
+    q[w]++; left--;
+    const at = order.indexOf(w); if (at >= 0) order.push(order.splice(at, 1)[0]);
+  }
+  return q;
+}
+
 /** 2. 排日別：回傳 { emp: { date: 'off'|'work'|'fixed' } }，以及 R／H 標記 */
 function planOffDays(ctx, dates, fixed) {
   const plan = {};
@@ -85,12 +104,13 @@ function planOffDays(ctx, dates, fixed) {
     plan[e] = {};
     const limit = (termAt(ctx.terms, e, dates[0]) || {}).kind === 'pt' ? 6 : 12;
     let run = priorRun(ctx, e, dates[0]);
+    const quota = ftPartialQuota(ctx, st, dates);
     for (let w = 0; w < 4; w++) {
       const wk = dates.slice(w * 7, w * 7 + 7).filter(d => employed(st, d));
       const free = wk.filter(d => !fixed[e][d]);
       const pinnedOff = free.filter(d => (pinOf(ctx, e, d) || {}).kind === 'off');
       const mustWork = new Set(free.filter(d => { const p = pinOf(ctx, e, d); return p && p.kind !== 'off'; }));
-      const need = wk.length === 7 ? offsPerWeek(ctx, e, wk[0]) : Math.round(offsPerWeek(ctx, e, wk[0]) * wk.length / 7);
+      const need = quota ? quota[w] : wk.length === 7 ? offsPerWeek(ctx, e, wk[0]) : Math.round(offsPerWeek(ctx, e, wk[0]) * wk.length / 7);
       const k = Math.max(need, pinnedOff.length);
       const cand = free.filter(d => !mustWork.has(d) && !pinnedOff.includes(d));
       let best = null, bestScore = Infinity, bestRun = run;
@@ -269,7 +289,8 @@ export function autoSchedule(ctx, opts) {
     fixed[e] = {};
     for (const d of dates) {
       const c = (ctx.days[e] || {})[d];
-      if (c && (c.day_type === 'L' || (keepManual && c.source === 'manual'))) fixed[e][d] = c;
+      // 休息日加班（H＋班）一律保留，連「全部重排」也不動：只能由店長手動改回休息日（Eason 2026-10-11，加班費不能因重排消失）
+      if (c && (c.day_type === 'L' || (c.day_type === 'H' && c.shift_id) || (keepManual && c.source === 'manual'))) fixed[e][d] = c;
       const p = pinOf(ctx, e, d);
       if (p && p.kind === 'shift' && !fixed[e][d]) fixed[e][d] = { day_type: 'W', shift_id: p.shift_id, leave: null, source: 'pin' };
     }
@@ -312,7 +333,7 @@ export function autoSchedule(ctx, opts) {
 
   // 5. 還是缺人：正職的休息日改成「休息日加班」來補（Eason 2026-10-11：只在人手不夠時才用；每人每期最多 2 天，
   //    連續上班最多 12 天由 F6 把關；加班分鐘由 rules 算進每月加班）。每補一格都整期重驗，有新的「擋」就退回。
-  const OT_PER_PERIOD = 2;
+  const OT_PER_PERIOD = FT_OT_MAX;
   const otUsed = {};
   for (const st of ctx.staff) otUsed[st.emp_id] = dates.filter(d => out[st.emp_id][d] && out[st.emp_id][d].day_type === 'H' && out[st.emp_id][d].shift_id).length;
   const blockCount = (rs) => rs.filter(r => r.level === 'block').length;

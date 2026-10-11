@@ -93,6 +93,7 @@ export function renderEntry(ctx) {
   }
   function drawTax() {
     const amount = Number($('cbAmount').value) || 0, t = splitTax(amount, D.hasInvoice);
+    if (amount && !Number.isInteger(amount)) { $('cbTax').textContent = '金額請填整數（元），不能有小數點'; return; }
     $('cbTax').innerHTML = amount
       ? `未稅 <b>${t.net.toLocaleString('en-US')}</b>　稅額 <b>${t.tax.toLocaleString('en-US')}</b>　合計 <b>${amount.toLocaleString('en-US')}</b>`
       : (D.hasInvoice ? '有發票：系統會自動拆未稅與稅額' : '沒發票：未稅＝金額，稅額 0');
@@ -149,6 +150,7 @@ export function renderEntry(ctx) {
       amount: Number($('cbAmount').value), hasInvoice: !!D.hasInvoice, photoBase64: D.photoBase64 };
     if (!payload.photoBase64) delete payload.photoBase64;
     if (!payload.date || !payload.name || !(payload.amount > 0)) return showMsg('cbErr', '日期、項目名稱、金額都要填，金額要大於 0。');
+    if (!Number.isInteger(payload.amount)) return showMsg('cbErr', '金額請填整數（元），不能有小數點。');   // 小數會讓未稅＋稅額對不上合計（2026-10-11 審查）
     if (drawLock()) return showMsg('cbErr', '這個月已經結帳鎖定，不能再新增。');
     payload.clientToken = tokenOf(payload);
     // 送出前先記下現在有哪些單號：逾時後要靠這份名單認出「哪一筆是剛剛新增的」，用單號差集而不是只比內容——店長真的可能連記兩筆一模一樣的

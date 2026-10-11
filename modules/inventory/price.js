@@ -1,7 +1,7 @@
 // 商品價格（照正本「商品管理」984–1115 行）＋異常通知門檻（正本 1118–1165，原本藏在「長按總金額 3 秒」的後台，這裡直接放在每個商品那一列）。
 // 單位成本＝價格÷規格；門檻是「盤點列金額（元）」，低於「低於」的算偏低、高於「高於」的算偏高，留空＝不設定。
 // 欄位改完離開（change）就存；存不成功狀態燈會顯示失敗，按狀態燈重試。
-import { esc } from '../../js/ui.js';
+import { esc, confirmBox } from '../../js/ui.js';
 import { api } from '../../js/api.js';
 import { S, track, flushNow } from './state.js';
 import { pgForProduct, fmtpg } from './calc.js';
@@ -54,7 +54,7 @@ export function renderPrice(ctx) {
     }
     const f = inp.dataset.f;                                                  // 1061–1073 pUpd
     if (f === 'name' || f === 'unit') { if (f === 'name' && !inp.value.trim()) { inp.value = p.name; return; } p[f] = inp.value.trim() || (f === 'unit' ? '克' : p.name); }
-    else p[f] = parseFloat(inp.value) || 0;
+    else { const v = parseFloat(inp.value); if (v < 0) inp.value = '0'; p[f] = v > 0 ? v : 0; }     // 不收負數（伺服器會退回）
     if (f === 'spec' && !(p.spec > 0)) p.spec = 0;
     tr.querySelector('.cmp').textContent = fmtpg(pgForProduct(p));
     if (f === 'name') Object.values([S.data.cartItems, S.data.stockItems]).forEach(m => Object.values(m).forEach(arr => arr.forEach(i => { if (i.pid === p.id) i.name = p.name; })));   // 正本 syncInvItemMeta：只同步品名
@@ -65,7 +65,7 @@ export function renderPrice(ctx) {
     const act = b.dataset.act;
     if (act === 'del') {
       const tr = b.closest('tr'), p = productOf(tr), cat = tr.closest('.inv-pcat').dataset.cat;
-      if (!confirm('確定刪除此商品？攤車與現場庫存中同品項的盤點資料將一併自動移除。')) return;       // 1075
+      if (!(await confirmBox('確定刪除此商品？攤車與現場庫存中同品項的盤點資料將一併自動移除。', '刪除'))) return;       // 1075
       try {
         await flushNow();
         await track('del:' + p.id, () => api('POST', '/m/inventory/deleteProduct', { id: p.id }));

@@ -31,7 +31,7 @@ export function paintStatus() {
   const st = S.status;
   let text, cls;
   if (st.kind === 'saving') { text = '存檔中…'; cls = 'saving'; }
-  else if (st.kind === 'fail') { text = '存檔失敗（按這裡重試）'; cls = 'fail'; }
+  else if (st.kind === 'fail') { text = '存檔失敗' + (st.msg ? '：' + st.msg : '') + '（按這裡重試）'; cls = 'fail'; }   // 原因直接顯示，手機沒辦法滑鼠移上去看
   else if (dirtyCount() > 0) { text = '待存（停手 3 秒自動存）'; cls = 'wait'; }
   else if (st.kind === 'ok') { text = '已存 ' + st.hm; cls = 'ok'; }
   else { text = '已讀取最新資料'; cls = 'idle'; }
@@ -107,7 +107,8 @@ export function flushNow() {
       }
     }
     S.saving--;
-    if (failed) { setStatus('fail', failed.message); clearTimeout(S.timer); S.timer = setTimeout(() => { flushNow(); }, 10000); }
+    // 資料本身不對（BAD_INPUT）重送也不會過：不自動重試，等店長改好再存（2026-10-11 審查）
+    if (failed) { setStatus('fail', failed.message); clearTimeout(S.timer); if (failed.code !== 'BAD_INPUT') S.timer = setTimeout(() => { flushNow(); }, 10000); }
     else if (S.saving === 0) { setStatus('ok'); }
     paintStatus();
   };

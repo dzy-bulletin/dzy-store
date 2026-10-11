@@ -57,7 +57,8 @@ export function renderApprove(ctx) {
   });
 
   // ---------- 某天的名單（manager.html:1540–1590、1840–1930）----------
-  const cacheable = d => !!d && d < C.taipeiToday();          // 嚴格早於今天（台北）才快取
+  // 昨天以前才快取（昨天不快取）：跨夜班同仁午夜後才打下班卡，掛在昨天，快取會一直顯示舊的（2026-10-11 審查）
+  const cacheable = d => !!d && d < C.addDaysStr(C.taipeiToday(), -1);
   function prefetch(date) {                                   // 背景預抓前幾天，‹ 幾乎瞬間；循序一次一天（原頁抓 6 天，這裡經營運系統轉送，縮成 3 天）
     const targets = []; for (let i = 1; i <= 3; i++) targets.push(C.addDaysStr(date, -i));
     (function next() {

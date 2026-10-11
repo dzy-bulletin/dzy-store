@@ -12,6 +12,7 @@ export function renderStaff(ctx) {
   const shifts = D.shifts.filter((s) => s.active);
   const asOf = D.dates[0];
   const noClock = D.meta.clockAlias === null;
+  const noDuty = !noClock && D.meta.dutyOn === false;          // 有打卡但沒開出勤核定：不同步名冊、不能帶入實際出勤、不能新增（要先開出勤核定）
   const card = (st) => {
     const t = termAt(D.terms, st.emp_id, asOf) || {};
     const lv = st.hire_date ? leaveOf(t, st.hire_date, D.today) : null;
@@ -44,8 +45,8 @@ export function renderStaff(ctx) {
     ${hired.link ? `<details class="mt" id="hiLinkBox"><summary>舊版專屬打卡連結（沒用 LINE 打卡的人才需要）</summary><p class="hint">用 Safari 開 → 加入主畫面，以後都從主畫面進。</p><span class="du-link" id="hiLink">${esc(hired.link)}</span> <button type="button" class="btn sm ghost" id="hiCopy">複製連結</button></details>` : ''}`;
   el.innerHTML = `
   <div class="card"><h2>同仁</h2>
-    <p class="hint">${noClock ? '這家店沒有打卡系統，同仁只存在排班裡。' : '姓名與在職跟打卡系統的名冊同步（以打卡的員工編號對人）。'}每個人都要設定正職或計時、填報到日期才能排班。</p>
-    ${noClock ? '' : `<div class="row"><button type="button" class="btn ghost" id="stActuals">帶入 10/19–10/31 實際出勤</button><span class="hint">11 月第一期要接著算連續上班天數與換班間隔，排之前按一次。</span></div>`}
+    <p class="hint">${noClock ? '這家店沒有打卡系統，同仁只存在排班裡。' : noDuty ? '這家店還沒開通「出勤核定」，同仁名單不會跟打卡系統同步，也不能新增同仁；需要的話請管理者開通。' : '姓名與在職跟打卡系統的名冊同步（以打卡的員工編號對人）。'}每個人都要設定正職或計時、填報到日期才能排班。</p>
+    ${noClock || noDuty ? '' : `<div class="row"><button type="button" class="btn ghost" id="stActuals">帶入 10/19–10/31 實際出勤</button><span class="hint">11 月第一期要接著算連續上班天數與換班間隔，排之前按一次。</span></div>`}
     <div id="stMsg" class="okmsg" role="status">${esc(staffMsg || '')}</div></div>
   <div class="card" id="hiCard"><h2>新增同仁</h2>
     <p class="hint">${noClock ? '填好按「新增同仁」就會出現在下面的清單。' : '填好按「新增同仁」，系統會<b>同時在打卡系統建立他的帳號</b>，不用再到「出勤核定 › 員工名冊」做一次。'}報到日之前不會排到他。</p>
