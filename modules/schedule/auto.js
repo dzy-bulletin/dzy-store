@@ -310,6 +310,44 @@ export function autoSchedule(ctx, opts) {
     }
   }
 
+  // 5. 還是缺人：正職的休息日改成「休息日加班」來補（Eason 2026-10-11：只在人手不夠時才用；每人每期最多 2 天，
+  //    連續上班最多 12 天由 F6 把關；加班分鐘由 rules 算進每月加班）。每補一格都整期重驗，有新的「擋」就退回。
+  const OT_PER_PERIOD = 2;
+  const otUsed = {};
+  for (const st of ctx.staff) otUsed[st.emp_id] = dates.filter(d => out[st.emp_id][d] && out[st.emp_id][d].day_type === 'H' && out[st.emp_id][d].shift_id).length;
+  const blockCount = (rs) => rs.filter(r => r.level === 'block').length;
+  const shortOn = (d) => { const n = needOf(ctx, d); let k = 0; for (const sid in n) k += Math.max(0, n[sid].min - ctx.staff.filter(x => employed(x, d) && (out[x.emp_id][d] || {}).shift_id === sid).length); return k; };
+  const gaveUp = new Set();
+  for (let guard = 0; guard < REPAIR_MAX; guard++) {
+    const sh = res.find(r => r.code === 'D1' && !gaveUp.has(r.date));
+    if (!sh) break;
+    const d = sh.date;
+    const need = needOf(ctx, d);
+    const lacking = Object.keys(need).filter(sid => ctx.staff.filter(x => (out[x.emp_id][d] || {}).shift_id === sid).length < need[sid].min);
+    let done = false;
+    const cands = ctx.staff.filter(st => {
+      const e = st.emp_id, c = out[e][d], t = termAt(ctx.terms, e, d);
+      return t && t.kind === 'ft' && c && c.day_type === 'H' && !c.shift_id && c.source !== 'manual' && otUsed[e] < OT_PER_PERIOD && (pinOf(ctx, e, d) || {}).kind !== 'off';
+    }).sort((x, y) => otUsed[x.emp_id] - otUsed[y.emp_id] || (x.emp_id < y.emp_id ? -1 : 1));
+    for (const st of cands) {
+      for (const sid of lacking) {
+        if (!allowedOf(ctx, st.emp_id, d).includes(sid)) continue;
+        const before = out[st.emp_id][d];
+        const short0 = shortOn(d);
+        out[st.emp_id][d] = { day_type: 'H', shift_id: sid, leave: null, source: 'auto' };
+        const tres = checkPeriod(merged(ctx, dates, out));
+        if (blockCount(tres) <= blockCount(res) && shortOn(d) < short0) {
+          res = tres; otUsed[st.emp_id]++; done = true;
+          problems.push(`${st.name} ${md(d)} 人手不夠，排休息日加班（要付加班費）`);
+          break;
+        }
+        out[st.emp_id][d] = before;
+      }
+      if (done) break;
+    }
+    if (!done) gaveUp.add(d);                                            // 這一天補不了：留給店長看「缺人」，換下一天
+  }
+
   const blocks = res.filter(r => r.level === 'block');
   if (blocks.length) return { ok: false, days: null, problems: problems.concat(blocks.map(b => b.msg)), results: res };
   return { ok: true, days: out, problems, results: res };

@@ -91,9 +91,12 @@ export async function schedule(action, me, b, db, s) {
       const g = guard(false); if (g) return g;
       for (const c of b.cells || []) {
         if (!dates.includes(c.date) || !st.staff.some((x) => x.emp_id === c.emp_id)) return fail('BAD_INPUT', '格子的人或日期不在這一期');
-        if (c.clear) { if (st.days[c.emp_id]) delete st.days[c.emp_id][c.date]; continue; }
+        const pv = (st.days[c.emp_id] || {})[c.date];
+        const otLocked = pv && pv.day_type === 'H' && pv.shift_id;
+        if (c.clear) { if (otLocked) return fail('BAD_INPUT', '這天是休息日加班，不能清空；不需要上班請改回休息日'); if (st.days[c.emp_id]) delete st.days[c.emp_id][c.date]; continue; }
         const cell = { day_type: c.day_type, shift_id: c.shift_id || null, leave: c.leave || null };
         const err = comboError(cell, hol, c.date); if (err) return fail('BAD_INPUT', err);
+        if (otLocked && cell.day_type === 'W') return fail('BAD_INPUT', '這天是休息日加班（要付加班費），不能改成一般工作日；不需要上班可以改回休息日');
         (st.days[c.emp_id] = st.days[c.emp_id] || {})[c.date] = Object.assign(cell, { source: 'manual' });
       }
       const v = bump(); recheckNext(); return ok({ version: v });
