@@ -140,7 +140,9 @@ export function renderAdd(ctx) {
       fresh = { 品名: name, 品類: cat, 單位: unit, 單位成本: cost, 停用: false };
     } else if (item.停用) return showMsg('lsErr', '這個品項已停用，請先到成本設定啟用');
     const input = { 日期: $('lsDate').value, 品類: cat, 耗損量: qty, 原因: reason, 原因說明: $('lsNote').value.trim(), 備註: $('lsMemo').value.trim() };
-    const p = pendingFor(JSON.stringify([input, name, fresh && [fresh.單位, fresh.單位成本]]));
+    // 識別只看使用者填的內容，不看「是不是新品項」：新品項第一次送出時 saveItem 成功、addLoss 逾時，重按時品項已存在（fresh 變 null），
+    // 若把 fresh 算進識別就會換新 id、記成兩筆（2026-10-12 Codex 審查）
+    const p = pendingFor(JSON.stringify([input, name]));
     btn.disabled = true; const old = btn.textContent; btn.textContent = '送出中';
     try {
       if (fresh) { const d = await call('saveItem', { item: fresh }); S.items = d.items || S.items; item = findItem(name) || fresh; }

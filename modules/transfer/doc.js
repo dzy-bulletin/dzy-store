@@ -21,7 +21,7 @@ export function renderDoc(ctx) {
 
   const reasonOpts = S.reasons.map(r => `<option value="${esc(r.code)}">${esc(r.name)}</option>`).join('');
   const rows = items.map(it => {
-    const plan = Number(it['應撥數量']) || 0, got = it['實收數量'], idx = String(it['列序']);
+    const plan = Number(it['應撥數量']) || 0, got = it['實收數量'], idx = esc(String(it['列序']));   // 列序是調撥系統產生的數字，仍照規矩跳脫（2026-10-12 Codex 審查）
     const diff = got === '' || got === null ? null : round2(Number(got) - plan);
     let body = `<div class="xf-qty">應撥 <b>${plan}</b> ${esc(it['單位'])}`;
     if (diff !== null) { body += `　實收 <b>${esc(got)}</b>`; if (diff !== 0) body += `　<span class="xf-gap">${diff > 0 ? '+' + diff : diff}　${esc(reasonName(it['差異原因代碼']))}</span>`; }

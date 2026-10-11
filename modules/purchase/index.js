@@ -182,7 +182,7 @@ async function renderMine(ctx) {
         const ret = s.status === 'returned';
         return `<div class="slip${ret ? ' ret' : ''}" data-id="${esc(s.id)}"><div class="row"><b class="grow">${esc(s.vendor_name || '（未指定廠商）')}</b>
           <span class="tag ${STATUS_CLS[s.status] || ''}" data-status="${esc(s.status)}">${esc(STATUS_TEXT[s.status] || s.status)}</span></div>
-          <div class="hint" style="margin:2px 0 0">${esc(s.id)}　${fmtTime(s.uploaded_at)}　${s.photo_count || 0} 張照片</div>
+          <div class="hint" style="margin:2px 0 0">${esc(s.id)}　${fmtTime(s.uploaded_at)}　${esc(s.photo_count || 0)} 張照片</div>
           ${ret ? `<div class="err" style="margin-top:4px">請重新拍照上傳這張貨單${s.return_reason ? '：' + esc(s.return_reason) : ''}</div>` : ''}
           <button class="btn ghost sm mt" type="button" data-photos="${esc(s.id)}">看照片</button>
           <div class="thumbs" hidden></div></div>`;

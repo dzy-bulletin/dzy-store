@@ -48,11 +48,14 @@ export function call(action, body) {
 export const sortMem = list => list.filter(m => m && m.name != null).map(m => ({ ...m, name: String(m.name) })).map((m, i) => [m, i]).sort((a, b) => (b[0].uses || 0) - (a[0].uses || 0) || a[1] - b[1]).map(x => x[0]);
 
 export async function loadBoot() {
+  const k = S.key;
   const d = await call('bootstrap', {});
+  // 換了登入（例如被登出後改登別家店）：上一個帳號晚到的回應不寫進來（2026-10-12 Codex 審查）
+  if (S.key !== k) return;
   S.me = d.me || null; S.nodes = d.nodes || []; S.reasons = d.reasons || []; S.mem = sortMem(d.items || []); S.cats = d.itemCats || S.cats; S.today = d.today || '';
   S.loaded = true;
 }
-export async function refreshMem() { try { const d = await call('bootstrap', {}); S.mem = sortMem(d.items || []); S.reasons = d.reasons || S.reasons; } catch (e) { /* 沒網路就沿用舊的 */ } }
+export async function refreshMem() { const k = S.key; try { const d = await call('bootstrap', {}); if (S.key !== k) return; S.mem = sortMem(d.items || []); S.reasons = d.reasons || S.reasons; } catch (e) { /* 沒網路就沿用舊的 */ } }
 export const shortOf = name => (S.nodes.find(n => n.name === name) || {}).short || name;
 export const reasonName = code => { const r = S.reasons.find(x => x.code === code); return r ? r.name : (code || ''); };
 export const STIDX = { '草稿': 0, '已出貨': 1, '已簽收': 2, '已刪除': 3 };

@@ -79,10 +79,13 @@ export function renderPrice(ctx) {
       err.textContent = '';
       if (!name) { err.textContent = '請填入品名'; return; }
       const body = { cat, name, price: parseFloat(box.querySelector('.ap').value) || 0, spec: parseFloat(box.querySelector('.as').value) || 1, unit: box.querySelector('.au').value.trim() || '克' };
+      if (b.disabled) return;
+      b.disabled = true;                                                        // 送出中不能再按：連點會建出兩個同名商品（2026-10-12 Codex 審查）
       try {
         const r = await track('add:' + Date.now(), () => api('POST', '/m/inventory/saveProduct', body));
         S.data.products[cat].push(r.product); S.data.thresholds[r.product.id] = r.threshold || { low: null, high: 2000 };
       } catch (er) { err.textContent = er.message; return; }
+      finally { b.disabled = false; }
       renderPrice(ctx); snack('已新增：' + name);
     } else if (act === 'addcat') {                                             // 1101–1109 addPriceCat
       const name = root.querySelector('#invNewPCat').value.trim(), err = root.querySelector('#invPCatErr');

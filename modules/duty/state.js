@@ -21,8 +21,9 @@ export function setStore(code, name) {
 // 呼叫 /m/duty/<action>；回應裡的 meta（店別與休息帶）順手記下。核定通行碼失效（後台重設、換了登入）就退回輸入畫面。
 export async function call(action, body) {
   try {
-    const r = await api('POST', '/m/duty/' + action, S.asStore ? Object.assign({}, body || {}, { asStore: S.asStore }) : (body || {}));
-    if (r && r.meta) S.meta = r.meta;
+    const k = S.key, st = S.asStore;
+    const r = await api('POST', '/m/duty/' + action, st ? Object.assign({}, body || {}, { asStore: st }) : (body || {}));
+    if (r && r.meta && S.key === k && S.asStore === st) S.meta = r.meta;   // 管理者已經換店／換登入：上一家店晚到的回應不寫進來（2026-10-12 Codex 審查）
     return r;
   } catch (e) {
     if (e.code === 'FORBIDDEN' && /核定通行碼/.test(e.message)) { try { sessionStorage.removeItem(FLAG); } catch (x) {} if (S.rerender) S.rerender(); }
@@ -73,10 +74,12 @@ export function failBar(el, label, e, retry) {
 export function loadLeave() {
   if (S.leave) return Promise.resolve(S.leave);
   if (!S.leaveP) {
-    const k = S.key;
-    S.leaveP = call('payroll_leave_options').then(r => { if (S.key === k) { S.leave = r && Array.isArray(r.types) ? r : null; if (!S.leave) S.leaveP = null; } return S.leave; },
-      () => { if (S.key === k) S.leaveP = null; return null; });
+    const k = S.key, st = S.asStore;
+    const same = () => S.key === k && S.asStore === st;                   // 管理者換店後，上一家店的假別不能套到新店
+    const p = call('payroll_leave_options').then(r => { if (same() && S.leaveP === p) { S.leave = r && Array.isArray(r.types) ? r : null; if (!S.leave) S.leaveP = null; } return same() ? S.leave : null; },
+      () => { if (same() && S.leaveP === p) S.leaveP = null; return null; });
+    S.leaveP = p;
   }
   return S.leaveP;
 }
-export function staleLeave() { S.leave = null; S.leaveP = null; }
+export function staleLeave() { S.leave = null; S.leaveP = null; S.leaveStale = true; }   // leaveStale：下次換日期先重抓額度再畫名單

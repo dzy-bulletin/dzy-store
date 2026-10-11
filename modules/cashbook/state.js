@@ -54,7 +54,10 @@ export async function call(action, body) {
 
 // 登入後只打一趟：bootstrap 帶 month，設定／常用項目／鎖定月份／當月明細一次拿齊
 export async function loadAll(month) {
+  const k = S.key;
   const d = await call('bootstrap', { month });
+  // 換了登入（例如被登出後改登別家店）：上一個帳號晚到的回應不寫進來（2026-10-12 Codex 審查）
+  if (S.key !== k) return;
   S.settings = d.settings || S.settings;
   S.frequent = d.frequent || [];
   S.lockedMonths = d.lockedMonths || [];
@@ -62,7 +65,9 @@ export async function loadAll(month) {
   S.loaded = true;
 }
 export async function loadMonth(month) {
+  const k = S.key;
   const d = await call('list', { month });
+  if (S.key !== k) return;
   S.month = month; S.rows = d.rows || []; S.openId = S.editingId = null;
 }
 export const isLocked = month => S.lockedMonths.indexOf(month) >= 0;

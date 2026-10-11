@@ -69,6 +69,11 @@ export function renderApprove(ctx) {
   }
   function loadDay(dateOverride) {
     const tok = ++S.dayTok;
+    // 假別額度被清掉（核定過請假）時先重抓，再畫名單：不然新卡片拿不到額度，額度與期限的硬擋整批失效（2026-10-12 Codex 審查）
+    if (S.leaveStale) { S.leaveStale = false; const go = () => { if (tok === S.dayTok && live()) loadDayNow(dateOverride, tok); }; loadLeave().then(go, go); return; }
+    loadDayNow(dateOverride, tok);
+  }
+  function loadDayNow(dateOverride, tok) {
     if (dateOverride && S.dayCache[dateOverride]) { drawDay(dateOverride, S.dayCache[dateOverride]); prefetch(dateOverride); return; }
     box.innerHTML = '<div class="card du-center" id="duLoading">載入中…</div>';
     const body = dateOverride ? { date: dateOverride } : {};

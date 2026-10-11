@@ -117,6 +117,13 @@ export function flushNow() {
   return p;
 }
 
+// 完成盤點、列印、匯出之前用：先存，還有沒存進去的就丟錯（不能拿舊資料去完成盤點或印出來）（2026-10-12 Codex 審查）
+export async function flushStrict() {
+  await flushNow();
+  const n = dirtyCount();
+  if (n > 0) throw new Error(`還有 ${n} 筆盤點沒存進去${S.status && S.status.msg ? '（' + S.status.msg + '）' : ''}，請先按上方狀態燈重試或改正後再試`);
+}
+
 // 商品、門檻、分類這類「改完就要存」的動作：包一層，狀態燈跟著動；失敗的存起來，按狀態燈重試
 export async function track(key, fn) {
   S.saving++; setStatus('saving');

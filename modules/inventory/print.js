@@ -2,10 +2,11 @@
 // 「列印 PDF」用瀏覽器列印（另存成 PDF）、「匯出 Excel」是帶 BOM 的 CSV、「匯出資料」是舊版相容的 JSON。另有「完成盤點」把這一輪存進歷史。
 import { esc } from '../../js/ui.js';
 import { api } from '../../js/api.js';
-import { S, flushNow, track } from './state.js';
+import { S, flushStrict, track } from './state.js';
 import { buildSummary, fmt, excelRows, toCsv, exportBaseName } from './calc.js';
 import { snack } from './count.js';
 
+const saved = async () => { try { await flushStrict(); return true; } catch (e) { snack(e.message); return false; } };
 const tsOf = now => `${now.getFullYear()}/${now.getMonth() + 1}/${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
 
 // 正本匯出的 JSON 就是整個 S；這裡的形狀完全一樣，所以舊版也讀得進去
@@ -37,7 +38,7 @@ export function renderPrint(ctx) {
     ${bar}<section class="card inv-sumcard"><h2>📋 庫存彙整（攤車＋現場）<span class="inv-sumtotal" id="invSumTotal">${fmt(sm.total)}</span></h2>${rows || '<div class="inv-empty">尚無資料</div>'}</section>${miss}`;
 
   el.querySelector('#invPrintBtn').onclick = async () => {                       // 1343–1357 doPrint
-    await flushNow();
+    if (!(await saved())) return;
     const now = new Date();
     el.querySelector('#invPm').textContent = (storeName ? storeName + ' ｜ ' : '') + '盤點時間：' + tsOf(now) + '　麻的小辛辣 — 內部使用';
     const old = document.title; document.title = exportBaseName(storeName, now);
@@ -47,19 +48,19 @@ export function renderPrint(ctx) {
     setTimeout(() => window.print(), 100);
   };
   el.querySelector('#invCsvBtn').onclick = async () => {
-    await flushNow();
+    if (!(await saved())) return;
     const now = new Date();
     download(exportBaseName(storeName, now) + '.csv', toCsv(excelRows(S.data, storeName, tsOf(now))), 'text/csv;charset=utf-8'); snack('Excel 已下載');
   };
   el.querySelector('#invJsonBtn').onclick = async () => {                        // 928–938 exportConfig
-    await flushNow();
+    if (!(await saved())) return;
     download(exportBaseName(storeName, new Date()) + '.json', JSON.stringify(legacyJson(storeName), null, 2), 'application/json;charset=utf-8'); snack('資料已匯出');
   };
   el.querySelector('#invFinishBtn').onclick = async e => {
     const b = e.currentTarget, msg = el.querySelector('#invFinishMsg');
     b.disabled = true;
     try {
-      await flushNow();
+      await flushStrict();
       const r = await track('finish', () => api('POST', '/m/inventory/finish', {}));
       S.lastFinish = r.at; msg.textContent = '已完成盤點，這一輪已存進「歷史」（' + new Date(r.at).toLocaleTimeString('zh-TW', { hour12: false }) + '）'; msg.className = 'hint ok';
     } catch (er) { msg.textContent = '完成盤點失敗：' + er.message; msg.className = 'hint warn'; }

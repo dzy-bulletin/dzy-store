@@ -39,7 +39,10 @@ export async function call(action, body) {
 }
 
 export async function loadAll() {
+  const k = S.key;
   const d = await call('bootstrap', {});
+  // 換了登入（例如被登出後改登別家店）：上一個帳號晚到的回應不寫進來（2026-10-12 Codex 審查）
+  if (S.key !== k) return;
   S.items = d.items || [];
   S.mode = d.mode || 'own'; S.storeLabel = d.storeLabel || '';
   if (Array.isArray(d.categories) && d.categories.length) S.categories = d.categories;

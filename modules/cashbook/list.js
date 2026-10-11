@@ -109,6 +109,7 @@ export function renderList(ctx) {
         if (f === 'amount') patch.amount = Number(inp.value); else if (f === 'hasInvoice') patch.hasInvoice = inp.value === '1'; else patch[f] = inp.value;
       });
       if (!(patch.amount > 0) || !String(patch.name || '').trim()) return err('項目名稱要填，金額要大於 0。');
+      if (!Number.isInteger(patch.amount)) return err('金額請填整數（元），不能有小數點。');   // 同新增頁（2026-10-12 Codex 審查）
       await runBusy(btn, async () => {
         const res = await call('update', Object.assign({ id: btn.dataset.id }, patch));
         replaceRow(res.row); S.editingId = null; S.openId = null;
