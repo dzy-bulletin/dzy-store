@@ -3,7 +3,6 @@ import { esc, busy, confirmBox } from '../../js/ui.js';
 import { api } from '../../js/api.js';
 import { S, load, mutate, movePeriod, setDutyFlag, WD, md, hm, DAY_LABEL, LEAVE_LABEL, call } from './state.js';
 import { weekday, periodEnd } from './period.js';
-import { ratios } from './calc.js';
 
 const PUB_TEXT = { pending: '等待送到 LINE', sent: '已發布到 LINE', failed: '送 LINE 失敗', stale: '已被較新版本取代' };
 
@@ -29,7 +28,6 @@ export function renderBoard(ctx) {
   }
   const counts = { block: 0, warn: 0, info: 0 };
   D.results.forEach((r) => { counts[r.level]++; });
-  const rat = ratios({ staff: D.staff, days: D.days, shifts }, D.dates, D.revenue);
   const target = D.cfg && D.cfg.ratio_target;
   const narrow = window.matchMedia && window.matchMedia('(max-width: 760px)').matches;
   const view = S.view || (narrow ? 'day' : 'grid');
@@ -37,7 +35,17 @@ export function renderBoard(ctx) {
   const pub = D.meta.publication;
   const bday = (st, d) => st.birthday && st.birthday.slice(5) === d.slice(5);
 
+  const ratioCls = (r) => (r == null || !target ? '' : r < target ? ' low' : ' good');
+  // 當天總人數（Eason 2026-10-11：不分班別，只看當天幾個人上班）；需要人數＝各班最少人數加總
+  const dayTotal = (d) => staff.filter((st) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date) && ((D.days[st.emp_id] || {})[d] || {}).shift_id).length;
+  const dayNeed = (d) => Object.values(D.demand[d] || {}).reduce((a, x) => a + (x.min || 0), 0);
+  // 預估營業額以月為單位：本期碰到的每個月一格
+  const monthsHtml = (D.months || []).map((m) => `<div class="sc-month"><label for="scRev-${m.ym}">${+m.ym.slice(5)} 月預估營業額</label>
+      <input type="number" inputmode="numeric" min="0" id="scRev-${m.ym}" class="sc-mrev" data-ym="${m.ym}" value="${m.revenue == null ? '' : m.revenue}"> 元
+      <span class="hint">每工時營業額 <b class="${ratioCls(m.ratio)}">${m.ratio == null ? '—' : m.ratio.toLocaleString() + ' 元'}</b>（整月排班 ${hm(m.minutes)} 小時${target ? `，目標 ${target.toLocaleString()} 元` : ''}）</span></div>`).join('');
+
   const head = `<div class="card sc-head">
+    <div class="sc-printtitle">${esc((ctx.session && ctx.session.name) || '')} 班表　${esc(D.period)}　${md(D.dates[0])}–${md(periodEnd(D.period))}</div>
     <div class="sc-period"><button type="button" class="btn ghost sm" id="scPrev" aria-label="上一期">‹</button>
       <div><b>${esc(D.period)}</b><span class="sc-range">${md(D.dates[0])}（日）– ${md(periodEnd(D.period))}（六）</span></div>
       <button type="button" class="btn ghost sm" id="scNext" aria-label="下一期">›</button></div>
@@ -51,25 +59,24 @@ export function renderBoard(ctx) {
       ${locked ? '' : `<button type="button" class="btn" id="scAuto">自動排班</button><label class="sc-chk"><input type="checkbox" id="scAll"> 連手動改過的也重排</label>`}
       <button type="button" class="btn ${locked ? 'ghost' : ''}" id="scLock">${locked ? '解除鎖定' : '鎖定並發布'}</button>
       ${pub && (pub.status === 'failed' || pub.status === 'pending') ? '<button type="button" class="btn ghost" id="scResend">立即重送</button>' : ''}
+      <button type="button" class="btn ghost" id="scPdf">匯出 PDF</button>
       <span class="grow"></span>
       <div class="sc-seg" role="group" aria-label="檢視方式"><button type="button" id="scViewGrid" class="${view === 'grid' ? 'on' : ''}">整期</button><button type="button" id="scViewDay" class="${view === 'day' ? 'on' : ''}">單日</button></div>
     </div>
     <div id="scPw" hidden class="row mt"><input type="password" id="scPwIn" autocomplete="off" placeholder="出勤核定密碼" aria-label="出勤核定密碼"><button type="button" class="btn" id="scPwBtn">確認</button></div>
     ${D.meta.needs_recheck ? '<div class="note warn mt" role="alert">這一期已發布，但上一期改過之後，跨期的換班間隔或連續上班天數不合規定了。請解除鎖定、修正後再鎖定。</div>' : ''}
+    <div class="sc-months mt">${monthsHtml}</div>
     <div id="scMsg" class="${S.err ? 'err' : 'okmsg'}" role="status">${esc(S.err || S.msg || '')}</div>
   </div>`;
 
-  const sum = D.results.length ? `<details class="card sc-sum" ${counts.block ? 'open' : ''}><summary class="sc-sumtoggle">
+  const sum = D.results.length ? `<details class="card sc-sum"><summary class="sc-sumtoggle"><span class="sc-sumlabel">提醒</span>
       ${counts.block ? `<span class="lv block">${counts.block} 個要修正</span>` : '<span class="lv ok">沒有違反規定</span>'}
       ${counts.warn ? `<span class="lv warn">${counts.warn} 個警告</span>` : ''}${counts.info ? `<span class="lv info">${counts.info} 個提醒</span>` : ''}</summary>
       <ul class="sc-list">${D.results.slice().sort((a, b) => LV_RANK[a.level] - LV_RANK[b.level]).slice(0, 80).map((r) => `<li class="lv-${r.level}">${esc(r.msg)}</li>`).join('')}</ul></details>` : '';
 
-  const ratioCls = (r) => (r == null || !target ? '' : r < target ? ' low' : ' good');
   let body;
   if (view === 'grid') {
     const th = D.dates.map((d) => { const w = weekday(d), hol = D.holidays.days[d]; return `<th class="${w === 0 || w === 6 ? 'we' : ''}${hol ? ' hol' : ''}" title="${esc(hol || '')}">${md(d)}<small>${WD[w]}${hol ? '・國' : ''}</small></th>`; }).join('');
-    const rev = D.dates.map((d) => `<td><input type="number" inputmode="numeric" min="0" class="sc-rev" data-date="${d}" value="${D.revenue[d] == null ? '' : D.revenue[d]}" aria-label="${md(d)} 預估營業額"></td>`).join('');
-    const ratioRow = D.dates.map((d) => { const r = rat.daily[d]; return `<td class="sc-ratio${ratioCls(r.ratio)}">${r.ratio == null ? '—' : r.ratio.toLocaleString()}</td>`; }).join('');
     const rows = staff.map((st) => {
       const tds = D.dates.map((d) => {
         const c = (D.days[st.emp_id] || {})[d];
@@ -83,17 +90,15 @@ export function renderBoard(ctx) {
       }).join('');
       return `<tr><th class="sc-name" scope="row">${esc(st.name)}</th>${tds}</tr>`;
     }).join('');
-    const cnt = activeShifts.map((s) => `<tr class="sc-cnt"><th scope="row">${esc(s.name)}人數</th>${D.dates.map((d) => {
-      const n = staff.filter((st) => ((D.days[st.emp_id] || {})[d] || {}).shift_id === s.id).length, need = (D.demand[d] || {})[s.id];
-      const short = need && n < need.min;
-      return `<td class="${short ? 'short' : ''}" title="${need ? `最少 ${need.min}${need.max != null ? '、最多 ' + need.max : ''}` : '沒有設人數'}">${n}${need ? '/' + need.min : ''}</td>`;
-    }).join('')}</tr>`).join('');
+    const cnt = `<tr class="sc-cnt"><th scope="row">當天人數</th>${D.dates.map((d) => {
+      const n = dayTotal(d), need = dayNeed(d);
+      return `<td class="${need && n < need ? 'short' : ''}" title="${need ? `至少要 ${need} 人` : '沒有設人數'}">${n}${need ? '/' + need : ''}</td>`;
+    }).join('')}</tr>`;
     body = `<div class="card sc-gridcard"><div class="scroll"><table class="sc-grid">
       <thead><tr><th class="sc-name">同仁</th>${th}</tr></thead>
-      <tbody><tr class="sc-revrow"><th scope="row">預估營業額</th>${rev}</tr><tr class="sc-ratiorow"><th scope="row">每工時營業額</th>${ratioRow}</tr>${rows}${cnt}</tbody></table></div>
-      <p class="hint sc-total">整期每工時營業額：<b class="${ratioCls(rat.period.ratio)}">${rat.period.ratio == null ? '—' : rat.period.ratio.toLocaleString() + ' 元'}</b>（營業額 ${rat.period.revenue.toLocaleString()} 元 ÷ ${hm(rat.period.minutes)} 小時）${target ? `，目標 ${target.toLocaleString()} 元` : ''}</p></div>`;
+      <tbody>${rows}${cnt}</tbody></table></div></div>`;
   } else {
-    const d = S.day, r = rat.daily[d], hol = D.holidays.days[d];
+    const d = S.day, hol = D.holidays.days[d];
     const chips = D.dates.map((x) => `<button type="button" class="sc-daychip${x === d ? ' on' : ''}${(byDay[x] || []).length ? ' warn' : ''}" data-day="${x}">${md(x)}<small>${WD[weekday(x)]}</small></button>`).join('');
     const list = staff.filter((st) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date)).map((st) => {
       const c = (D.days[st.emp_id] || {})[d], x = cellText(c, shifts), iss = byCell[st.emp_id + '|' + d] || [];
@@ -102,13 +107,11 @@ export function renderBoard(ctx) {
         <span class="sc-dn">${esc(st.name)}${bday(st, d) ? ' <i class="sc-bd">生日</i>' : ''}</span><span class="sc-dv">${esc(x.t)}${s ? `<small>${esc(s.start)}–${esc(s.end)}</small>` : ''}</span>
         ${iss.length ? `<span class="sc-dmsg">${esc(iss.map((i) => i.msg).join('；'))}</span>` : ''}</button>`;
     }).join('');
-    const need = D.demand[d] || {};
-    const cnt = activeShifts.map((s) => { const n = staff.filter((st) => ((D.days[st.emp_id] || {})[d] || {}).shift_id === s.id).length, nd = need[s.id]; return `<span class="tag ${nd && n < nd.min ? 'bad' : ''}">${esc(s.name)} ${n}${nd ? '/' + nd.min : ''} 人</span>`; }).join(' ');
+    const n = dayTotal(d), nd = dayNeed(d);
+    const cnt = `<span class="tag ${nd && n < nd ? 'bad' : ''}" id="scDayCount">當天 ${n}${nd ? '/' + nd : ''} 人</span>`;
     body = `<div class="card"><div class="sc-days">${chips}</div>
       <h2 class="mt">${md(d)}（${WD[weekday(d)]}）${hol ? `<span class="tag">${esc(hol)}</span>` : ''}</h2>
-      <div class="row"><label for="scDayRev">預估營業額</label><input type="number" inputmode="numeric" min="0" id="scDayRev" class="sc-rev" data-date="${d}" value="${D.revenue[d] == null ? '' : D.revenue[d]}">
-        <span class="hint">每工時營業額：<b>${r.ratio == null ? '—' : r.ratio.toLocaleString() + ' 元'}</b></span></div>
-      <div class="row mt">${cnt}</div>
+      <div class="row">${cnt}</div>
       ${(byDay[d] || []).map((x) => `<div class="note warn mt">${esc(x.msg)}</div>`).join('')}
       <div class="sc-dlist mt">${list}</div></div>`;
   }
@@ -144,13 +147,18 @@ export function renderBoard(ctx) {
   el.querySelectorAll('.sc-c[data-emp], .sc-drow').forEach((td) => {
     td.onclick = () => { if (locked) { say('這一期已鎖定，要先解除鎖定才能修改', true); return rerender(); } S.sel = { emp: td.dataset.emp, date: td.dataset.date }; rerender(); };
   });
-  el.querySelectorAll('.sc-rev').forEach((inp) => {
+  el.querySelectorAll('.sc-mrev').forEach((inp) => {
     inp.onchange = async () => {
-      try { await mutate('saveRevenue', { values: { [inp.dataset.date]: inp.value === '' ? null : Number(inp.value) } }); say('已存營業額'); }
+      try { await call('saveRevenue', { values: { [inp.dataset.ym]: inp.value === '' ? null : Number(inp.value) } }); await load(); say('已存營業額'); }
       catch (e) { say(e.message, true); }
       rerender();
     };
   });
+  // 匯出 PDF：切到整期格子、用瀏覽器列印（選「儲存為 PDF」）；列印樣式只留班表本身（schedule.css 的 @media print）
+  q('#scPdf').onclick = () => {
+    const go = () => { try { window.print(); } catch (e) { say('這個瀏覽器不能列印，請改用電腦的 Chrome 或 Safari', true); rerender(); } };
+    if (view !== 'grid') { S.view = 'grid'; rerender(); setTimeout(go, 400); } else go();
+  };
   if (q('#scCellX')) q('#scCellX').onclick = () => { S.sel = null; rerender(); };
   if (q('#scCellOk')) q('#scCellOk').onclick = () => busy(q('#scCellOk'), async () => {
     const v = q('#scCellSel').value, cell = { emp_id: S.sel.emp, date: S.sel.date };

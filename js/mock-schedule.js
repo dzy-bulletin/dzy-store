@@ -79,13 +79,20 @@ export async function schedule(action, me, b, db, s) {
       for (const d of dates) if (st.dayDemand[d]) ov[d] = st.dayDemand[d];
       const days = {};
       for (const e in st.days) for (const d in st.days[e]) if (d >= addDays(dates[0], -13) && d <= dates[27]) (days[e] = days[e] || {})[d] = st.days[e][d];
-      const rev = {};
-      for (const d of dates) if (st.revenue[d] != null) rev[d] = st.revenue[d];
+      const months = [...new Set(dates.map((d) => d.slice(0, 7)))].map((ym) => {
+        let minutes = 0;
+        for (const x of st.staff) for (const d in (st.days[x.emp_id] || {})) {
+          const c = st.days[x.emp_id][d];
+          if (d.slice(0, 7) === ym && c.shift_id && st.shifts[c.shift_id] && (!x.hire_date || x.hire_date <= d) && (!x.leave_date || d <= x.leave_date)) minutes += shiftMinutes(st.shifts[c.shift_id]);
+        }
+        const revenue = st.revenue[ym] == null ? null : st.revenue[ym];
+        return { ym, revenue, minutes, ratio: revenue != null && minutes > 0 ? Math.round(revenue / (minutes / 60)) : null };
+      });
       const pubs = st.pubs[period] || [];
       return ok({ period, dates, today: todayTaipei(), store: me.code,
         meta: { version: r.version, locked: !!r.locked, locked_at: r.locked_at, locked_by: r.locked_by, needs_recheck: !!r.needs_recheck, publication: pubs.length ? pubs[pubs.length - 1] : null, clockAlias, lineFrom: '2026-11-01' },
         shifts: Object.values(st.shifts).sort((a, x) => a.sort - x.sort), staff: st.staff, terms: st.terms, days, actuals: st.actuals, demand: ctx.demand, demandTpl: tpl, demandOverrides: ov,
-        pins: ctx.pins, pairs: st.pairs, revenue: rev, cfg: st.cfg, holidays: hol, monthOtMin: {}, results: checkPeriod(Object.assign(ctx, { days: st.days })), roster: { synced: clockAlias !== null } });
+        pins: ctx.pins, pairs: st.pairs, months, cfg: st.cfg, holidays: hol, monthOtMin: {}, results: checkPeriod(Object.assign(ctx, { days: st.days })), roster: { synced: clockAlias !== null } });
     }
     case 'saveDays': {
       const g = guard(false); if (g) return g;
@@ -109,9 +116,12 @@ export async function schedule(action, me, b, db, s) {
       const v = bump(); recheckNext(); return ok({ ok: true, problems: res.problems, version: v });
     }
     case 'saveRevenue': {
-      const g = guard(prow(st, period).locked); if (g) return g;
-      for (const d of Object.keys(b.values || {})) { if (!dates.includes(d)) return fail('BAD_INPUT', '日期不在這一期'); const v = b.values[d]; if (v == null || v === '') delete st.revenue[d]; else if (!(Number(v) >= 0)) return fail('BAD_INPUT', '營業額要是 0 以上的整數'); else st.revenue[d] = Math.round(Number(v)); }
-      return ok({ version: bump() });
+      for (const ym of Object.keys(b.values || {})) {
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(ym)) return fail('BAD_INPUT', '月份格式不對');
+        const v = b.values[ym];
+        if (v == null || v === '') delete st.revenue[ym]; else if (!(Number(v) >= 0)) return fail('BAD_INPUT', '營業額要是 0 以上的整數'); else st.revenue[ym] = Math.round(Number(v));
+      }
+      return ok();
     }
     case 'savePins': {
       const g = guard(false); if (g) return g;

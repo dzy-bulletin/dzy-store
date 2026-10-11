@@ -64,3 +64,24 @@
   .sc-editor{bottom:8px}
   .sc-editor select{min-width:0;flex:1}
 }
+.sc-printtitle{display:none}
+.sc-months{display:grid;gap:8px}
+.sc-month{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:14px}
+.sc-month input{width:120px}
+.sc-sumlabel{font-weight:700;margin-right:4px}
+/* 匯出 PDF（瀏覽器列印）：只留標題與班表格子，橫式 A4 */
+@media print{
+  @page{size:A4 landscape;margin:8mm}
+  body{background:#fff}
+  #sidebar,header.hdr,.topbar,nav.tabs,.banner,.demo-bar,.sc-period,.sc-state,.sc-acts,#scPw,.sc-months,#scMsg,.sc-sum,.sc-editor,.note{display:none!important}
+  .sc-printtitle{display:block;font-size:16px;font-weight:700;margin:0 0 8px}
+  .card{box-shadow:none;border:0;padding:0;margin:0}
+  .main-wrap,.app{display:block;margin:0;padding:0}
+  .scroll{overflow:visible}
+  .sc-grid{font-size:10px;width:100%}
+  .sc-grid th,.sc-grid td{min-width:0;height:26px;padding:0 1px;position:static!important}
+  .sc-grid .sc-name{min-width:0;padding:0 3px}
+  .sc-c.i-block,.sc-c.i-warn,.sc-c.sel{outline:0}
+  .sc-c.pin::after{display:none}
+  .sc-c.work,.sc-c.rest,.sc-c.off,.sc-c.leave,.sc-grid thead th.hol{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
