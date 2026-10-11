@@ -36,7 +36,7 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
 <header><h1>門市操作手冊</h1><p>登入、貨單辨識、收支登記、出勤核定、耗損登記</p></header>
 <div class="wrap">
 <nav class="toc" aria-label="目錄"><b>想看哪一段</b>
-  <a href="#login">登入與改密碼</a><a href="#home">首頁</a><a href="#purchase">貨單辨識</a><a href="#cashbook">收支登記</a><a href="#duty">出勤核定</a><a href="#transfer">門市調撥</a><a href="#loss">耗損登記</a><a href="#inventory">庫存盤點</a><a href="#help">遇到問題</a></nav>
+  <a href="#login">登入與改密碼</a><a href="#home">首頁</a><a href="#purchase">貨單辨識</a><a href="#cashbook">收支登記</a><a href="#duty">出勤核定</a><a href="#transfer">門市調撥</a><a href="#loss">耗損登記</a><a href="#inventory">庫存盤點</a><a href="#board">叫貨看板</a><a href="#help">遇到問題</a></nav>
 
 <section id="login"><h2>一、登入與改密碼</h2>
   <h3>第一次登入</h3>
@@ -279,7 +279,27 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
   <figure class="shot"><img src="img/guide/25-inventory-import.jpg" width="780" height="1688" loading="lazy" alt="從舊版匯入"><figcaption>從舊版匯入</figcaption></figure>
 </section>
 
-<section id="help"><h2>九、遇到問題</h2>
+<section id="board"><h2>九、叫貨看板</h2>
+  <p>看墨竹亭總部叫貨看板上<b>自己店</b>的當期原物料使用量和建議叫貨量。營運系統會在背後幫你登入總部看板，<b>不用再輸入看板的帳號密碼</b>，也只會看到自己店的資料。</p>
+  <h3>怎麼看</h3>
+  <ol>
+    <li>點左側欄（手機是上方系統列）的 <b>叫貨看板</b>，等一下就會出現自己店的看板。</li>
+    <li>每一列是一種原物料：<b>當期使用</b>是上次叫貨日到昨天實際用掉的量，<b>建議叫貨</b>是依最近用量算出來的參考值。</li>
+    <li>點 <b>當期使用</b> 的數字（藍色有底線），會跳出這一期每天用了多少；按右上角的 <span class="btn">×</span> 或旁邊空白處關掉。</li>
+    <li>上方會寫「更新時間」。想看最新的，按 <span class="btn">重新整理</span>。</li>
+  </ol>
+  <div class="tip">建議叫貨量只是參考，實際下單請依現場庫存增減。看板的資料由總部提供，當天的用量要等當天結算後才會算進去。</div>
+  <h3>看到這些訊息時</h3>
+  <ul>
+    <li><b>叫貨看板沒有這家店的資料</b>：總部看板上沒有你們店（例如小辛辣、中央廚房），這是正常的。</li>
+    <li><b>這家店的叫貨看板帳號還沒設定</b>、<b>叫貨看板的帳號或密碼對不上</b>、<b>叫貨看板的版面改了</b>：請截圖給管理者處理。</li>
+    <li><b>叫貨看板暫時沒有回應</b>、<b>回應太久</b>：總部看板一時連不上，稍後按 <span class="btn">重新讀取</span>。</li>
+  </ul>
+  <figure class="shot"><img src="img/guide/26-board.jpg" width="780" height="1688" loading="lazy" alt="叫貨看板：本店原物料的當期使用與建議叫貨"><figcaption>叫貨看板</figcaption></figure>
+  <figure class="shot"><img src="img/guide/27-board-detail.jpg" width="780" height="1688" loading="lazy" alt="點當期使用的數字，跳出每天用量明細"><figcaption>點數字看每天明細</figcaption></figure>
+</section>
+
+<section id="help"><h2>十、遇到問題</h2>
   <ul>
     <li><b>登入不了</b>：確認門市代號、密碼。忘記密碼請找管理者重設。被鎖住請等 15 分鐘。</li>
     <li><b>左側欄看不到某個系統</b>：那項功能還沒開給你們店，請洽管理者。</li>

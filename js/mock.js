@@ -31,11 +31,29 @@ function boardMock(action, me, b, db) {
   if (action !== 'view') return fail('NOT_FOUND', '找不到這個功能');
   if ((((E2E().board || {}).unset) || []).includes(me.code)) return fail('FORBIDDEN', '這家店的叫貨看板帳號還沒設定，請聯絡管理者');
   db.boardN = (db.boardN || 0) + 1;
+  // 版型照營運系統重建後的叫貨看板（server/proxy/board.js onlyStore）：本店一區＋點數字看每日明細。數字是假的
+  const esc = v => String(v).replace(/[<>&"]/g, c => `&#${c.charCodeAt(0)};`);
+  const items = [['肉燥', '央廚/冷凍', 1.3, 2, '包'], ['滷豆干', '央廚/冷凍', 1.5, 4, '包'], ['鮮肉抄手', '央廚/冷凍', 7.6, 15, '包'], ['紅油', '央廚/常溫', 3.6, 8, '包'], ['麵', '自買', 10.7, 24, '包'], ['大陸妹', '自買', 9.5, 13, '斤']];
+  const details = items.map(([n, , u, , unit]) => ({ name: n, unit, total: String(u), days: [{ d: '10/09', w: '五', v: +(u * 0.45).toFixed(2) }, { d: '10/10', w: '六', v: +(u * 0.55).toFixed(2) }] }));
   const html = `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>叫貨看板</title>
-    <style>body{font-family:-apple-system,"PingFang TC",sans-serif;margin:0;padding:16px;background:#f4f5f7;color:#0f172a}table{border-collapse:collapse;width:100%;background:#fff}td,th{border:1px solid #e2e8f0;padding:8px;text-align:left}</style></head>
-    <body><h1 id="bdMockTitle">${String(me.name).replace(/[<>&"]/g, c => `&#${c.charCodeAt(0)};`)}・叫貨看板（假資料）</h1><p id="bdMockN">第 ${db.boardN} 次讀取</p>
-    <table><tr><th>品項</th><th>本期使用</th><th>建議訂貨</th></tr><tr><td>雞腿排</td><td>42</td><td>45</td></tr><tr><td>燃麵</td><td>120</td><td>130</td></tr></table>
-    <script>document.body.dataset.js='ok'</script></body></html>`;
+    <style>*{box-sizing:border-box}body{font-family:-apple-system,"PingFang TC",sans-serif;margin:0;background:#f4f5f7;color:#0f172a}.wrap{max-width:860px;margin:0 auto;padding:16px}
+    h1{font-size:19px;margin:0 0 4px}.sub{color:#64748b;font-size:12.5px;line-height:1.6;margin:0 0 12px}.store{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px}
+    h2{font-size:17px;margin:0 0 6px}.note{font-size:12.5px;color:#475569;margin:0 0 10px}table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #eef2f6;padding:9px 6px;text-align:left;font-size:14px}
+    th{color:#64748b;font-size:12px}td small{display:block;color:#94a3b8;font-size:11px}.use-link{border:0;background:none;color:#0070f3;font:inherit;text-decoration:underline;cursor:pointer;padding:0}
+    .num{font-weight:800}.modal[hidden]{display:none}.modal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}.modal-bg{position:absolute;inset:0;background:rgba(15,23,42,.45)}
+    .modal-card{position:relative;background:#fff;border-radius:14px;padding:16px;width:min(360px,90vw)}.modal-hd{display:flex;justify-content:space-between;font-weight:800}.modal-x{border:0;background:none;font-size:20px}
+    .modal-sub{color:#64748b;font-size:12px;margin:4px 0 10px}.dd-row{display:flex;gap:8px;font-size:13px;padding:4px 0}.modal-foot{text-align:right;margin-top:8px}</style></head>
+    <body><div class="wrap"><header><h1 id="bdMockTitle">墨竹亭 · 叫貨看板（${esc(me.name)}）</h1><p class="sub">當期＝上次叫貨日到昨天。建議叫貨量僅供參考，實際下單請由店長判斷。<span id="bdMockN">（示範資料・第 ${db.boardN} 次讀取）</span></p></header>
+    <section class="store"><h2>${esc(me.name)}</h2><p class="note">下次叫貨日：10/12（週一）。點「當期使用」的數字可看每天明細。</p>
+    <table><thead><tr><th>原物料</th><th>當期使用</th><th>建議叫貨</th></tr></thead><tbody>
+    ${items.map(([n, cat, u, sug, unit], i) => `<tr><td>${n}<small>${cat}</small></td><td><button type="button" class="use-link" data-idx="${i}">${u} ${unit}</button></td><td class="num">${sug} ${unit}</td></tr>`).join('')}
+    </tbody></table></section></div>
+    <div id="ddModal" class="modal" hidden><div class="modal-bg" data-close></div><div class="modal-card"><div class="modal-hd"><span id="ddTitle"></span><button class="modal-x" type="button" data-close aria-label="關閉">×</button></div><div class="modal-sub" id="ddSub"></div><div id="ddBody"></div><div class="modal-foot" id="ddFoot"></div></div></div>
+    <script>document.body.dataset.js='ok';var DETAILS=${JSON.stringify(details).replace(/</g, '\\u003c')};
+    function showDD(i){var d=DETAILS[i];if(!d)return;document.getElementById('ddTitle').textContent=d.name;document.getElementById('ddSub').textContent='當期使用 · 這一期每天用量（共 '+d.days.length+' 天）';
+    var b=document.getElementById('ddBody');b.textContent='';d.days.forEach(function(x){var r=document.createElement('div');r.className='dd-row';r.textContent=x.d+'（'+x.w+'）　'+x.v+' '+d.unit;b.appendChild(r);});
+    document.getElementById('ddFoot').textContent='合計　'+d.total+' '+d.unit;document.getElementById('ddModal').hidden=false;}
+    document.addEventListener('click',function(e){var b=e.target.closest('.use-link');if(b){showDD(+b.dataset.idx);return;}if(e.target.closest('[data-close]'))document.getElementById('ddModal').hidden=true;});</script></body></html>`;
   return ok({ html, at: new Date().toISOString() });
 }
 function fresh() {
