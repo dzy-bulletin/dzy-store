@@ -137,7 +137,7 @@ export async function schedule(action, me, b, db, s) {
       if (!x.name || !String(x.name).trim()) return fail('BAD_INPUT', '班別名稱不能空白');
       if (!/^\d{2}:\d{2}$/.test(x.start || '') || !/^\d{2}:\d{2}$/.test(x.end || '')) return fail('BAD_INPUT', '上下班時間格式要是 HH:MM');
       const sh = { start: x.start, end: x.end, break_min: Number(x.break_min) || 0 };
-      if (!breakOk(sh)) return fail('BAD_INPUT', '班長超過 4 小時，休息至少要 30 分鐘（勞基法 §35）');
+      if (!breakOk(sh)) return fail('BAD_INPUT', '一個班超過 6 小時，休息至少要 30 分鐘（勞基法 §35）');
       if (shiftMinutes(sh) > 720) return fail('BAD_INPUT', '一班不能超過 12 小時');
       let id = x.id; if (!id) { let i = Object.keys(st.shifts).length + 1; while (st.shifts['S' + i]) i++; id = 'S' + i; }
       st.shifts[id] = Object.assign({ id, name: String(x.name).trim(), color: x.color || '', sort: Number(x.sort) || 0, active: x.active === false ? 0 : 1 }, sh);

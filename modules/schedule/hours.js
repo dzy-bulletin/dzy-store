@@ -15,8 +15,11 @@ export function spanMinutes(s) {
 }
 /** 工時（分鐘）＝在店時間 − 休息 */
 export function shiftMinutes(s) { return Math.max(0, spanMinutes(s) - (s.break_min || 0)); }
-/** §35：連續工作超過 4 小時，休息至少 30 分鐘 */
-export function breakOk(s) { return spanMinutes(s) <= 240 || (s.break_min || 0) >= 30; }
+/** 一個時段沒排休息最多 6 小時（Eason 2026-10-11）：超過 6 小時而休息不到 30 分鐘＝存不進去 */
+export const NO_BREAK_MAX = 6 * 60;
+export function breakOk(s) { return spanMinutes(s) <= NO_BREAK_MAX || (s.break_min || 0) >= 30; }
+/** §35：連續工作超過 4 小時要休息 30 分鐘；4～6 小時沒排休息可以存，但要提醒「依 §35 但書在工作時間內輪流休息」 */
+export function breakWarn(s) { return spanMinutes(s) > 240 && (s.break_min || 0) < 30 && breakOk(s); }
 
 /** 這一班的開始、結束，換算成「距 d0 那天 00:00 幾分鐘」 */
 function bounds(date, s, d0) {
