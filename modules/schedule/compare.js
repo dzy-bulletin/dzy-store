@@ -19,7 +19,8 @@ export function comparePlan(plan, segments, opts) {
   const s = toMin(plan.start);
   let e = toMin(plan.end);
   if (e !== null && s !== null && e <= s) e += 1440;
-  const firstIn = toMin((segs.find((x) => x.in) || {}).in);
+  let firstIn = toMin((segs.find((x) => x.in) || {}).in);
+  if (firstIn !== null && s !== null && e > 1440 && firstIn < s && firstIn < e - 1440) firstIn += 1440;   // 跨夜班凌晨才到：打卡時間換到隔天，才算得出晚到（2026-10-11 Codex 審查）
   const lastOutRaw = toMin((segs.slice().reverse().find((x) => x.out) || {}).out);
   if (firstIn !== null && s !== null && firstIn - s > THRESHOLD_MIN) flags.push(`晚到 ${firstIn - s} 分`);
   if (lastOutRaw !== null && e !== null) {

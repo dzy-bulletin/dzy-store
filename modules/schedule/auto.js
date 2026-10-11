@@ -111,7 +111,9 @@ function planOffDays(ctx, dates, fixed) {
       const pinnedOff = free.filter(d => (pinOf(ctx, e, d) || {}).kind === 'off');
       const mustWork = new Set(free.filter(d => { const p = pinOf(ctx, e, d); return p && p.kind !== 'off'; }));
       const need = quota ? quota[w] : wk.length === 7 ? offsPerWeek(ctx, e, wk[0]) : Math.round(offsPerWeek(ctx, e, wk[0]) * wk.length / 7);
-      const k = Math.max(need, pinnedOff.length);
+      // 這週已經手動排好的例假／休息日（沒排班）要扣掉，只補不足的天數（2026-10-11 Codex 審查：原本會再多排兩天休）
+      const fixedOff = wk.filter(d => fixed[e][d] && (fixed[e][d].day_type === 'R' || fixed[e][d].day_type === 'H') && !fixed[e][d].shift_id).length;
+      const k = Math.max(need - fixedOff, pinnedOff.length);
       const cand = free.filter(d => !mustWork.has(d) && !pinnedOff.includes(d));
       let best = null, bestScore = Infinity, bestRun = run;
       for (const pick of combos(cand, Math.min(cand.length, k - pinnedOff.length))) {
@@ -160,13 +162,16 @@ function labelOffs(dates, plan, fixed, e) {
 }
 
 /** 3. 單日配對。workers：[emp]；回傳 { assign: {emp: shift}, unassigned: [emp] } */
-export function assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixedCount) {
+export function assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixedCount, extra) {
   const need = needOf(ctx, d);
   fixedCount = fixedCount || {};                                     // 已固定的班（指定某班、手動）先算進人數（GPT 上線前審查 15）
+  const capLeft = (extra && extra.capLeft) || {};                    // 計時同仁這期還剩幾分鐘可排（2026-10-11 Codex 審查：原本只用平均班長估天數，會超過上限）
+  const fixedShift = (extra && extra.fixedShift) || {};              // 這天已固定班的人 → 班別（不排同班的配對要一起看）
   const shiftIds = Object.keys(ctx.shifts).filter(s => ctx.shifts[s].active !== 0);
   const ok = (e, s) => {
     if (!allowedOf(ctx, e, d).includes(s)) return false;
     const sh = ctx.shifts[s];
+    if (capLeft[e] !== undefined && shiftMinutes(sh) > capLeft[e]) return false;
     if (shiftMinutes(sh) > DAY_MAX) return false;
     const p = pinOf(ctx, e, d);
     if (p && p.kind === 'shift' && p.shift_id !== s) return false;
@@ -205,10 +210,13 @@ export function assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixed
     });
     assign[e] = opts[0]; count[opts[0]] = (count[opts[0]] || 0) + 1;
   });
-  // 不排同班的兩人（spec 5.5 D5）：配好後若同班，找別班一位可以對調的人交換（雙方都要合規）
+  // 不排同班的兩人（spec 5.5 D5）：配好後若同班，找別班一位可以對調的人交換（雙方都要合規）。
+  // 其中一人是手動固定的班也要算（2026-10-11 Codex 審查）：固定的不能動，只能動另一個人
+  const shiftOf = (e) => assign[e] || fixedShift[e];
+  const conflicts = [];
   for (const [a, b] of (ctx.pairs || [])) {
-    if (!assign[a] || !assign[b] || assign[a] !== assign[b]) continue;
-    const pin = (e) => (pinOf(ctx, e, d) || {}).kind === 'shift';
+    if (!shiftOf(a) || !shiftOf(b) || shiftOf(a) !== shiftOf(b)) continue;
+    const pin = (e) => (pinOf(ctx, e, d) || {}).kind === 'shift' || !assign[e];
     const tryMove = (x) => {
       if (pin(x)) return false;
       for (const y of workers) {
@@ -217,9 +225,15 @@ export function assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixed
       }
       return false;
     };
-    if (!tryMove(b)) tryMove(a);
+    const moveAlone = (x) => {                                        // 對方是固定班：先試著把這個人直接換到別的班
+      if (pin(x)) return false;
+      const s2 = shiftIds.find(s => s !== shiftOf(x) && ok(x, s));
+      if (s2) { assign[x] = s2; return true; }
+      return false;
+    };
+    if (!(tryMove(b) || tryMove(a) || moveAlone(b) || moveAlone(a))) conflicts.push([a, b]);
   }
-  return { assign, unassigned };
+  return { assign, unassigned, conflicts };
 }
 
 function buildDays(ctx, dates, fixed, plan) {
@@ -236,22 +250,33 @@ function buildDays(ctx, dates, fixed, plan) {
     prevShift[st.emp_id] = a ? { start: a.start, end: a.end, break_min: 0 } : c ? (c.shift_id ? ctx.shifts[c.shift_id] : null) : null;
   }
   const problems = [];
+  // 計時同仁每期時數上限：先扣掉已固定的班，配班時逐天扣
+  const capLeft = {};
+  for (const st of ctx.staff) {
+    const t = termAt(ctx.terms, st.emp_id, dates.find(d => employed(st, d)) || dates[0]);
+    if (!t || t.kind !== 'pt' || t.target_min == null) continue;
+    capLeft[st.emp_id] = t.target_min - dates.reduce((a, d) => { const c = fixed[st.emp_id][d]; return a + (c && c.shift_id && ctx.shifts[c.shift_id] ? shiftMinutes(ctx.shifts[c.shift_id]) : 0); }, 0);
+  }
   for (const d of dates) {
     const workers = [];
     const nextShift = {};
     const fixedCount = {};
+    const fixedShift = {};
     for (const st of ctx.staff) {
       const e = st.emp_id;
       if (!employed(st, d)) continue;
-      if (fixed[e][d]) { out[e][d] = fixed[e][d]; if (fixed[e][d].shift_id) fixedCount[fixed[e][d].shift_id] = (fixedCount[fixed[e][d].shift_id] || 0) + 1; continue; }
+      if (fixed[e][d]) { out[e][d] = fixed[e][d]; if (fixed[e][d].shift_id) { fixedCount[fixed[e][d].shift_id] = (fixedCount[fixed[e][d].shift_id] || 0) + 1; fixedShift[e] = fixed[e][d].shift_id; } continue; }
       if (plan[e][d] === 'off') { out[e][d] = { day_type: labels[e][d], shift_id: null, leave: null, source: 'auto' }; continue; }
       workers.push(e);
       const nx = fixed[e][addDays(d, 1)];
       if (nx && nx.shift_id) nextShift[e] = ctx.shifts[nx.shift_id];
     }
-    const { assign, unassigned } = assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixedCount);
+    const { assign, unassigned, conflicts } = assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixedCount, { capLeft, fixedShift });
+    const nm = (e) => (ctx.staff.find(s => s.emp_id === e) || {}).name;
+    for (const [a, b] of conflicts) problems.push(`${md(d)} ${nm(a)} 和 ${nm(b)} 設定不排同一班，但這天排不開（其中有人是手動固定的班），請手動調整`);
     for (const e of workers) {
       if (assign[e]) {
+        if (capLeft[e] !== undefined) capLeft[e] -= shiftMinutes(ctx.shifts[assign[e]]);
         const p = pinOf(ctx, e, d);
         out[e][d] = { day_type: 'W', shift_id: assign[e], leave: null, source: p ? 'pin' : 'auto' };
         fairness[e][assign[e]] = (fairness[e][assign[e]] || 0) + 1;
@@ -259,7 +284,7 @@ function buildDays(ctx, dates, fixed, plan) {
     }
     for (const e of unassigned) {
       out[e][d] = { day_type: 'H', shift_id: null, leave: null, source: 'auto' };
-      problems.push(`${(ctx.staff.find(s => s.emp_id === e) || {}).name} ${md(d)} 沒有能上的班（換班間隔或可上班別限制），改排休息日`);
+      problems.push(`${nm(e)} ${md(d)} 沒有能上的班（${capLeft[e] !== undefined && Object.keys(ctx.shifts).every(s => shiftMinutes(ctx.shifts[s]) > capLeft[e]) ? '這期時數已經排滿' : '換班間隔或可上班別限制'}），改排休息日`);
     }
     for (const st of ctx.staff) { const c = out[st.emp_id][d]; prevShift[st.emp_id] = c && c.shift_id ? ctx.shifts[c.shift_id] : null; }
   }

@@ -201,7 +201,8 @@ export function checkPeriod(ctx) {
       if (otDays.length > FT_OT_MAX) add('F8', 'warn', e, otDays[FT_OT_MAX], `${who} 這期排了 ${otDays.length} 天休息日加班，超過每期 ${FT_OT_MAX} 天（要付加班費）`);
       const normal = dates.reduce((a, d) => a + (mine[d] && mine[d].day_type === 'W' ? Math.min(mins[d].work, FT_DAY_NORMAL) : 0), 0);
       if (normal > PERIOD_NORMAL) add('F5', 'info', e, end, `${who} 這期正常工時 ${hm(normal)}，超過 160 小時的部分要付加班費`);
-      const credit = dates.reduce((a, d) => a + mins[d].normal + (mine[d] && mine[d].day_type === 'L' ? LEAVE_MIN : 0), 0);
+      // 特休、國定假日放假一天算 8 小時；補休不算（Eason 2026-10-11：補休是用掉之前的加班，不能再抵這期的目標工時）
+      const credit = dates.reduce((a, d) => a + mins[d].normal + (mine[d] && mine[d].day_type === 'L' && (mine[d].leave === '特' || mine[d].leave === '國') ? LEAVE_MIN : 0), 0);
       const target = t0.target_min == null ? PERIOD_NORMAL : t0.target_min;
       if (fullPeriod && !blank.length && credit < target) add('F7', 'warn', e, end, `${who} 這期只排到 ${hm(credit)}，目標 ${hm(target)}，還差 ${hm(target - credit)}`);
     } else if (t0) {
