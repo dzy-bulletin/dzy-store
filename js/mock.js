@@ -200,6 +200,11 @@ function homeFor(me) {
   }
   if (has('transfer')) items.push(...transferHome(db, me));
   if (has('inventory')) items.push(...invHome(me, db));
+  if (has('schedule')) {     // 自動排班：每期最新一筆發布 failed、或 pending 超過 15 分鐘（同 server/home.js）；直接讀假資料，不載入 mock-schedule.js
+    const pubs = ((db.sched || {})[me.code] || {}).pubs || {};
+    const late = Object.keys(pubs).sort().filter(p => { const l = pubs[p][pubs[p].length - 1]; return l && (l.status === 'failed' || (l.status === 'pending' && Date.now() - Date.parse(l.created_at) > 15 * 60e3)); });
+    if (late.length) add('schedule', 'warn', `${late.join('、')} 班表還沒送到 LINE`, late.length, '#/schedule/board');
+  }
   const rank = { error: 0, warn: 1, todo: 2 };
   items.sort((a, c) => rank[a.level] - rank[c.level]);
   return { items, errors, at: new Date().toISOString() };
