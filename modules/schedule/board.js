@@ -8,7 +8,7 @@ const PUB_TEXT = { pending: '等待送到 LINE', sent: '已發布到 LINE', fail
 
 function cellText(c, shifts) {
   if (!c) return { t: '', cls: 'empty' };
-  if (c.shift_id) { const s = shifts[c.shift_id]; return { t: s ? s.name : c.shift_id, cls: 'work' + (c.day_type === 'H' ? ' ot' : ''), color: s && s.color }; }
+  if (c.shift_id) { const s = shifts[c.shift_id]; return { t: s ? s.name : c.shift_id, cls: 'work' + (c.day_type === 'H' ? ' ot' : '') }; }
   if (c.day_type === 'L') return { t: LEAVE_LABEL[c.leave] || '假', cls: 'leave' };
   if (c.day_type === 'W') return { t: '?', cls: 'empty' };
   return { t: DAY_LABEL[c.day_type] || '', cls: c.day_type === 'R' ? 'rest' : 'off' };
@@ -35,7 +35,21 @@ export function renderBoard(ctx) {
   const pub = D.meta.publication;
   const bday = (st, d) => st.birthday && st.birthday.slice(5) === d.slice(5);
   // 六日、同仁生日各有底色（Eason 2026-10-12）
-  const isWe = (d) => { const w = weekday(d); return w === 0 || w === 6; };
+  const isWe = (d) => { const w = weekday(d); return w === 0 || w === 6 || !!D.holidays.days[d]; };   // 六日與國定假日同一個淡紅底（Eason 2026-10-12）
+  // 本期休假天數＝例假＋休息日（沒出勤）＋請假；請假另外分列（Eason 2026-10-12）
+  const offOf = (st) => {
+    let n = 0; const lv = {};
+    for (const d of D.dates) {
+      if ((st.hire_date && st.hire_date > d) || (st.leave_date && d > st.leave_date)) continue;
+      const c = (D.days[st.emp_id] || {})[d];
+      if (!c || c.shift_id) continue;
+      if (c.day_type === 'R' || c.day_type === 'H') n++;
+      else if (c.day_type === 'L') { n++; const k = LEAVE_LABEL[c.leave] || '假'; lv[k] = (lv[k] || 0) + 1; }
+    }
+    return { n, lv };
+  };
+  // 名字下方的剩餘特休：薪資系統的餘額（D.annual，拿不到就不顯示）
+  const annualTxt = (st) => { const a = D.annual && D.annual[st.emp_id]; return a == null ? '' : `<small class="sc-al">特休剩 ${a} 天</small>`; };
 
   const ratioCls = (r) => (r == null || !target ? '' : r < target ? ' low' : ' good');
   // 當天總人數（Eason 2026-10-11：不分班別，只看當天幾個人上班）；需要人數＝各班最少人數加總
@@ -78,7 +92,7 @@ export function renderBoard(ctx) {
 
   let body;
   if (view === 'grid') {
-    const th = D.dates.map((d) => { const w = weekday(d), hol = D.holidays.days[d]; return `<th class="${w === 0 || w === 6 ? 'we' : ''}${hol ? ' hol' : ''}" title="${esc(hol || '')}">${md(d)}<small>${WD[w]}${hol ? '・國' : ''}</small></th>`; }).join('');
+    const th = D.dates.map((d) => { const w = weekday(d), hol = D.holidays.days[d]; return `<th class="${isWe(d) ? 'we' : ''}${hol ? ' hol' : ''}" title="${esc(hol || '')}">${md(d)}<small>${WD[w]}${hol ? '・國' : ''}</small></th>`; }).join('');
     const rows = staff.map((st) => {
       const tds = D.dates.map((d) => {
         const c = (D.days[st.emp_id] || {})[d];
@@ -88,16 +102,18 @@ export function renderBoard(ctx) {
         const lv = iss.length ? iss.sort((a, b) => LV_RANK[a.level] - LV_RANK[b.level])[0].level : '';
         const pin = (D.pins[st.emp_id] || {})[d];
         const sel = S.sel && S.sel.emp === st.emp_id && S.sel.date === d;
-        return `<td class="sc-c ${x.cls}${isWe(d) ? ' we' : ''}${bday(st, d) ? ' bd' : ''}${lv ? ' i-' + lv : ''}${sel ? ' sel' : ''}${pin ? ' pin' : ''}" data-emp="${esc(st.emp_id)}" data-date="${d}" title="${esc(iss.map((r) => r.msg).join('\n'))}" ${x.color ? `style="--sc-shift:${esc(x.color)}"` : ''}>${esc(x.t)}${bday(st, d) ? '<i class="sc-bd" title="生日">生日</i>' : ''}</td>`;
+        const pinCls = !pin ? '' : pin.kind === 'off' ? ' pin-off' : ' pin';   // 指定休假：黃底；指定上班／班別：右上小黑點
+        return `<td class="sc-c ${x.cls}${isWe(d) ? ' we' : ''}${bday(st, d) ? ' bd' : ''}${lv ? ' i-' + lv : ''}${sel ? ' sel' : ''}${pinCls}" data-emp="${esc(st.emp_id)}" data-date="${d}" title="${esc(iss.map((r) => r.msg).concat(pin && pin.kind === 'off' ? ['指定休假'] : []).join('\n'))}">${esc(x.t)}${bday(st, d) ? '<i class="sc-bd" title="生日">生日</i>' : ''}</td>`;
       }).join('');
-      return `<tr><th class="sc-name" scope="row">${esc(st.name)}</th>${tds}</tr>`;
+      const o = offOf(st), lvs = Object.entries(o.lv).map(([k, v]) => k + ' ' + v).join('・');
+      return `<tr><th class="sc-name" scope="row">${esc(st.name)}${annualTxt(st)}</th>${tds}<td class="sc-off"><b>${o.n}</b>${lvs ? `<small>${esc(lvs)}</small>` : ''}</td></tr>`;
     }).join('');
     const cnt = `<tr class="sc-cnt"><th scope="row">當天人數</th>${D.dates.map((d) => {
       const n = dayTotal(d), need = dayNeed(d);
       return `<td class="${need && n < need ? 'short' : ''}${isWe(d) ? ' we' : ''}" title="${need ? `至少要 ${need} 人` : '沒有設人數'}">${n}${need ? '/' + need : ''}</td>`;
-    }).join('')}</tr>`;
+    }).join('')}<td class="sc-off"></td></tr>`;
     body = `<div class="card sc-gridcard"><div class="scroll"><table class="sc-grid">
-      <thead><tr><th class="sc-name">同仁</th>${th}</tr></thead>
+      <thead><tr><th class="sc-name">同仁</th>${th}<th class="sc-offh">休假<small>天數</small></th></tr></thead>
       <tbody>${rows}${cnt}</tbody></table></div></div>`;
   } else {
     const d = S.day, hol = D.holidays.days[d];
@@ -105,8 +121,9 @@ export function renderBoard(ctx) {
     const list = staff.filter((st) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date)).map((st) => {
       const c = (D.days[st.emp_id] || {})[d], x = cellText(c, shifts), iss = byCell[st.emp_id + '|' + d] || [];
       const s = c && c.shift_id ? shifts[c.shift_id] : null;
-      return `<button type="button" class="sc-drow ${x.cls}${bday(st, d) ? ' bd' : ''}${iss.length ? ' i-' + iss.sort((a, b) => LV_RANK[a.level] - LV_RANK[b.level])[0].level : ''}" data-emp="${esc(st.emp_id)}" data-date="${d}">
-        <span class="sc-dn">${esc(st.name)}${bday(st, d) ? ' <i class="sc-bd">生日</i>' : ''}</span><span class="sc-dv">${esc(x.t)}${s ? `<small>${esc(s.start)}–${esc(s.end)}</small>` : ''}</span>
+      const pin = (D.pins[st.emp_id] || {})[d];
+      return `<button type="button" class="sc-drow ${x.cls}${bday(st, d) ? ' bd' : ''}${pin && pin.kind === 'off' ? ' pin-off' : ''}${iss.length ? ' i-' + iss.sort((a, b) => LV_RANK[a.level] - LV_RANK[b.level])[0].level : ''}" data-emp="${esc(st.emp_id)}" data-date="${d}">
+        <span class="sc-dn">${esc(st.name)}${bday(st, d) ? ' <i class="sc-bd">生日</i>' : ''}${annualTxt(st)}</span><span class="sc-dv">${esc(x.t)}${s ? `<small>${esc(s.start)}–${esc(s.end)}</small>` : ''}</span>
         ${iss.length ? `<span class="sc-dmsg">${esc(iss.map((i) => i.msg).join('；'))}</span>` : ''}</button>`;
     }).join('');
     const n = dayTotal(d), nd = dayNeed(d);

@@ -1,4 +1,4 @@
-/* 自動排班。色票沿用 tokens.css；班別底色由班別設定的顏色（--sc-shift）帶入 */
+/* 自動排班。色票沿用 tokens.css；班表格子配色見下方 .sc-grid 變數 */
 .sc-head .sc-period{display:flex;align-items:center;gap:12px}
 .sc-head .sc-period b{font-size:20px;margin-right:8px}
 .sc-range{color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums}
@@ -21,37 +21,43 @@
 .sc-grid th,.sc-grid td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:0;text-align:center;min-width:44px;height:34px}
 .sc-grid thead th{position:sticky;top:0;background:var(--card);font-weight:700;padding:4px 2px;z-index:1}
 .sc-grid thead th small{display:block;font-weight:400;color:var(--muted)}
-.sc-grid thead th.we{background:#e9e4f7} .sc-grid thead th.we small{color:var(--red)} .sc-grid thead th.hol{background:#fff4d1}
+/* 班表配色（Eason 2026-10-12）：班別不分色、一律白底深字；例／休紅字；指定休假暖黃底；六日與國定假日整欄淡紅；生日淡綠。
+   色票集中在這幾個變數，要調色只改這裡。 */
+.sc-grid{--sc-we:#fbeeec;--sc-we-head:#f6dcd8;--sc-off-ink:#c0392b;--sc-pin:#f8ecc4;--sc-bd:#e1f1e6;--sc-bd-ink:#2e7a4f;--sc-leave-ink:#3f6aa8}
+.sc-grid thead th.we{background:var(--sc-we-head)} .sc-grid thead th.we small{color:var(--sc-off-ink)}
+.sc-grid thead th.hol small{color:var(--sc-off-ink);font-weight:700}
 .sc-grid .sc-name{position:sticky;left:0;background:var(--card);text-align:left;padding:0 10px;min-width:84px;z-index:2;white-space:nowrap}
-.sc-grid tbody th{position:sticky;left:0;background:var(--card);text-align:left;padding:0 10px;white-space:nowrap;font-weight:700;z-index:1}
-.sc-c{cursor:pointer;position:relative;--sh-ot:inset 0 0 0 transparent;--sh-bd:inset 0 0 0 transparent;box-shadow:var(--sh-ot),var(--sh-bd)}
-.sc-c.work{background:var(--sc-shift,#fff4d1);font-weight:700}
-.sc-c.ot{--sh-ot:inset 0 -3px 0 #b26a00}
-.sc-c.rest{background:#f1eeeb;color:var(--muted)} .sc-c.off{background:#f7f5f3;color:var(--muted)}
-.sc-c.leave{background:#e8f0fb;color:#2c5aa0}
-/* 六日：整欄淡紫底（有班的格子把班別色往紫色調深）；生日：薄荷綠底＋綠字，班別色改成左邊色條（Eason 2026-10-12） */
-.sc-c.we.rest,.sc-c.we.off,.sc-c.we.empty,.sc-cnt td.we{background:#e9e4f7} .sc-c.we.leave{background:#dfe3f7}
-.sc-c.we.work{background:color-mix(in srgb,var(--sc-shift,#fff4d1) 72%,#a693e0)}
-.sc-c.bd,.sc-c.bd.work,.sc-c.bd.rest,.sc-c.bd.off,.sc-c.bd.leave,.sc-c.bd.empty{background:#cfeedd;color:#1f6b45} .sc-c.bd.work{--sh-bd:inset 6px 0 0 var(--sc-shift,#fff4d1)}
-.sc-c.bd .sc-bd,.sc-drow.bd .sc-bd{color:#1f6b45}
+.sc-grid tbody th{position:sticky;left:0;background:var(--card);text-align:left;padding:4px 10px;white-space:nowrap;font-weight:700;z-index:1}
+.sc-al{display:block;font-size:10px;font-weight:400;color:var(--muted);line-height:1.3}
+.sc-c{cursor:pointer;position:relative;background:#fff;--sh-ot:inset 0 0 0 transparent;box-shadow:var(--sh-ot)}
+.sc-c.work{color:var(--black);font-weight:600}
+.sc-c.ot{--sh-ot:inset 0 -2px 0 #c98a2b}
+.sc-c.rest,.sc-c.off{color:var(--sc-off-ink);font-weight:600}
+.sc-c.leave{color:var(--sc-leave-ink);font-weight:600}
+.sc-c.we{background:var(--sc-we)}
+.sc-c.bd{background:var(--sc-bd)}
+.sc-c.pin-off,.sc-c.pin-off.we,.sc-c.pin-off.bd{background:var(--sc-pin)}
 .sc-c.na{background:repeating-linear-gradient(45deg,#faf8f6,#faf8f6 4px,#f1eeeb 4px,#f1eeeb 8px);cursor:default}
 .sc-c.pin::after{content:"";position:absolute;top:3px;right:3px;width:5px;height:5px;border-radius:50%;background:var(--black)}
 .sc-c.i-block{outline:2px solid var(--bad);outline-offset:-2px} .sc-c.i-warn{outline:2px solid #e8a33d;outline-offset:-2px}
 .sc-c.sel{outline:3px solid var(--black);outline-offset:-3px}
-.sc-bd{display:block;font-style:normal;font-size:9px;color:var(--red);font-weight:700;line-height:1}
+.sc-bd{display:block;font-style:normal;font-size:9px;color:var(--sc-bd-ink,#2e7a4f);font-weight:700;line-height:1}
+.sc-grid .sc-offh{position:sticky;right:0;z-index:2;border-left:1px solid var(--line);min-width:58px}
+.sc-grid .sc-off{position:sticky;right:0;background:#faf8f6;border-left:1px solid var(--line);font-variant-numeric:tabular-nums;padding:2px 4px}
+.sc-off b{display:block;font-size:13px} .sc-off small{display:block;font-size:10px;color:var(--muted);white-space:nowrap}
 .sc-rev{width:64px;border:1px solid var(--line);border-radius:4px;padding:3px;font:inherit;font-size:11px;text-align:right}
 .sc-ratio.low,.low{color:#b26a00;font-weight:700} .sc-ratio.good,.good{color:var(--ok)}
-.sc-cnt td{font-size:11px;color:var(--muted)} .sc-cnt td.short{color:var(--bad);font-weight:700;background:#fdf0ee}
+.sc-cnt td{font-size:11px;color:var(--muted)} .sc-cnt td.we{background:var(--sc-we)} .sc-cnt td.short{color:var(--bad);font-weight:700;background:#fdf0ee}
 .sc-total{margin:10px 4px 0}
 .sc-days{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}
 .sc-daychip{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 8px;font:inherit;font-size:13px;min-width:52px;cursor:pointer}
 .sc-daychip small{display:block;color:var(--muted);font-size:11px}
 .sc-daychip.on{background:var(--black);color:#fff;border-color:var(--black)} .sc-daychip.on small{color:#ddd}
-.sc-daychip.warn{border-color:#e8a33d} .sc-daychip.we:not(.on){background:#e9e4f7}
+.sc-daychip.warn{border-color:#e8a33d} .sc-daychip.we:not(.on){background:#fbeeec} .sc-daychip.we:not(.on) small{color:#c0392b}
 .sc-dlist{display:grid;gap:6px}
 .sc-drow{display:grid;grid-template-columns:1fr auto;gap:2px 10px;text-align:left;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fff;font:inherit;cursor:pointer}
-.sc-drow.work{background:var(--sc-shift,#fff8e1)} .sc-drow.rest,.sc-drow.off{color:var(--muted)} .sc-drow.leave{background:#eef4fc}
-.sc-drow.bd,.sc-drow.bd.work,.sc-drow.bd.leave{background:#cfeedd}
+.sc-drow.rest .sc-dv,.sc-drow.off .sc-dv{color:#c0392b} .sc-drow.leave .sc-dv{color:#3f6aa8}
+.sc-drow.bd{background:#e1f1e6} .sc-drow.pin-off{background:#f8ecc4} .sc-drow .sc-al{margin-top:2px}
 .sc-drow.i-block{border-color:var(--bad)} .sc-drow.i-warn{border-color:#e8a33d}
 .sc-dn{font-weight:700} .sc-dv{text-align:right;font-weight:700} .sc-dv small{display:block;font-weight:400;color:var(--muted)}
 .sc-dmsg{grid-column:1/-1;font-size:12px;color:var(--bad)}
@@ -89,5 +95,6 @@
   .sc-grid .sc-name{min-width:0;padding:0 3px}
   .sc-c.i-block,.sc-c.i-warn,.sc-c.sel{outline:0}
   .sc-c.pin::after{display:none}
-  .sc-c.work,.sc-c.rest,.sc-c.off,.sc-c.leave,.sc-c.empty,.sc-cnt td,.sc-grid thead th.hol,.sc-grid thead th.we{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .sc-grid .sc-off,.sc-grid .sc-offh{position:static!important}
+  .sc-c,.sc-cnt td,.sc-off,.sc-grid thead th.we{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
