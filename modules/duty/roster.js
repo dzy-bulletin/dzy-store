@@ -1,5 +1,5 @@
 // 員工名冊：新進同仁報到（manager.html:1930–2010）＋同仁異動（離職＝停用不是真刪、可恢復，manager.html:2012–2120）。
-// 建立後顯示員工專屬打卡連結與「複製連結」，照原頁；連結裡的 k 是該員工自己的打卡金鑰（不是主管金鑰）。
+// 2026-10-11 起建議改在自動排班 › 同仁新增（一次填報到日與身分）；這裡保留。建立後專屬打卡連結收合成次要資訊（LINE 打卡上線後少用）；連結裡的 k 是該員工自己的打卡金鑰（不是主管金鑰）。
 import { esc, confirmBox } from '../../js/ui.js';
 import { S, call, h, failBar } from './state.js';
 import { clockLink } from './calc.js';
@@ -7,7 +7,7 @@ import { clockLink } from './calc.js';
 export function renderRoster(ctx) {
   const el = ctx.el;
   el.innerHTML = `<div class="card" id="duAdd"><h2>新進同仁報到</h2>
-    <p class="hint">輸入姓名就會產生他的專屬打卡連結，當場給他設定手機即可上工。</p>
+    <p class="hint"><b>建議改在「自動排班 › 同仁」新增</b>，可以一次填好報到日與正職／計時，打卡帳號也會一起建好。這裡只建打卡帳號，之後還要到自動排班補資料。</p>
     <div class="row"><input type="text" id="aeName" class="grow" placeholder="同仁姓名" autocomplete="off" maxlength="20" aria-label="同仁姓名"><button type="button" class="btn" id="aeBtn">建立帳號</button></div>
     <div class="du-msg" id="aeResult" hidden></div></div>
     <div id="duRosterFail"></div>
@@ -101,8 +101,9 @@ export function renderRoster(ctx) {
     try {
       const res = await call('mgr_add_employee', { name });
       const link = clockLink(S.meta.clockStore, res.key);
-      show(aeBox, '✓ 已建立 <b>' + esc(res.name) + '</b>（編號 ' + esc(res.emp_id) + '）<br>把下面這條連結給他，請他<b>用 Safari 開 → 加入主畫面</b>，以後都從主畫面進：'
-        + '<span class="du-link" id="aeLink">' + esc(link) + '</span><button type="button" class="btn sm ghost" id="aeCopy">複製連結</button>');
+      show(aeBox, '✓ 已建立 <b>' + esc(res.name) + '</b>（編號 ' + esc(res.emp_id) + '）<br>請他打開 LINE「鼎兆元打卡」，第一次打卡時人在店裡、輸入全名綁定。記得到「自動排班 › 同仁」補報到日期與正職／計時。'
+        + '<details id="aeLinkBox"><summary>舊版專屬打卡連結（沒用 LINE 打卡的人才需要）</summary>用 Safari 開 → 加入主畫面，以後都從主畫面進：'
+        + '<span class="du-link" id="aeLink">' + esc(link) + '</span><button type="button" class="btn sm ghost" id="aeCopy">複製連結</button></details>');
       nameIn.value = '';
       const cp = q('#aeCopy');
       cp.onclick = () => {

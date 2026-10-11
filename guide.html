@@ -36,7 +36,7 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
 <header><h1>門市操作手冊</h1><p>登入、貨單辨識、收支登記、出勤核定、耗損登記</p></header>
 <div class="wrap">
 <nav class="toc" aria-label="目錄"><b>想看哪一段</b>
-  <a href="#login">登入與改密碼</a><a href="#home">首頁</a><a href="#purchase">貨單辨識</a><a href="#cashbook">收支登記</a><a href="#duty">出勤核定</a><a href="#transfer">門市調撥</a><a href="#loss">耗損登記</a><a href="#inventory">庫存盤點</a><a href="#board">叫貨看板</a><a href="#help">遇到問題</a></nav>
+  <a href="#login">登入與改密碼</a><a href="#home">首頁</a><a href="#purchase">貨單辨識</a><a href="#cashbook">收支登記</a><a href="#duty">出勤核定</a><a href="#transfer">門市調撥</a><a href="#loss">耗損登記</a><a href="#inventory">庫存盤點</a><a href="#board">叫貨看板</a><a href="#staff">新進與離職同仁</a><a href="#help">遇到問題</a></nav>
 
 <section id="login"><h2>一、登入與改密碼</h2>
   <h3>第一次登入</h3>
@@ -171,8 +171,8 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
   <h3>員工名冊</h3>
   <p>切到 <b>員工名冊</b>：</p>
   <ul>
-    <li><b>新進同仁報到</b>：輸入姓名按 <span class="btn">建立帳號</span>，會產生他的專屬打卡連結，按 <span class="btn">複製連結</span> 傳給他，請他用 Safari 開、加入主畫面。</li>
-    <li><b>同仁異動</b>：選同仁按 <span class="btn">設為離職</span>，他立刻不能打卡，過去的紀錄都保留。設錯了，在「已離職」清單按 <span class="btn">恢復在職</span>。</li>
+    <li><b>新進同仁報到</b>：<b>建議改在「自動排班 › 同仁」新增</b>（見「十、新進與離職同仁」），可以一次填好報到日與正職／計時。這裡只建打卡帳號，建好後請他打開 LINE「鼎兆元打卡」綁定；舊版專屬打卡連結收在「舊版專屬打卡連結」裡，沒用 LINE 打卡的人才需要。</li>
+    <li><b>同仁異動</b>：選同仁按 <span class="btn">設為離職</span>，他立刻不能打卡，過去的紀錄都保留。設錯了，在「已離職」清單按 <span class="btn">恢復在職</span>。同仁要離職，請先看「十、新進與離職同仁」的順序。</li>
   </ul>
   <h3>公告</h3>
   <p>切到 <b>公告</b>：輸入內容（最多 120 字），需要時選「顯示到」的日期（留空＝一直顯示），按 <span class="btn">發布公告</span>，同仁打卡頁最上方就會看到。下面的清單可以按 <span class="btn">下架</span>，之後也能按 <span class="btn">重新顯示</span>。</p>
@@ -299,7 +299,32 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
   <figure class="shot"><img src="img/guide/27-board-detail.jpg" width="780" height="1688" loading="lazy" alt="點當期使用的數字，跳出每天用量明細"><figcaption>點數字看每天明細</figcaption></figure>
 </section>
 
-<section id="help"><h2>十、遇到問題</h2>
+<section id="staff"><h2>十、新進與離職同仁</h2>
+  <p>同仁的報到、身分、離職都在 <b>自動排班 › 同仁</b> 處理。有打卡系統的店，系統會在背後同時建好打卡帳號，<b>不用再到「出勤核定 › 員工名冊」做一次</b>。</p>
+  <h3>新進同仁</h3>
+  <ol>
+    <li>到 <b>自動排班</b> → 上方切到 <b>同仁</b> → 「新增同仁」那張卡片。</li>
+    <li>填 <b>姓名（全名）</b>、<b>報到日期（必填，報到日之前不會排到他）</b>、<b>身分</b>（正職或計時；計時另外填每期目標工時、契約每週工時），有的話再填生日、手機、只能上的班。</li>
+    <li>按 <span class="btn">新增同仁</span>，確認後就建好了。畫面會寫出他的員工編號；請他打開 LINE「鼎兆元打卡」，第一次打卡時<b>人在店裡</b>、輸入全名綁定。</li>
+    <li>排進班表：這一期<b>還沒鎖定</b>就到「班表」按 <span class="btn">自動排班</span>；<b>已經鎖定</b>要先解除鎖定（要出勤核定密碼，LINE 上那一期會暫時撤下）→ 自動排班 → 沒有紅字再鎖定並發布。</li>
+  </ol>
+  <div class="tip">期中才報到的同仁，例假與休息日依在職天數比例計算。同名的人不能同時在職（薪資和班表會對錯人），真的同名請加姓氏或括號區分。</div>
+  <h3>離職同仁</h3>
+  <ol>
+    <li>先在 <b>自動排班 › 同仁</b> 找到他，填 <b>離職日期</b>（最後上班那一天），按 <span class="btn">儲存</span>。</li>
+    <li>最後一天過後，到 <b>出勤核定 › 員工名冊 › 同仁異動</b> 把他 <span class="btn">設為離職</span>（停止打卡，過去紀錄保留）。</li>
+    <li>離職日之後還排著的班會標紅：這一期沒鎖定就按 <span class="btn">自動排班</span>；已鎖定就解除鎖定 → 重排 → 鎖定。</li>
+  </ol>
+  <div class="warn">順序不要反過來：先在出勤核定設離職的話，名冊同步會把他的離職日記成「設定那天的前一天」，不是真正的最後上班日。</div>
+  <h3>另外兩件事</h3>
+  <ul>
+    <li><b>正職改計時（或反過來）</b>：在他的卡片改身分，「身分從哪天開始」要填<b>某一期的第一天</b>，期中換會被擋。</li>
+    <li><b>沒有 LINE 打卡的店</b>（例如墨竹亭六張犁）：一樣在「同仁」新增，只會存在排班裡，不會建打卡帳號。</li>
+  </ul>
+  <figure class="shot"><img src="img/guide/28-schedule-hire.jpg" width="780" height="1688" loading="lazy" alt="自動排班 › 同仁：新增同仁"><figcaption>新增同仁</figcaption></figure>
+</section>
+
+<section id="help"><h2>十一、遇到問題</h2>
   <ul>
     <li><b>登入不了</b>：確認門市代號、密碼。忘記密碼請找管理者重設。被鎖住請等 15 分鐘。</li>
     <li><b>左側欄看不到某個系統</b>：那項功能還沒開給你們店，請洽管理者。</li>

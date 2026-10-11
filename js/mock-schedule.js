@@ -45,7 +45,7 @@ function ctxOf(st, period, hol) {
   return { period, shifts: st.shifts, staff: st.staff, terms: st.terms, days: st.days, actuals: st.actuals, demand: demandFor(st, dates), pins, pairs: st.pairs, holidays: hol, monthOtMin: {} };
 }
 
-export async function schedule(action, me, b, db, s) {
+export async function schedule(action, me, b, db, s, hooks) {
   const hol = await holidays();
   const st = storeOf(db, me.code);
   const clockAlias = me.code === 'TEST2' ? null : '';
@@ -162,6 +162,27 @@ export async function schedule(action, me, b, db, s) {
       if (x.hire_date && x.leave_date && x.leave_date < x.hire_date) return fail('BAD_INPUT', '離職日期不能早於報到日期');
       Object.assign(row, { hire_date: x.hire_date || null, leave_date: x.leave_date || null, birthday: x.birthday || null, phone: x.phone || null });
       return ok({ emp_id: e });
+    }
+    case 'addHire': {   // 照 server/schedule.js addHire：先檢查欄位與同名 → 有打卡的店代建打卡帳號（假出勤核定名冊）→ 寫排班資料
+      const h = b.hire || {};
+      const name = String(h.name || '').trim();
+      if (!name) return fail('BAD_INPUT', '姓名不能空白');
+      if (name.length > 20) return fail('BAD_INPUT', '姓名太長');
+      if (!h.hire_date) return fail('BAD_INPUT', '請填報到日期（報到日前不會排班）');
+      if (!['ft', 'pt'].includes(h.kind)) return fail('BAD_INPUT', '請選正職或計時');
+      if (h.phone && !/^[0-9+\-\s]{6,20}$/.test(h.phone)) return fail('BAD_INPUT', '手機格式不對');
+      const today = todayTaipei();
+      const dup = st.staff.find((x) => x.name === name && (!x.leave_date || x.leave_date >= today));
+      if (dup) return fail('BAD_INPUT', `同仁清單已經有在職的「${name}」（編號 ${dup.emp_id}）。同名會讓薪資與班表對錯人，真的是不同人請改用可區分的名字（例如加姓氏或括號）。`);
+      let e, key = null;
+      if (clockAlias !== null) {
+        const r = hooks && hooks.addEmployee ? hooks.addEmployee(name) : fail('UPSTREAM', '打卡系統暫時沒有回應，請稍後再試');
+        if (!r.ok) return r;
+        e = r.data.emp_id; key = r.data.key;
+      } else e = 'local-' + String(st.staff.filter((y) => y.emp_id.startsWith('local-')).length + 1).padStart(6, '0');
+      st.staff.push({ emp_id: e, name, hire_date: h.hire_date, leave_date: null, birthday: h.birthday || null, phone: h.phone || null, sort: st.staff.length });
+      st.terms[e] = [{ from_date: '2026-10-04', kind: h.kind, target_min: h.target_min == null && h.kind === 'ft' ? 9600 : h.target_min, week_min: h.week_min == null ? null : h.week_min, same_days: h.same_days ? 1 : 0, allowed_shifts: (h.allowed_shifts || []).filter((x) => st.shifts[x]) }];
+      return ok({ emp_id: e, name, clock: clockAlias !== null, clockStore: clockAlias, key });
     }
     case 'saveTerm': {
       const t = b.term || {};

@@ -148,7 +148,7 @@ function route(method, p, q, b, token) {
     if (m[1] === 'inventory') return invMock(m[2], me, b, db);
     if (m[1] === 'loss') return lossMock(m[2], me, b, db);
     if (m[1] === 'board') return boardMock(m[2], me, b, db);
-    if (m[1] === 'schedule') return import('./mock-schedule.js').then(x => x.schedule(m[2], me, b, db, s));   // 用到才載入（排班計算檔案多，放在開頁就載會拉長每一頁的載入時間，WebKit 換頁時更容易打斷其他假資料的讀取）
+    if (m[1] === 'schedule') return import('./mock-schedule.js').then(x => x.schedule(m[2], me, b, db, s, { addEmployee: name => dutyDo(dutyDb(), 'mgr_add_employee', { name }) }));   // 用到才載入（排班計算檔案多，放在開頁就載會拉長每一頁的載入時間，WebKit 換頁時更容易打斷其他假資料的讀取）
     return fail('NOT_FOUND', '還在搬移中，暫時請用原本的系統');
   }
   if (p.startsWith('/admin/')) {
