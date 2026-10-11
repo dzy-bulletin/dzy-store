@@ -93,7 +93,12 @@ export async function handle(method, path, body, token) {
 }
 
 function route(method, p, q, b, token) {
-  if (method === 'GET' && p === '/ui') return ok(db.ui);
+  if (method === 'GET' && p === '/ui') {
+    const order = { mala: 1, mzt: 2, yiwu: 3, cf: 4 };
+    const stores = Object.values(db.accounts).filter(a => a.role === 'store' && a.active)   // 示範帳號都是 TEST 開頭，不套伺服器的測試店過濾
+      .sort((a, b) => (order[a.brand] || 5) - (order[b.brand] || 5) || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0)).map(a => ({ code: a.code, name: a.name }));
+    return ok({ ...db.ui, stores });
+  }
   if (method === 'POST' && p === '/login') {
     const a = db.accounts[String(b.code || '').toUpperCase()];
     if (!a) return fail('AUTH', '代號或密碼不對');

@@ -66,9 +66,15 @@ function frame(s, inner, nav, opts) {
 }
 
 // ---------- 登入 ----------
+// 已建檔門市清單（GET /ui 的 stores；連不上或沒有就不顯示）
+function storeListHtml() {
+  const list = Array.isArray(UI.stores) ? UI.stores : [];
+  if (!list.length) return '';
+  return `<div class="store-list" id="storeList"><div class="sl-ttl">已建檔的門市</div><ul>${list.map(x => `<li><span>${esc(x.name)}</span><b>${esc(x.code)}</b></li>`).join('')}</ul></div>`;
+}
 function viewLogin() {
   const main = frame(null, `<div class="page">${bannerHtml()}<div class="lcard"><h1>${esc(UI.systemName)}</h1>
-    <p class="muted">請用門市代號登入（例如 MDGF）</p>
+    <p class="muted">請用門市代號登入（例如 MDGF）</p>${storeListHtml()}
     <form id="loginForm" autocomplete="off"><label class="f" for="code">門市代號<input id="code" type="text" autocapitalize="characters" autocomplete="username" value="${esc(rememberedCode())}"></label>
     <label class="f" for="password">密碼<input id="password" type="password" autocomplete="current-password"></label>
     <p class="pwhint" id="pwHint">第一次使用的預設密碼是 000000，登入後系統會請你設定自己的新密碼。</p>
