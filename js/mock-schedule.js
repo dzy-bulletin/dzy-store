@@ -227,6 +227,13 @@ export async function schedule(action, me, b, db, s, hooks) {
       st.actuals = { E001: { '2026-10-31': { start: '17:00', end: '23:30' } } };
       return ok({ from: '2026-10-19', to: '2026-10-31', rows: 1 });
     }
+    case 'annual': {   // 照 server/schedule.js A.annual：沒有打卡的店回 null；正職給假的剩餘天數（e2e 可用 st.annual 指定），計時不列
+      if (clockAlias === null) return ok({ annual: null });
+      if (st.annual) return ok({ annual: st.annual });
+      const out = {};
+      st.staff.forEach((x, i) => { const t = (st.terms[x.emp_id] || []).slice(-1)[0]; if (t && t.kind === 'ft') out[x.emp_id] = [7, 5.5, 3, 10, 0.5, 14][i % 6]; });
+      return ok({ annual: out });
+    }
     case 'dayPlan': {
       const out = {};
       for (const x of st.staff) { const c = (st.days[x.emp_id] || {})[b.date]; if (!c) continue; const sh = c.shift_id ? st.shifts[c.shift_id] : null; out[x.emp_id] = { name: x.name, day_type: c.day_type, leave: c.leave, shift_id: c.shift_id, shift_name: sh ? sh.name : null, start: sh ? sh.start : null, end: sh ? sh.end : null }; }

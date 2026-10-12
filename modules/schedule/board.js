@@ -1,7 +1,7 @@
 // 自動排班「班表」分頁：整期格子（桌機）／單日清單（手機）、營業額與工時比、每班人數、檢查結果、自動排班、鎖定與發布。
 import { esc, busy, confirmBox } from '../../js/ui.js';
 import { api } from '../../js/api.js';
-import { S, load, mutate, movePeriod, setDutyFlag, WD, md, hm, DAY_LABEL, LEAVE_LABEL, call } from './state.js';
+import { S, loadAnnual, load, mutate, movePeriod, setDutyFlag, WD, md, hm, DAY_LABEL, LEAVE_LABEL, call } from './state.js';
 import { weekday, periodEnd } from './period.js';
 import { termAt } from './rules.js';
 
@@ -52,8 +52,9 @@ export function renderBoard(ctx) {
     }
     return { n, lv };
   };
-  // 名字下方的剩餘特休：薪資系統的餘額（D.annual，拿不到就不顯示）
-  const annualTxt = (st) => { const a = D.annual && D.annual[st.emp_id]; return a == null ? '' : `<small class="sc-al">特休剩 ${a} 天</small>`; };
+  // 名字下方的剩餘特休：薪資系統的餘額（S.annual，另外抓；計時或拿不到就不顯示）
+  loadAnnual(ctx.rerender);
+  const annualTxt = (st) => { const a = S.annual && S.annual[st.emp_id]; return a == null ? '' : `<small class="sc-al">特休剩 ${a} 天</small>`; };
 
   const ratioCls = (r) => (r == null || !target ? '' : r < target ? ' low' : ' good');
   // 當天總人數（Eason 2026-10-11：不分班別，只看當天幾個人上班）；需要人數＝各班最少人數加總
