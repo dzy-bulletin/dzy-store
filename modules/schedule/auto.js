@@ -6,7 +6,7 @@
 //       → 3 逐日配對（先滿足最少人數，用增廣路徑做二分圖配對）→ 4 修復（同週對調休假日）→ 5 整期檢查，沒有「擋」才回傳
 import { periodDates, addDays } from './period.js';
 import { shiftMinutes, gapMinutes } from './hours.js';
-import { checkPeriod, termAt, employed, MIN_GAP, FT_OT_MAX } from './rules.js';
+import { checkPeriod, termAt, employed, isHoliday, MIN_GAP, FT_OT_MAX } from './rules.js';
 
 const DAY_MAX = 12 * 60, REPAIR_MAX = 200;
 const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
@@ -91,7 +91,7 @@ function ftPartialQuota(ctx, st, dates) {
 }
 
 /** 2. 排日別：回傳 { emp: { date: 'off'|'work'|'fixed' } }，以及 R／H 標記 */
-function planOffDays(ctx, dates, fixed) {
+function planOffDays(ctx, dates, fixed, guoSkip) {
   const plan = {};
   const avail = {};          // avail[d][s]：這天能上 s 班、還沒休的人數
   dates.forEach(d => { avail[d] = {}; Object.keys(ctx.shifts).forEach(s => { avail[d][s] = 0; }); });
@@ -109,7 +109,9 @@ function planOffDays(ctx, dates, fixed) {
       const wk = dates.slice(w * 7, w * 7 + 7).filter(d => employed(st, d));
       const free = wk.filter(d => !fixed[e][d]);
       const pinnedOff = free.filter(d => (pinOf(ctx, e, d) || {}).kind === 'off');
-      const mustWork = new Set(free.filter(d => { const p = pinOf(ctx, e, d); return p && p.kind !== 'off'; }));
+      // 正職國定假日預設上班（Eason 2026-10-12），另在第 6 步排一天國定假日假；指定休假的照休
+      const ftNow = (termAt(ctx.terms, e, wk[0] || dates[0]) || {}).kind === 'ft';
+      const mustWork = new Set(free.filter(d => { const p = pinOf(ctx, e, d); return (p && p.kind !== 'off') || (!p && ftNow && isHoliday(ctx.holidays, d)); }));
       const need = quota ? quota[w] : wk.length === 7 ? offsPerWeek(ctx, e, wk[0]) : Math.round(offsPerWeek(ctx, e, wk[0]) * wk.length / 7);
       // 這週已經手動排好的例假／休息日（沒排班）要扣掉，只補不足的天數（2026-10-11 Codex 審查：原本會再多排兩天休）
       const fixedOff = wk.filter(d => fixed[e][d] && (fixed[e][d].day_type === 'R' || fixed[e][d].day_type === 'H') && !fixed[e][d].shift_id).length;
@@ -145,6 +147,24 @@ function planOffDays(ctx, dates, fixed) {
       }
       run = bestRun;
       if (!best.size) { let r = run; for (const d of dates.slice(w * 7, w * 7 + 7)) { const c = fixed[e][d]; r = (c ? !!c.shift_id : plan[e][d] === 'work') ? r + 1 : 0; } run = r; }
+    }
+    // 正職國定假日假（Eason 2026-10-12）：本期每一天國定假日各補一天，排在離那天最近的一週（同週優先）、同一週不排兩天，
+    //   再挑人手最寬裕的上班日（不挑國定假日、指定過的日子）。手動排好的國定假日假先抵掉最早的國定假日。
+    const inP = dates.filter(d => employed(st, d));
+    if (inP.length && (termAt(ctx.terms, e, inP[0]) || {}).kind === 'ft' && !(guoSkip && guoSkip.has(e))) {
+      const hols = inP.filter(d => isHoliday(ctx.holidays, d));
+      const have = inP.filter(d => fixed[e][d] && fixed[e][d].day_type === 'L' && fixed[e][d].leave === '國');
+      const wkOf = (d) => Math.floor(dates.indexOf(d) / 7);
+      const slack = (d) => allowedOf(ctx, e, d).reduce((m, s) => Math.max(m, avail[d][s] - ((needOf(ctx, d)[s] || {}).min || 0)), -Infinity);
+      const taken = new Set(have.map(wkOf));
+      for (const h of hols.slice(have.length)) {
+        const cand = inP.filter(d => plan[e][d] === 'work' && !pinOf(ctx, e, d) && !isHoliday(ctx.holidays, d) && slack(d) > 0 && !taken.has(wkOf(d)));   // 同一週不排兩天
+        if (!cand.length) break;
+        const key = (d) => [-slack(d), Math.abs(wkOf(d) - wkOf(h)), Math.abs(dates.indexOf(d) - dates.indexOf(h))];
+        cand.sort((x, y) => { const a = key(x), b = key(y); for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] - b[i]; return x < y ? -1 : 1; });
+        const d = cand[0];
+        plan[e][d] = 'guo'; allowedOf(ctx, e, d).forEach(s => { avail[d][s]--; }); taken.add(wkOf(d));
+      }
     }
   });
   return plan;
@@ -267,6 +287,7 @@ function buildDays(ctx, dates, fixed, plan) {
       if (!employed(st, d)) continue;
       if (fixed[e][d]) { out[e][d] = fixed[e][d]; if (fixed[e][d].shift_id) { fixedCount[fixed[e][d].shift_id] = (fixedCount[fixed[e][d].shift_id] || 0) + 1; fixedShift[e] = fixed[e][d].shift_id; } continue; }
       if (plan[e][d] === 'off') { out[e][d] = { day_type: labels[e][d], shift_id: null, leave: null, source: 'auto' }; continue; }
+      if (plan[e][d] === 'guo') { out[e][d] = { day_type: 'L', shift_id: null, leave: '國', source: 'auto' }; continue; }
       workers.push(e);
       const nx = fixed[e][addDays(d, 1)];
       if (nx && nx.shift_id) nextShift[e] = ctx.shifts[nx.shift_id];
@@ -302,7 +323,27 @@ function merged(ctx, dates, out) {
   return Object.assign({}, ctx, { days });
 }
 
+const otCells = (days) => Object.values(days || {}).reduce((a, m) => a + Object.values(m).filter(c => c && c.day_type === 'H' && c.shift_id && c.source === 'auto').length, 0);
+
+/** 國定假日假不能逼出休息日加班（加班費比國定假日出勤的雙倍薪資貴；Eason 2026-10-12）：
+ *  先照常排；若比「完全不排國定假日假」多出休息日加班，就逐一讓正職這期不排國定假日假（留 C8 提醒雙倍薪資），直到不多為止 */
 export function autoSchedule(ctx, opts) {
+  const dates = periodDates(ctx.period);
+  const r0 = scheduleOnce(ctx, opts, null);
+  if (!r0.ok || !dates.some(d => isHoliday(ctx.holidays, d)) || !otCells(r0.days)) return r0;
+  const ft = ctx.staff.filter(st => (termAt(ctx.terms, st.emp_id, dates.find(d => employed(st, d)) || dates[0]) || {}).kind === 'ft').map(st => st.emp_id);
+  const base = scheduleOnce(ctx, opts, new Set(ft));
+  if (!base.ok || otCells(r0.days) <= otCells(base.days)) return r0;
+  const skip = new Set();
+  for (const e of ft.slice().reverse()) {
+    skip.add(e);
+    const r = scheduleOnce(ctx, opts, skip);
+    if (r.ok && otCells(r.days) <= otCells(base.days)) return r;
+  }
+  return base;
+}
+
+function scheduleOnce(ctx, opts, guoSkip) {
   const keepManual = !opts || opts.keepManual !== false;
   const inp = inputProblems(ctx);
   if (inp.length) return { ok: false, days: null, problems: inp, results: [] };
@@ -315,15 +356,18 @@ export function autoSchedule(ctx, opts) {
     for (const d of dates) {
       const c = (ctx.days[e] || {})[d];
       // 休息日加班（H＋班）一律保留，連「全部重排」也不動：只能由店長手動改回休息日（Eason 2026-10-11，加班費不能因重排消失）
-      if (c && (c.day_type === 'L' || (c.day_type === 'H' && c.shift_id) || (keepManual && c.source === 'manual'))) fixed[e][d] = c;
+      // 自動排的國定假日假（source=auto）每次重排都重新挑日子；手動排的照請假保留
+      const autoGuo = c && c.day_type === 'L' && c.leave === '國' && c.source === 'auto';
+      if (c && !autoGuo && (c.day_type === 'L' || (c.day_type === 'H' && c.shift_id) || (keepManual && c.source === 'manual'))) fixed[e][d] = c;
       const p = pinOf(ctx, e, d);
       if (p && p.kind === 'shift' && !fixed[e][d]) fixed[e][d] = { day_type: 'W', shift_id: p.shift_id, leave: null, source: 'pin' };
     }
   }
-  const plan = planOffDays(ctx, dates, fixed);
+  const plan = planOffDays(ctx, dates, fixed, guoSkip);
   let { out, problems } = buildDays(ctx, dates, fixed, plan);
   let res = checkPeriod(merged(ctx, dates, out));
 
+  const holWork = (e, d) => isHoliday(ctx.holidays, d) && (termAt(ctx.terms, e, d) || {}).kind === 'ft';   // 正職國定假日要上班，修復時不能把它換成休假
   // 4. 修復：某天某班缺人 → 找那天休假、能上這班的人，跟同週他上班且那班有多餘人手的一天對調
   const shortages = () => res.filter(r => r.code === 'D1');
   let tries = 0;
@@ -340,7 +384,7 @@ export function autoSchedule(ctx, opts) {
         if (done || plan[e][d] !== 'off' || (pinOf(ctx, e, d) || {}).kind === 'off') continue;
         if (!lacking.some(s => allowedOf(ctx, e, d).includes(s))) continue;
         for (const d2 of wk) {
-          if (d2 === d || plan[e][d2] !== 'work' || pinOf(ctx, e, d2)) continue;
+          if (d2 === d || plan[e][d2] !== 'work' || pinOf(ctx, e, d2) || holWork(e, d2)) continue;
           const s2 = (out[e][d2] || {}).shift_id;
           const n2 = ctx.staff.filter(x => (out[x.emp_id][d2] || {}).shift_id === s2).length;
           if (n2 <= ((needOf(ctx, d2)[s2] || {}).min || 0)) continue;
@@ -356,12 +400,39 @@ export function autoSchedule(ctx, opts) {
     }
   }
 
+  const blockCount = (rs) => rs.filter(r => r.level === 'block').length;
+  const d1Count = (rs) => rs.filter(r => r.code === 'D1').length;
+  // 4.5 還是缺人：先拿國定假日假來補（國定假日當天上班付雙倍薪資，比付休息日加班費便宜；Eason 2026-10-12）。
+  //     某人那天休假、且本期有排國定假日假 → 那天改上班、國定假日假那天改成休假（例休天數不變，少一天國定假日假），整期重排驗證
+  for (let guard = 0, progressed = true; progressed && guard < REPAIR_MAX; guard++) {
+    progressed = false;
+    for (const sh of res.filter(r => r.code === 'D1')) {
+      const d = sh.date;
+      for (const st of ctx.staff) {
+        const e = st.emp_id;
+        if (plan[e][d] !== 'off' && plan[e][d] !== 'guo') continue;
+        if ((pinOf(ctx, e, d) || {}).kind === 'off') continue;
+        const gds = dates.filter(x => plan[e][x] === 'guo' && x !== d);
+        const tries2 = plan[e][d] === 'guo' ? [null] : gds;
+        for (const gd of tries2) {
+          const p0 = plan[e][d];
+          plan[e][d] = 'work'; if (gd) plan[e][gd] = 'off';
+          const trial = buildDays(ctx, dates, fixed, plan);
+          const tres = checkPeriod(merged(ctx, dates, trial.out));
+          if (blockCount(tres) <= blockCount(res) && d1Count(tres) < d1Count(res)) { out = trial.out; problems = trial.problems; res = tres; progressed = true; break; }
+          plan[e][d] = p0; if (gd) plan[e][gd] = 'guo';
+        }
+        if (progressed) break;
+      }
+      if (progressed) break;
+    }
+  }
+
   // 5. 還是缺人：正職的休息日改成「休息日加班」來補（Eason 2026-10-11：只在人手不夠時才用；每人每期最多 2 天，
   //    連續上班最多 12 天由 F6 把關；加班分鐘由 rules 算進每月加班）。每補一格都整期重驗，有新的「擋」就退回。
   const OT_PER_PERIOD = FT_OT_MAX;
   const otUsed = {};
   for (const st of ctx.staff) otUsed[st.emp_id] = dates.filter(d => out[st.emp_id][d] && out[st.emp_id][d].day_type === 'H' && out[st.emp_id][d].shift_id).length;
-  const blockCount = (rs) => rs.filter(r => r.level === 'block').length;
   const shortOn = (d) => { const n = needOf(ctx, d); let k = 0; for (const sid in n) k += Math.max(0, n[sid].min - ctx.staff.filter(x => employed(x, d) && (out[x.emp_id][d] || {}).shift_id === sid).length); return k; };
   const gaveUp = new Set();
   for (let guard = 0; guard < REPAIR_MAX; guard++) {
@@ -392,6 +463,30 @@ export function autoSchedule(ctx, opts) {
       if (done) break;
     }
     if (!done) gaveUp.add(d);                                            // 這一天補不了：留給店長看「缺人」，換下一天
+  }
+
+  // 6. 正職國定假日假（Eason 2026-10-12）：本期有幾天國定假日就排幾天「國定假日假」，挑那班人手最寬裕、不是國定假日、
+  //    沒指定的自動排班日；每排一天整期重驗，不能多出「擋」或缺人。排不出來就留 C8 提醒（當天出勤要給雙倍薪資）。
+  for (const st of ctx.staff) {
+    const e = st.emp_id;
+    const inP = dates.filter(d => employed(st, d));
+    if (!inP.length || (termAt(ctx.terms, e, inP[0]) || {}).kind !== 'ft') continue;
+    let need = inP.filter(d => isHoliday(ctx.holidays, d)).length - inP.filter(d => out[e][d] && out[e][d].day_type === 'L' && out[e][d].leave === '國').length;
+    if (need <= 0) continue;
+    const slackOf = (d) => { const sid = out[e][d].shift_id; return ctx.staff.filter(x => (out[x.emp_id][d] || {}).shift_id === sid).length - ((needOf(ctx, d)[sid] || {}).min || 0); };
+    const guoWeeks = new Set(inP.filter(d => out[e][d] && out[e][d].day_type === 'L' && out[e][d].leave === '國').map(d => Math.floor(dates.indexOf(d) / 7)));
+    const cands = inP.filter(d => { const c = out[e][d]; return c && c.day_type === 'W' && c.shift_id && c.source !== 'manual' && c.source !== 'pin' && !pinOf(ctx, e, d) && !isHoliday(ctx.holidays, d) && !guoWeeks.has(Math.floor(dates.indexOf(d) / 7)); })
+      .sort((a, b) => slackOf(b) - slackOf(a) || (a < b ? -1 : 1));
+    for (const d of cands) {
+      if (need <= 0) break;
+      if (slackOf(d) <= 0 || guoWeeks.has(Math.floor(dates.indexOf(d) / 7))) continue;   // 同一週不排兩天
+      const before = out[e][d];
+      out[e][d] = { day_type: 'L', shift_id: null, leave: '國', source: 'auto' };
+      const tres = checkPeriod(merged(ctx, dates, out));
+      if (blockCount(tres) <= blockCount(res) && d1Count(tres) <= d1Count(res)) { res = tres; need--; guoWeeks.add(Math.floor(dates.indexOf(d) / 7)); }
+      else out[e][d] = before;
+    }
+    if (need > 0) problems.push(`${st.name} 本期還有 ${need} 天國定假日假排不出來，國定假日當天出勤要給雙倍薪資`);
   }
 
   const blocks = res.filter(r => r.level === 'block');

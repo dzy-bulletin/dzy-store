@@ -3,6 +3,7 @@ import { esc, busy, confirmBox } from '../../js/ui.js';
 import { api } from '../../js/api.js';
 import { S, load, mutate, movePeriod, setDutyFlag, WD, md, hm, DAY_LABEL, LEAVE_LABEL, call } from './state.js';
 import { weekday, periodEnd } from './period.js';
+import { termAt } from './rules.js';
 
 const PUB_TEXT = { pending: '等待送到 LINE', sent: '已發布到 LINE', failed: '送 LINE 失敗', stale: '已被較新版本取代' };
 
@@ -35,7 +36,10 @@ export function renderBoard(ctx) {
   const pub = D.meta.publication;
   const bday = (st, d) => st.birthday && st.birthday.slice(5) === d.slice(5);
   // 六日、同仁生日各有底色（Eason 2026-10-12）
-  const isWe = (d) => { const w = weekday(d); return w === 0 || w === 6 || !!D.holidays.days[d]; };   // 六日與國定假日同一個淡紅底（Eason 2026-10-12）
+  // 假日淡紅底（Eason 2026-10-12）：照人事行政總處辦公日曆——六日（補行上班的週六除外）、國定假日、補假
+  const gov = D.holidays.gov || { off: {}, work: [] };
+  const govOff = (d) => (gov.off || {})[d] || '';
+  const isWe = (d) => { const w = weekday(d); return ((w === 0 || w === 6) && !(gov.work || []).includes(d)) || !!D.holidays.days[d] || !!govOff(d); };
   // 本期休假天數＝例假＋休息日（沒出勤）＋請假；請假另外分列（Eason 2026-10-12）
   const offOf = (st) => {
     let n = 0; const lv = {};
@@ -92,7 +96,7 @@ export function renderBoard(ctx) {
 
   let body;
   if (view === 'grid') {
-    const th = D.dates.map((d) => { const w = weekday(d), hol = D.holidays.days[d]; return `<th class="${isWe(d) ? 'we' : ''}${hol ? ' hol' : ''}" title="${esc(hol || '')}">${md(d)}<small>${WD[w]}${hol ? '・國' : ''}</small></th>`; }).join('');
+    const th = D.dates.map((d) => { const w = weekday(d), hol = D.holidays.days[d], g = !hol && govOff(d); return `<th class="${isWe(d) ? 'we' : ''}${hol ? ' hol' : ''}" title="${esc(hol || (g ? g + '（行政院人事行政總處辦公日曆，非勞基法國定假日）' : ''))}">${md(d)}<small>${WD[w]}${hol ? '・國' : g ? '・補' : ''}</small></th>`; }).join('');
     const rows = staff.map((st) => {
       const tds = D.dates.map((d) => {
         const c = (D.days[st.emp_id] || {})[d];
@@ -141,12 +145,15 @@ export function renderBoard(ctx) {
     const st = D.staff.find((x) => x.emp_id === S.sel.emp);
     const c = (D.days[S.sel.emp] || {})[S.sel.date] || {};
     const cur = c.shift_id ? 'S:' + c.shift_id + (c.day_type === 'H' ? ':H' : '') : c.day_type === 'L' ? 'L:' + c.leave : c.day_type || '';
+    // 國定假日假：國定假日當天都可選；正職在有國定假日的期別可移到別天（Eason 2026-10-12）
+    const isFt = (termAt(D.terms, S.sel.emp, S.sel.date) || {}).kind === 'ft';
+    const guoOk = !!D.holidays.days[S.sel.date] || (isFt && D.dates.some((d) => D.holidays.days[d]));
     const otOpts = activeShifts.map((s) => `<option value="S:${esc(s.id)}:H">${esc(s.name)}（休息日出勤）</option>`).join('');
     // 休息日加班只能改回休息日或換一個休息日出勤的班（伺服器同樣擋，Eason 2026-10-11）
     const opts = c.day_type === 'H' && c.shift_id ? otOpts + '<option value="H">休息日</option>'
       : activeShifts.map((s) => `<option value="S:${esc(s.id)}">${esc(s.name)} ${esc(s.start)}–${esc(s.end)}</option>`).join('') + otOpts
       + '<option value="R">例假</option><option value="H">休息日</option><option value="L:特">特休</option><option value="L:補">補休</option>'
-      + (D.holidays.days[S.sel.date] ? '<option value="L:國">國定假日放假</option>' : '') + '<option value="CLEAR">清空</option>';
+      + (guoOk ? '<option value="L:國">國定假日假</option>' : '') + '<option value="CLEAR">清空</option>';
     const iss = byCell[S.sel.emp + '|' + S.sel.date] || [];
     editor = `<div class="card sc-editor" id="scEditor"><b>${esc(st ? st.name : '')}　${md(S.sel.date)}（${WD[weekday(S.sel.date)]}）</b>
       <div class="row mt"><select id="scCellSel" aria-label="這一格要排什麼">${opts.replace(`value="${cur}"`, `value="${cur}" selected`)}</select>

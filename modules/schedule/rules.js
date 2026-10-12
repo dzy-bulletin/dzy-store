@@ -49,8 +49,7 @@ export function comboError(c, hol, d) {
     case 'L':
       if (s) return '請假那天不能排班';
       if (!['特', '補', '國'].includes(c.leave)) return '請假要選特休、補休或國定假日';
-      if (c.leave === '國' && !isHoliday(hol, d)) return '這天不是國定假日';
-      return null;
+      return null;   // 「國」排在哪天合法要看整期（正職可移到同期別天），由 checkPeriod 的 C7 檢查
     default: return '日別要是工作日、例假、休息日或請假';
   }
 }
@@ -174,12 +173,22 @@ export function checkPeriod(ctx) {
       lastShift = cur;
     }
 
-    // 國定假日
-    for (const d of dates) {
-      const c = mine[d];
-      if (!c || !isHoliday(hol, d)) continue;
-      if (c.shift_id) add('C3', 'info', e, d, `${who} ${md(d)}（${hol.days[d]}）國定假日上班，要本人同意、工資加倍`);
-      if (c.day_type === 'R' || c.day_type === 'H') add('C4', 'info', e, d, `${who} ${md(d)}（${hol.days[d]}）剛好是${c.day_type === 'R' ? '例假' : '休息日'}，要另外補一天假`);
+    // 國定假日（Eason 2026-10-12）：正職預設國定假日照常上班，同一期另排一天「國定假日假」（L＋國，可排在任何一天）；
+    //   國定假日假天數＝本期在職的國定假日天數。排不夠只提醒（當天出勤要給雙倍薪資），排太多擋。
+    //   計時維持原規則：國定假日假只能排在國定假日當天，當天上班提醒工資加倍、碰到例休提醒補假。
+    const hols = inPeriod.filter(d => isHoliday(hol, d));
+    const guo = inPeriod.filter(d => mine[d] && mine[d].day_type === 'L' && mine[d].leave === '國');
+    if (t0 && t0.kind === 'ft') {
+      if (guo.length > hols.length) add('C7', 'block', e, guo[hols.length], `${who} 排了 ${guo.length} 天國定假日假，這期${hols.length ? `只有 ${hols.length} 天國定假日` : '沒有國定假日'}`);
+      else if (guo.length < hols.length) add('C8', 'warn', e, hols[0], `${who} 本期有 ${hols.length - guo.length} 天國定假日假還沒排；國定假日（${hols.map(d => `${md(d)} ${hol.days[d]}`).join('、')}）當天出勤要給雙倍薪資`);
+    } else {
+      for (const d of guo) if (!isHoliday(hol, d)) add('C7', 'block', e, d, `${who} ${md(d)} 不是國定假日；計時同仁的國定假日假只能排在國定假日當天`);
+      for (const d of hols) {
+        const c = mine[d];
+        if (!c) continue;
+        if (c.shift_id) add('C3', 'info', e, d, `${who} ${md(d)}（${hol.days[d]}）國定假日上班，要本人同意、工資加倍`);
+        if (c.day_type === 'R' || c.day_type === 'H') add('C4', 'info', e, d, `${who} ${md(d)}（${hol.days[d]}）剛好是${c.day_type === 'R' ? '例假' : '休息日'}，要另外補一天假`);
+      }
     }
 
     // 制度別：正職四週變形、計時每週制
