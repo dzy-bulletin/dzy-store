@@ -268,7 +268,7 @@ function admin(method, p, q, b, me) {
       transferNodes: TRANSFER_NODES.map(n => ({ code: n.code, name: n.name, short: n.short })),
       transferVault: TRANSFER_NODES.map(n => ({ name: 'transfer:' + n.code, label: n.name, set: !!db.vault['transfer:' + n.code], updatedAt: db.vault['transfer:' + n.code] || null })),
       boardVault: [{ name: 'board:_', label: '全部門市共用', set: true, updatedAt: '2026-10-11T02:00:00.000Z' }].concat(Object.values(db.accounts).filter(a => a.role === 'store').sort((x, y) => x.code.localeCompare(y.code))   // 假後端：共用已設；__E2E_DATA.board.unset 列的店當作連共用都用不到
-        .map(a => { const no = (((E2E().board || {}).unset) || []).includes(a.code); return { name: 'board:' + a.code, label: a.name, set: false, shared: !no, store: { MZTGF: '光復', MZTZS: '金山', MZTLZL: '六張犁', TEST2: '光復' }[a.code] || null, updatedAt: null }; })) });
+        .map(a => { const no = (((E2E().board || {}).unset) || []).includes(a.code); return { name: 'board:' + a.code, label: a.name, set: false, shared: !no, store: { MZTGF: '光復', MZTJS: '金山', MZTLZL: '六張犁', TEST2: '光復' }[a.code] || null, updatedAt: null }; })) });
   }
   if (method === 'POST' && p === '/admin/alias') {
     const a = acc(); if (!a) return fail('NOT_FOUND', '找不到這個帳號');
