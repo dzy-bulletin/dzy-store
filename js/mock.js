@@ -10,7 +10,7 @@ const KEY = 'dzystore_mockdb';
 // e2e 注入的資料（window.__E2E_DATA，由測試每次隨機產生）；沒有就用下面內建預設，示範模式不受影響。
 const E2E = () => (typeof window !== 'undefined' && window.__E2E_DATA) || {};
 const clone = x => JSON.parse(JSON.stringify(x));
-const DB_VERSION = 9;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
+const DB_VERSION = 10;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
 const MODS = ['purchase', 'cashbook', 'duty', 'transfer', 'loss', 'inventory', 'board', 'schedule'];
 const LABELS = { purchase: '貨單辨識', cashbook: '收支登記', duty: '出勤核定', transfer: '門市調撥', loss: '耗損登記', inventory: '庫存盤點', board: '叫貨看板', schedule: '自動排班' };
 const hex = n => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -81,7 +81,9 @@ function load() {
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) {} }
 const rid = () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'.split('').sort(() => Math.random() - .5).slice(0, 10).join('');
-const pub = (a, token) => ({ code: a.code, name: a.name, role: a.role, brand: a.brand, mustChangePassword: a.must, features: a.features, ...(token ? { token: token.token, expiresAt: token.expiresAt } : {}) });
+// 生效中的功能＝管理者開通的（features）減掉門市自己關掉的（storeOff）；與伺服器 featuresOf 一致
+const eff = a => a.features.filter(f => !(a.storeOff || []).includes(f));
+const pub = (a, token) => ({ code: a.code, name: a.name, role: a.role, brand: a.brand, mustChangePassword: a.must, features: eff(a), ...(token ? { token: token.token, expiresAt: token.expiresAt } : {}) });
 function log(code, module, action, okk, error) { db.audit.unshift({ at: new Date().toISOString(), code, module, action, ok: okk, ms: 5, error: error || '' }); db.audit.length = Math.min(db.audit.length, 500); }
 
 export async function handle(method, path, body, token) {
@@ -139,10 +141,22 @@ function route(method, p, q, b, token) {
     for (const t of Object.values(db.sessions)) if (t.code === me.code && t !== s) { t.duty = false; t.dutyMust = false; }
     log(me.code, 'duty', 'password', true); return ok();
   }
+  if (p === '/my/features') {   // 門市自己開關功能（只限門市帳號、只動自己、只能在管理者開通的範圍內）
+    if (me.role !== 'store') return fail('FORBIDDEN', '管理者帳號請到後台管理的功能開關設定');
+    me.storeOff = me.storeOff || [];
+    if (method === 'GET') return ok({ items: MODS.filter(f => me.features.includes(f)).map(id => ({ id, on: !me.storeOff.includes(id) })) });
+    if (method === 'POST') {
+      if (typeof b.on !== 'boolean') return fail('BAD_INPUT', '開關狀態必須是 true 或 false');
+      if (!MODS.includes(b.feature) || !me.features.includes(b.feature)) return fail('BAD_INPUT', '這個功能沒有開通，要使用請洽管理者');
+      me.storeOff = me.storeOff.filter(f => f !== b.feature);
+      if (!b.on) me.storeOff.push(b.feature);
+      log(me.code, 'settings', 'features', true); return ok({ features: eff(me) });
+    }
+  }
   if (method === 'GET' && p === '/home') return ok(homeFor(me));
   let m = p.match(/^\/m\/(\w+)\/(\w+)$/);
   if (method === 'POST' && m) {
-    if (!MODS.includes(m[1]) || !me.features.includes(m[1])) return fail('FORBIDDEN', '這家店沒有開通這個功能');
+    if (!MODS.includes(m[1]) || !eff(me).includes(m[1])) return fail('FORBIDDEN', '這家店沒有開通這個功能');
     if ((db.fail || []).includes(m[1] + '/' + m[2])) return fail('UPSTREAM', '伺服器暫時沒有回應，請稍後再試');   // e2e 用：db.fail = ['模組/動作'] 讓那個動作失敗
     if (m[1] === 'duty' && s.dutyMust) return fail('DUTY_MUST_CHANGE', '請先把出勤核定通行碼改成自己的');
     if (m[1] === 'duty' && !s.duty) return fail('FORBIDDEN', '請先輸入出勤核定通行碼');
@@ -166,7 +180,7 @@ function route(method, p, q, b, token) {
 // ---------- 首頁待辦與異常（對照 server/home.js 的規則；用假資料算）----------
 // db.homeFaults（測試用，e2e 直接寫進 localStorage）：['cashbook', …]＝該模組讀不到；不動各模組的呼叫計數
 function homeFor(me) {
-  const has = id => me.features.includes(id);
+  const has = id => eff(me).includes(id);
   const bad = id => (db.homeFaults || []).includes(id);
   const items = [], errors = [];
   const ERR = { duty: '出勤核定暫時讀不到', purchase: '貨單辨識暫時讀不到', cashbook: '收支登記暫時讀不到' };
@@ -218,7 +232,7 @@ function homeFor(me) {
 function admin(method, p, q, b, me) {
   const acc = () => db.accounts[String(b.code || '').toUpperCase()];
   if (method === 'GET' && p === '/admin/accounts')
-    return ok(Object.values(db.accounts).map(a => ({ code: a.code, name: a.name, brand: a.brand, role: a.role, active: a.active, locked: a.lockUntil > Date.now(), mustChangePassword: a.must, features: a.features })));
+    return ok(Object.values(db.accounts).map(a => ({ code: a.code, name: a.name, brand: a.brand, role: a.role, active: a.active, locked: a.lockUntil > Date.now(), mustChangePassword: a.must, features: a.features, storeOff: (a.storeOff || []).filter(f => a.features.includes(f)) })));
   if (method === 'POST' && p === '/admin/accounts') {
     const code = String(b.code || '').toUpperCase();
     if (!/^[A-Z0-9]{2,10}$/.test(code)) return fail('BAD_INPUT', '門市代號要是 2-10 碼的大寫英數字');
@@ -245,7 +259,10 @@ function admin(method, p, q, b, me) {
   }
   if (method === 'POST' && p === '/admin/features') {
     const a = acc(); if (!a) return fail('NOT_FOUND', '找不到這個帳號');
-    a.features = MODS.filter(x => (b.features || []).includes(x)); log(me.code, 'admin', 'features', true); return ok();
+    const before = a.features;
+    a.features = MODS.filter(x => (b.features || []).includes(x));
+    a.storeOff = (a.storeOff || []).filter(f => before.includes(f) && a.features.includes(f));   // 只保留「原本就開通、這次仍開通」的關閉紀錄
+    log(me.code, 'admin', 'features', true); return ok();
   }
   if (method === 'POST' && p === '/admin/duty-pass') {
     const a = acc(); if (!a) return fail('NOT_FOUND', '找不到這個帳號');

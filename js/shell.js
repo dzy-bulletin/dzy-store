@@ -41,7 +41,7 @@ function sidebarHtml(s, cur) {
     </nav>
     <div class="side-user"><div class="av">🙂</div>
       <div class="su-main"><div class="nm" id="whoName">${esc(s.name)}</div><div class="rl">${esc(s.code || '')}${s.role === 'admin' ? '・管理者' : ''}</div></div>
-      <div class="su-act">${!s.mustChangePassword ? '<a href="#/password" id="pwLink">改密碼</a>' : ''}<button id="logoutBtn" type="button">登出</button></div></div>
+      <div class="su-act">${!s.mustChangePassword ? '<a href="#/password" id="pwLink">改密碼</a>' : ''}${!s.mustChangePassword && s.role === 'store' ? '<a href="#/features" id="featLink">功能開關</a>' : ''}<button id="logoutBtn" type="button">登出</button></div></div>
   </aside>`;
 }
 function bannerHtml() { return UI.banner ? `<div class="banner" id="uiBanner">${esc(UI.banner)}</div>` : ''; }
@@ -59,10 +59,13 @@ function frame(s, inner, nav, opts) {
     app.innerHTML = `<div class="app">${sidebarHtml(s, opts.cur)}<div class="main-wrap"><div class="topbar"><h1 class="page-title" id="pageTitle">${esc(opts.title || '')}</h1>${opts.sub ? `<div class="sub">${esc(opts.sub)}</div>` : ''}</div>${nav || ''}<main>${inner}</main></div></div>`;
   }
   applyTheme(s ? s.brand : null, UI.logoUrl);
+  bindLogout();
+  return app.querySelector('main') || app.querySelector('.login-view');
+}
+function bindLogout() {
   const lb = document.getElementById('logoutBtn');
   // 登出後整頁重新載入：上一個帳號還沒回來的請求、各模組暫存的資料一起清掉，換別店登入不會看到上一店的東西（2026-10-10 Codex 審查）
   if (lb) lb.onclick = async () => { await logout(); location.hash = '#/'; location.reload(); };
-  return app.querySelector('main') || app.querySelector('.login-view');
 }
 
 // ---------- 登入 ----------
@@ -162,9 +165,45 @@ function viewHome(s, tok) {
     .filter(c => c.visible && feats.has(c.id) && MODULES.some(m => m.id === c.id));
   const html = cards.length
     ? `<div id="todoBody" aria-live="polite">${cards.map(c => `<section class="card todo-group" data-module="${c.id}"><h2>${esc(c.label)}</h2><div class="todo-body"><div class="hint">讀取中…</div></div></section>`).join('')}</div>`
-    : `<div class="card"><p>目前還沒有開通任何功能，請洽管理者。</p></div>`;
+    : `<div class="card"><p>目前還沒有開通任何功能，請洽管理者。</p>${s.role === 'store' ? '<p class="hint" id="noFeatHint">如果是自己關掉的，可到選單裡你的店名旁「功能開關」打開。</p>' : ''}</div>`;
   frame(s, bannerHtml() + html, '', { cur: 'home', title: '待辦與異常', sub: s.name });
   if (cards.length) loadTodos(tok);
+}
+
+// ---------- 功能開關（門市自己開關，只影響自己這一店；2026-10-14） ----------
+// 管理者在後台開通的才會列出來；關掉＝這家店的側邊欄與首頁不再出現、直接打網址也進不去。每個開關一切就送出，失敗就復原
+async function viewFeatures(s) {
+  if (s.role !== 'store') return go('#/');
+  const main = frame(s, `${bannerHtml()}<div class="card"><h2>功能開關</h2>
+    <p class="hint">只影響你這家店。管理者沒有開通的功能不會出現在這裡，要開請洽管理者。</p>
+    <div id="ftMsg" class="err" role="alert"></div><div id="ftList"><div class="hint">讀取中…</div></div></div>`, '', { cur: '', title: '功能開關' });
+  const list = main.querySelector('#ftList'), msg = main.querySelector('#ftMsg');
+  let items;
+  try { items = (await api('GET', '/my/features')).items || []; } catch (e) { list.innerHTML = ''; return setMsg(msg, e.message); }
+  if (!document.body.contains(list)) return;
+  const rows = [...(UI.cards || [])].sort((a, b) => a.order - b.order).filter(c => c.visible && items.some(i => i.id === c.id));
+  if (!rows.length) { list.innerHTML = '<div class="hint">管理者還沒有替這家店開通任何功能。</div>'; return; }
+  list.innerHTML = rows.map(c => `<label class="ft-row"><input type="checkbox" class="ft-chk" data-feat="${esc(c.id)}"${items.find(i => i.id === c.id).on ? ' checked' : ''}><span>${esc(c.label)}</span></label>`).join('');
+  list.querySelectorAll('.ft-chk').forEach(box => {
+    box.onchange = async () => {
+      const want = box.checked;
+      box.disabled = true; setMsg(msg, '');
+      try {
+        const d = await api('POST', '/my/features', { feature: box.dataset.feat, on: want });
+        const cur = getSession();
+        if (cur) { cur.features = d.features || []; setSession(cur); refreshSidebar(cur); }
+      } catch (e) { box.checked = !want; setMsg(msg, e.message); }
+      box.disabled = false;
+    };
+  });
+}
+// 只重畫側邊欄（功能開關切了之後，不動內容區）
+function refreshSidebar(s) {
+  const old = document.getElementById('sidebar');
+  if (!old) return;
+  old.outerHTML = sidebarHtml(s, '');
+  applyTheme(s.brand, UI.logoUrl);
+  bindLogout();
 }
 
 // ---------- 模組 ----------
@@ -200,6 +239,7 @@ export async function render() {
   const r = route();
   window.scrollTo(0, 0);
   if (r.page === 'password') return viewPassword(s);
+  if (r.page === 'features') return viewFeatures(s);
   if (r.page === 'admin') return viewAdmin(s, r.tab, tok);
   if (r.page) return viewModule(s, r.page, r.tab, tok);
   return viewHome(s, tok);

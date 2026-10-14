@@ -381,3 +381,10 @@ nav.tabs a .badge{display:inline-block;margin-left:5px;min-width:18px;height:18p
 .du-store-bar select{min-width:200px;max-width:100%}
 .du-ov-back{font-size:13px;margin-left:auto}
 @media (max-width:480px){.du-ov-tbl th,.du-ov-tbl td{padding:8px 4px;font-size:12.5px}.du-ov-tbl .du-hint{display:none}.du-ov-back{margin-left:0}}
+
+/* 功能開關（門市自己開關）＋後台標示「門市已自行關閉」 */
+.ft-row{display:flex;align-items:center;gap:12px;min-height:48px;padding:6px 2px;border-top:1px solid var(--line);font-size:15px;font-weight:700;cursor:pointer}
+.ft-row:first-child{border-top:0}
+.ft-row input{width:22px;height:22px;margin:0;flex:none;accent-color:var(--red);cursor:pointer}
+.store-off{font-size:11px;color:var(--muted);font-weight:400;white-space:nowrap}
+@media (max-width:480px){.su-act{gap:4px}.su-act a,.su-act button{padding:7px 7px;font-size:12px}}
