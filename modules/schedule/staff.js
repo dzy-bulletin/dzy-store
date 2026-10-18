@@ -2,6 +2,7 @@
 // 姓名與在職從打卡名冊來（有打卡的店）。新同仁一律在這裡「新增同仁」（2026-10-11 合併出勤核定的新進同仁報到）：
 // 有打卡的店由伺服器代建打卡帳號（addHire），沒有打卡的店用 local- 編號。不放任何薪資。
 import { esc, busy, confirmBox } from '../../js/ui.js';
+import { DZY_ORIGIN } from '../../js/config.js';
 import { clockLink } from '../duty/calc.js';
 import { S, call, load } from './state.js';
 import { termAt } from './rules.js';
@@ -41,6 +42,7 @@ export function renderStaff(ctx) {
   const staffMsg = S.staffMsg; S.staffMsg = '';
   const hired = S.hireResult; S.hireResult = null;
   const hiredHtml = !hired ? '' : `<div class="okmsg" id="hiDone" role="status">✓ 已新增 <b>${esc(hired.name)}</b>（編號 ${esc(hired.emp_id)}）${hired.clock ? '，打卡帳號也建好了。請他打開 LINE「鼎兆元打卡」，第一次打卡時<b>人在店裡</b>、輸入全名綁定。' : '。'}
+      <br>這是備案新增：請通知總部到管理系統把他建檔，他才能認領管理系統帳號。
       <br>接著：這一期還沒鎖定就到「班表」按自動排班；已經鎖定要先解除鎖定（要出勤核定密碼，LINE 上那一期會暫時撤下）→ 自動排班 → 沒有紅字再鎖定。</div>
     ${hired.link ? `<details class="mt" id="hiLinkBox"><summary>舊版專屬打卡連結（沒用 LINE 打卡的人才需要）</summary><p class="hint">用 Safari 開 → 加入主畫面，以後都從主畫面進。</p><span class="du-link" id="hiLink">${esc(hired.link)}</span> <button type="button" class="btn sm ghost" id="hiCopy">複製連結</button></details>` : ''}`;
   el.innerHTML = `
@@ -49,6 +51,11 @@ export function renderStaff(ctx) {
     ${noClock || noDuty ? '' : `<div class="row"><button type="button" class="btn ghost" id="stActuals">帶入 10/19–10/31 實際出勤</button><span class="hint">11 月第一期要接著算連續上班天數與換班間隔，排之前按一次。</span></div>`}
     <div id="stMsg" class="okmsg" role="status">${esc(staffMsg || '')}</div></div>
   <div class="card" id="hiCard"><h2>新增同仁</h2>
+    <div class="row"><a class="btn" id="hiDzy" href="${DZY_ORIGIN}/#/staff" target="_blank" rel="noopener">到管理系統新增（建議）</a></div>
+    <p class="hint">新同仁請在管理系統新增，會同時建好打卡帳號與管理系統帳號，本人當天就能認領。</p>
+    ${hiredHtml}
+    <details class="fb-box" id="hiFallback"><summary>管理系統連不上時才用（備案）</summary>
+    <div class="note warn mt" id="hiWarn">這裡新增只會建打卡帳號；新人要等總部在管理系統建檔後才能認領帳號，請事後通知總部。</div>
     <p class="hint">${noClock ? '填好按「新增同仁」就會出現在下面的清單。' : '填好按「新增同仁」，系統會<b>同時在打卡系統建立他的帳號</b>，不用再到「出勤核定 › 員工名冊」做一次。'}報到日之前不會排到他。</p>
     <div class="grid2">
       <div class="fld"><label for="hiName">姓名（全名）</label><input type="text" id="hiName" maxlength="20" autocomplete="off"></div>
@@ -62,7 +69,7 @@ export function renderStaff(ctx) {
     <label class="sc-chk"><input type="checkbox" id="hiSame"> 計時但每週上班天數跟正職一樣（特休給完整天數）</label>
     <div class="fld mt"><label>只能上的班（都不勾＝每班都能上）</label><div class="row">${shifts.map((s) => `<label class="sc-chk"><input type="checkbox" class="hi-al" value="${esc(s.id)}"> ${esc(s.name)}</label>`).join('')}</div></div>
     <div class="row mt"><button type="button" class="btn" id="hiAdd">新增同仁</button></div>
-    <div id="hiMsg" class="okmsg" role="status"></div>${hiredHtml}</div>
+    <div id="hiMsg" class="okmsg" role="status"></div></details></div>
   ${D.staff.map(card).join('')}
   <div class="card"><h2>不要排在同一班的兩個人</h2>
     <div class="row"><select id="prA" aria-label="第一個人">${D.staff.map((s) => `<option value="${esc(s.emp_id)}">${esc(s.name)}</option>`).join('')}</select>

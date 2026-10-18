@@ -10,7 +10,7 @@ const KEY = 'dzystore_mockdb';
 // e2e 注入的資料（window.__E2E_DATA，由測試每次隨機產生）；沒有就用下面內建預設，示範模式不受影響。
 const E2E = () => (typeof window !== 'undefined' && window.__E2E_DATA) || {};
 const clone = x => JSON.parse(JSON.stringify(x));
-const DB_VERSION = 10;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
+const DB_VERSION = 11;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
 const MODS = ['purchase', 'cashbook', 'duty', 'transfer', 'loss', 'inventory', 'board', 'schedule'];
 const LABELS = { purchase: '貨單辨識', cashbook: '收支登記', duty: '出勤核定', transfer: '門市調撥', loss: '耗損登記', inventory: '庫存盤點', board: '叫貨看板', schedule: '自動排班' };
 const hex = n => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -84,11 +84,29 @@ const rid = () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'.split('').sort(() => Math.r
 // 生效中的功能＝管理者開通的（features）減掉門市自己關掉的（storeOff）；與伺服器 featuresOf 一致
 const eff = a => a.features.filter(f => !(a.storeOff || []).includes(f));
 const pub = (a, token) => ({ code: a.code, name: a.name, role: a.role, brand: a.brand, mustChangePassword: a.must, features: eff(a), ...(token ? { token: token.token, expiresAt: token.expiresAt } : {}) });
-function log(code, module, action, okk, error) { db.audit.unshift({ at: new Date().toISOString(), code, module, action, ok: okk, ms: 5, error: error || '' }); db.audit.length = Math.min(db.audit.length, 500); }
+let curActor = null;   // 個人登入的姓名（寫進操作紀錄的「操作人」；門市登入沒有＝畫面顯示「門市帳號」）
+function log(code, module, action, okk, error, actor) { db.audit.unshift({ at: new Date().toISOString(), code, module, action, ok: okk, ms: 5, error: error || '', ...((actor || curActor) ? { actor: actor || curActor } : {}) }); db.audit.length = Math.min(db.audit.length, 500); }
+// 個人帳號登入的假後端放在 mock-person.js（用到才載入）。PM＝已載入的模組
+let PM = null, PMP = null;
+const needPerson = (path, token) => {
+  if (/^\/(sso|store-perm)/.test(path) || /^\/admin\/(unit-map|store-login-off)/.test(path)) return true;
+  try { const raw = JSON.parse(localStorage.getItem(KEY) || 'null'); return !!(token && raw && raw.sessions && raw.sessions[token] && raw.sessions[token].sub); } catch (e) { return false; }
+};
+// 假的管理系統發入場券（示範模式的「用管理系統帳號登入」鍵與 e2e 用）；mockPersona＝這個瀏覽器扮演誰（localStorage dzystore_mockwho，預設陳小明店長）
+export async function mintTicket(sub) {
+  const P = await import('./mock-person.js'); db = null; load();
+  if (!db.personas) Object.assign(db, P.seed());
+  const t = P.mint(db, sub); save(); return t;
+}
+export const mockPersona = () => { try { return localStorage.getItem('dzystore_mockwho') || 'DZY023'; } catch (e) { return 'DZY023'; } };
 
 export async function handle(method, path, body, token) {
   await new Promise(r => setTimeout(r, 60));
+  const pth = path.split('?')[0];
+  if (needPerson(pth, token)) { if (!PMP) PMP = import('./mock-person.js'); PM = await PMP; } else PM = null;       // 先載入再讀資料庫，避免載入期間別的請求改掉 db
   db = null; load(); body = body || {};
+  if (PM && !db.personas) Object.assign(db, PM.seed());
+  curActor = null;
   const r = await route(method, path.split('?')[0], path.includes('?') ? new URLSearchParams(path.split('?')[1]) : new URLSearchParams(), body, token);   // 自動排班假後端是 async（要讀假日表），等它做完才存
   save();
   return r;
@@ -99,12 +117,13 @@ function route(method, p, q, b, token) {
     const order = { mala: 1, mzt: 2, yiwu: 3, cf: 4 };
     const stores = Object.values(db.accounts).filter(a => a.role === 'store' && a.active)   // 示範帳號都是 TEST 開頭，不套伺服器的測試店過濾
       .sort((a, b) => (order[a.brand] || 5) - (order[b.brand] || 5) || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0)).map(a => ({ code: a.code, name: a.name }));
-    return ok({ ...db.ui, stores });
+    return ok({ ...db.ui, stores, sso: E2E().sso !== false });      // sso：伺服器有設管理系統連線才有；示範模式預設有（e2e 可用 __E2E_DATA.sso=false 關掉，驗證舊畫面不變）
   }
   if (method === 'POST' && p === '/login') {
     const a = db.accounts[String(b.code || '').toUpperCase()];
     if (!a) return fail('AUTH', '代號或密碼不對');
     if (a.lockUntil > Date.now()) { return fail('LOCKED', '連續輸入錯誤，帳號已鎖定，請 15 分鐘後再試或請管理者解鎖'); }
+    if (a.active && a.pw === b.password && a.role === 'store' && (db.storeLoginOff || []).includes(a.code)) return fail('FORBIDDEN', '這家店已改用個人帳號登入');
     if (!a.active || a.pw !== b.password) {
       if (a.active) a.fails++;
       if (a.fails >= 5) { a.lockUntil = Date.now() + 15 * 60000; a.fails = 0; }
@@ -116,24 +135,38 @@ function route(method, p, q, b, token) {
     db.sessions[t.token] = t; log(a.code, 'auth', 'login', true);
     return ok(pub(a, t));
   }
+  const pub0 = PM && PM.publicRoute(db, method, p, b, eff, log);
+  if (pub0) return pub0;
   const s = token && db.sessions[token];
   if (!s || Date.parse(s.expiresAt) <= Date.now()) return fail('AUTH', '登入已過期，請重新登入');
   const me = db.accounts[s.code];
   if (!me || !me.active) return fail('AUTH', '登入已過期，請重新登入');
+  if (!s.sub && me.role === 'store' && (db.storeLoginOff || []).includes(me.code)) return fail('AUTH', '這家店已改用個人帳號登入，請重新登入');
+  // 個人登入（管理系統帳號）：功能由「本店預設／自訂／支援」算出，每個請求重算（店長改權限立刻生效）；帳號停用或沒有權限就登出
+  const per = s.sub && PM ? PM.personaOf(db, s.sub) : null;
+  const pa = per ? PM.access(db, per, s.code, eff) : null;
+  if (s.sub && (!per || per.active === false || !pa.features.length)) { delete db.sessions[token]; return fail('AUTH', '帳號已停用或沒有這家店的權限'); }
+  const mx = per ? { ...me, features: pa.features, storeOff: [], must: false, person: { sub: per.sub, name: per.name }, canVoid: pa.canVoid, scheduleAdmin: pa.scheduleAdmin } : me;
+  if (per) { s.duty = pa.features.includes('duty'); curActor = per.name; }
   if (method === 'POST' && p === '/logout') { delete db.sessions[token]; return ok(); }
-  if (method === 'GET' && p === '/me') return ok(pub(me));
+  if (method === 'GET' && p === '/me') return ok(per ? PM.sessionBody(db, per, s.code, eff, null) : pub(me));
+  if (per && method === 'POST' && p === '/sso/switch') return PM.personRoute(db, method, p, b, s, per, eff, log);
+  if (PM && /^\/store-perm/.test(p)) { const r = PM.storePermRoute(db, method, p, q, b, s, per, me, eff, log); if (r) return r; }
+  if (per && method === 'POST' && p === '/password') return fail('FORBIDDEN', '個人帳號不使用門市密碼');
   if (method === 'POST' && p === '/password') {
     if (me.pw !== b.oldPassword) return fail('AUTH', '目前的密碼不對');
     if (b.newPassword === '000000') return fail('BAD_INPUT', '新密碼不可以是預設密碼 000000');
     if (String(b.newPassword || '').length < 8) return fail('BAD_INPUT', '新密碼至少要 8 碼');
     me.pw = b.newPassword; me.must = false; return ok();
   }
-  if (me.must) return fail('MUST_CHANGE_PASSWORD', '請先改密碼');
+  if (mx.must) return fail('MUST_CHANGE_PASSWORD', '請先改密碼');
   if (method === 'POST' && p === '/duty/unlock') {
+    if (per) return pa.features.includes('duty') ? ok({ unlocked: true }) : fail('FORBIDDEN', '這個帳號沒有開通出勤核定');      // 個人登入：有出勤核定入口就已解鎖，不用輸入核定密碼
     if (b.password !== (me.duty || '0000')) { log(me.code, 'duty', 'unlock', false, '密碼錯誤'); return fail('FORBIDDEN', '核定密碼不對'); }
     s.duty = true; s.dutyMust = !me.duty; log(me.code, 'duty', 'unlock', true); return ok(s.dutyMust ? { unlocked: true, mustChange: true } : { unlocked: true });
   }
   if (method === 'POST' && p === '/duty/password') {
+    if (per) return fail('FORBIDDEN', '個人帳號不使用出勤核定通行碼');
     if (!s.duty) return fail('FORBIDDEN', '請先輸入目前的核定密碼');
     if (String(b.newPassword || '').length < 4) return fail('BAD_INPUT', '新的核定密碼至少 4 碼');
     if (b.newPassword === '0000') return fail('BAD_INPUT', '新的核定密碼不可以是預設的 0000');
@@ -143,6 +176,7 @@ function route(method, p, q, b, token) {
   }
   if (p === '/my/features') {   // 門市自己開關功能（只限門市帳號、只動自己、只能在管理者開通的範圍內）
     if (me.role !== 'store') return fail('FORBIDDEN', '管理者帳號請到後台管理的功能開關設定');
+    if (per && !pa.isManager) return fail('FORBIDDEN', '只有這家店的店長可以開關功能');
     me.storeOff = me.storeOff || [];
     if (method === 'GET') return ok({ items: MODS.filter(f => me.features.includes(f)).map(id => ({ id, on: !me.storeOff.includes(id) })) });
     if (method === 'POST') {
@@ -153,26 +187,28 @@ function route(method, p, q, b, token) {
       log(me.code, 'settings', 'features', true); return ok({ features: eff(me) });
     }
   }
-  if (method === 'GET' && p === '/home') return ok(homeFor(me));
+  if (method === 'GET' && p === '/home') return ok(homeFor(mx));
   let m = p.match(/^\/m\/(\w+)\/(\w+)$/);
   if (method === 'POST' && m) {
-    if (!MODS.includes(m[1]) || !eff(me).includes(m[1])) return fail('FORBIDDEN', '這家店沒有開通這個功能');
+    if (!MODS.includes(m[1]) || !eff(mx).includes(m[1])) return fail('FORBIDDEN', '這家店沒有開通這個功能');
     if ((db.fail || []).includes(m[1] + '/' + m[2])) return fail('UPSTREAM', '伺服器暫時沒有回應，請稍後再試');   // e2e 用：db.fail = ['模組/動作'] 讓那個動作失敗
     if (m[1] === 'duty' && s.dutyMust) return fail('DUTY_MUST_CHANGE', '請先把出勤核定通行碼改成自己的');
     if (m[1] === 'duty' && !s.duty) return fail('FORBIDDEN', '請先輸入出勤核定通行碼');
-    if (m[1] === 'purchase') return purchase(m[2], me, b);
-    if (m[1] === 'cashbook') return cashbook(m[2], me, b);
-    if (m[1] === 'duty') return duty(m[2], me, s, b);
-    if (m[1] === 'transfer') return transferMock(m[2], me, b, db);
-    if (m[1] === 'inventory') return invMock(m[2], me, b, db);
-    if (m[1] === 'loss') return lossMock(m[2], me, b, db);
-    if (m[1] === 'board') return boardMock(m[2], me, b, db);
-    if (m[1] === 'schedule') return import('./mock-schedule.js').then(x => x.schedule(m[2], me, b, db, s, { addEmployee: name => dutyDo(dutyDb(), 'mgr_add_employee', { name }) }));   // 用到才載入（排班計算檔案多，放在開頁就載會拉長每一頁的載入時間，WebKit 換頁時更容易打斷其他假資料的讀取）
+    if (m[1] === 'purchase') return purchase(m[2], mx, b);
+    if (m[1] === 'cashbook') return cashbook(m[2], mx, b);
+    if (m[1] === 'duty') return duty(m[2], mx, s, b);
+    if (m[1] === 'transfer') return transferMock(m[2], mx, b, db);
+    if (m[1] === 'inventory') return invMock(m[2], mx, b, db);
+    if (m[1] === 'loss') return lossMock(m[2], mx, b, db);
+    if (m[1] === 'board') return boardMock(m[2], mx, b, db);
+    if (m[1] === 'schedule' && per && !pa.scheduleAdmin && ['lock', 'unlock', 'resend'].includes(m[2])) return fail('FORBIDDEN', '只有店長、人資主管或管理員可以鎖定、解鎖或重送班表');
+    if (m[1] === 'schedule') return import('./mock-schedule.js').then(x => x.schedule(m[2], mx, b, db, s, { addEmployee: name => dutyDo(dutyDb(), 'mgr_add_employee', { name }) }));   // 用到才載入（排班計算檔案多，放在開頁就載會拉長每一頁的載入時間，WebKit 換頁時更容易打斷其他假資料的讀取）
     return fail('NOT_FOUND', '還在搬移中，暫時請用原本的系統');
   }
   if (p.startsWith('/admin/')) {
     if (me.role !== 'admin') return fail('FORBIDDEN', '只有管理者可以使用');
-    return admin(method, p, q, b, me);
+    const ar = PM && PM.adminRoute(db, method, p, b, me, log);
+    return ar || admin(method, p, q, b, me);
   }
   return fail('NOT_FOUND', '找不到這個功能');
 }
@@ -388,6 +424,7 @@ function cashbook(action, me, b) {
   if (fault && fault.once) cb.faults.splice(fi, 1);
   if (fault && fault.mode === 'timeout') return fail('TIMEOUT', '現金帳回應太久，這次不一定沒記進去，請先看明細確認');
   if (fault && fault.mode === 'down') return fail('UPSTREAM', '現金帳沒有回應，請稍後再試');
+  if (action === 'void' && me.person && !me.canVoid) return fail('FORBIDDEN', '你沒有作廢收支的權限');   // 個人登入：只有 canVoid 的人能作廢（伺服器另外擋）
   const out = cbDo(cb, action, store, b);
   if (fault && fault.mode === 'timeout-saved') return fail('TIMEOUT', '現金帳回應太久，這次不一定沒記進去，請先看明細確認');
   if (out.ok) log(store, 'cashbook', action, true);

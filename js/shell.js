@@ -1,6 +1,6 @@
-import { MOCK } from './config.js';
+import { MOCK, EMBED, EMBED_ORIGIN, DZY_LOGIN_URL, ONLY_DUTY } from './config.js';
 import { api } from './api.js';
-import { initAuth, getSession, setSession, clearSession, rememberedCode, login, logout, changePassword } from './auth.js';
+import { initAuth, getSession, setSession, clearSession, rememberedCode, login, logout, changePassword, toSession, ssoRedeem, ssoSelect, ssoSwitch, adoptResult } from './auth.js';
 import { MODULES, ADMIN_TABS } from './registry.js';
 import { esc, busy, setMsg, applyUi } from './ui.js';
 import { applyTheme } from './theme.js';
@@ -24,26 +24,30 @@ function route() {
 }
 export function go(hash) { if (location.hash === hash) render(); else location.hash = hash; }
 
-const NAV_ICONS = { home: '🏠', purchase: '🧾', cashbook: '💰', duty: '🕒', transfer: '🔄', loss: '🗑️', inventory: '📦', board: '📋', schedule: '📅', admin: '⚙️' };
+const NAV_ICONS = { staffperm: '👥', home: '🏠', purchase: '🧾', cashbook: '💰', duty: '🕒', transfer: '🔄', loss: '🗑️', inventory: '📦', board: '📋', schedule: '📅', admin: '⚙️' };
 // 左側深色側邊欄（外觀正本 ~/mala-clock-in/payroll.html .sidebar）：品牌→首頁→有開的系統→（管理者）後台管理→使用者區
 function sidebarHtml(s, cur) {
   const feats = new Set(s.features || []);
   const mods = [...(UI.cards || [])].sort((a, b) => a.order - b.order)
-    .filter(c => c.visible && feats.has(c.id) && MODULES.some(m => m.id === c.id));
+    .filter(c => c.visible && feats.has(c.id) && MODULES.some(m => m.id === c.id) && (!ONLY_DUTY || c.id === 'duty'));   // ?only=duty：只剩出勤核定
+  const p = s.person, many = p && (s.stores || []).length > 1;
   const item = (key, href, label) => `<a href="${href}" data-nav="${key}" class="${cur === key ? 'on' : ''}"${cur === key ? ' aria-current="page"' : ''}><span class="ic">${NAV_ICONS[key] || '•'}</span>${esc(label)}</a>`;
   return `<aside class="sidebar" id="sidebar">
     <a class="brand" href="#/" id="brand"><div class="logos"></div><div><div class="bt js-bt" id="brandName"></div><div class="bs js-bs"></div></div></a>
     <nav id="nav" aria-label="系統選單">
-      ${item('home', '#/', '首頁')}
+      ${ONLY_DUTY ? '' : item('home', '#/', '首頁')}
       ${mods.length ? '<div class="nav-label">系統</div>' : ''}
       ${mods.map(c => item(c.id, `#/${c.id}/`, c.label)).join('')}
-      ${s.role === 'admin' ? `<div class="nav-label">管理</div>${item('admin', '#/admin/accounts', '後台管理').replace('<a ', '<a id="adminLink" ')}` : ''}
+      ${!ONLY_DUTY && canStaffPerm(s) ? item('staffperm', '#/staffperm', '本店同仁權限') : ''}
+      ${ONLY_DUTY ? '' : s.role === 'admin' ? `<div class="nav-label">管理</div>${item('admin', '#/admin/accounts', '後台管理').replace('<a ', '<a id="adminLink" ')}` : ''}
     </nav>
     <div class="side-user"><div class="av">🙂</div>
-      <div class="su-main"><div class="nm" id="whoName">${esc(s.name)}</div><div class="rl">${esc(s.code || '')}${s.role === 'admin' ? '・管理者' : ''}</div></div>
-      <div class="su-act">${!s.mustChangePassword ? '<a href="#/password" id="pwLink">改密碼</a>' : ''}${!s.mustChangePassword && s.role === 'store' ? '<a href="#/features" id="featLink">功能開關</a>' : ''}<button id="logoutBtn" type="button">登出</button></div></div>
+      <div class="su-main"><div class="nm" id="whoName">${p ? esc(p.name + '・' + s.name) : esc(s.name)}</div><div class="rl">${p ? '管理系統帳號' : esc(s.code || '') + (s.role === 'admin' ? '・管理者' : '')}</div></div>
+      <div class="su-act">${!s.mustChangePassword && !p ? '<a href="#/password" id="pwLink">改密碼</a>' : ''}${!s.mustChangePassword && s.role === 'store' && (!p || s.isManager) && !ONLY_DUTY ? '<a href="#/features" id="featLink">功能開關</a>' : ''}${many ? '<a href="#/switch" id="switchLink">換店</a>' : ''}<button id="logoutBtn" type="button">登出</button></div></div>
   </aside>`;
 }
+// 「本店同仁權限」：只有個人登入的店長（管理系統管理員也算店長）；門市登入、後台管理者帳號都沒有
+const canStaffPerm = s => !!(s.person && s.isManager);
 function bannerHtml() { return UI.banner ? `<div class="banner" id="uiBanner">${esc(UI.banner)}</div>` : ''; }
 function tabsHtml(base, tabs, cur) {
   return `<nav class="tabs">${tabs.map(t => `<a href="#/${base}/${t.id}" data-tab="${t.id}" class="${t.id === cur ? 'on' : ''}">${esc(t.label)}</a>`).join('')}</nav>`;
@@ -56,7 +60,8 @@ function frame(s, inner, nav, opts) {
     // 登入／強制改密碼：最上方深色頂條（照貨單辨識系統）＋置中白卡
     app.innerHTML = `<header class="hdr"><div class="logos"></div><span class="ttl" id="sysName">${esc(UI.systemName)}</span></header><section class="login-view">${inner}</section>`;
   } else {
-    app.innerHTML = `<div class="app">${sidebarHtml(s, opts.cur)}<div class="main-wrap"><div class="topbar"><h1 class="page-title" id="pageTitle">${esc(opts.title || '')}</h1>${opts.sub ? `<div class="sub">${esc(opts.sub)}</div>` : ''}</div>${nav || ''}<main>${inner}</main></div></div>`;
+    const embedBar = EMBED && s.person ? `<div class="embed-who"><span id="embedWho">${esc(s.person.name + '・' + s.name)}</span>${(s.stores || []).length > 1 ? '<a href="#/switch" id="embedSwitch">換店</a>' : ''}</div>` : '';
+    app.innerHTML = `<div class="app">${sidebarHtml(s, opts.cur)}<div class="main-wrap"><div class="topbar"><h1 class="page-title" id="pageTitle">${esc(opts.title || '')}</h1>${opts.sub ? `<div class="sub">${esc(opts.sub)}</div>` : ''}${embedBar}</div>${nav || ''}<main>${inner}</main></div></div>`;
   }
   applyTheme(s ? s.brand : null, UI.logoUrl);
   bindLogout();
@@ -82,6 +87,7 @@ function viewLogin() {
     <label class="f" for="password">密碼<input id="password" type="password" autocomplete="current-password"></label>
     <p class="pwhint" id="pwHint">第一次使用的預設密碼是 000000，登入後系統會請你設定自己的新密碼。</p>
     <div id="loginErr" class="err" role="alert"></div><button class="lbtn" id="loginBtn" type="submit">登入</button></form>
+    ${UI.sso ? '<div class="sso-or"><span>或</span></div><button class="lbtn plain" id="ssoBtn" type="button">用管理系統帳號登入</button>' : ''}
     <div class="login-links"><button type="button" id="forgotBtn" class="linkbtn" aria-expanded="false" aria-controls="forgotBox">忘記密碼</button>
       <a id="guideLink" href="guide.html" target="_blank" rel="noopener">操作手冊</a></div>
     <div class="note" id="forgotBox" hidden>忘記密碼請找管理者，在後台重設。重設後密碼會回到 000000，登入後再自己設定新密碼。</div></div></div></div>`);
@@ -90,7 +96,10 @@ function viewLogin() {
   const fb = main.querySelector('#forgotBtn'), fbox = main.querySelector('#forgotBox');
   fb.onclick = () => { fbox.hidden = !fbox.hidden; fb.setAttribute('aria-expanded', String(!fbox.hidden)); };
   const f = main.querySelector('#loginForm');
-  if (rememberedCode()) main.querySelector('#password').focus();
+  const sb = main.querySelector('#ssoBtn');
+  if (sb) sb.onclick = () => { SSO_ERR = ''; goDzyLogin(); };
+  if (SSO_ERR) setMsg(f.querySelector('#loginErr'), SSO_ERR);
+  if (rememberedCode() && !SSO_ERR) main.querySelector('#password').focus();
   f.onsubmit = e => {
     e.preventDefault();
     busy(f.querySelector('#loginBtn'), async () => {
@@ -165,15 +174,15 @@ function viewHome(s, tok) {
     .filter(c => c.visible && feats.has(c.id) && MODULES.some(m => m.id === c.id));
   const html = cards.length
     ? `<div id="todoBody" aria-live="polite">${cards.map(c => `<section class="card todo-group" data-module="${c.id}"><h2>${esc(c.label)}</h2><div class="todo-body"><div class="hint">讀取中…</div></div></section>`).join('')}</div>`
-    : `<div class="card"><p>目前還沒有開通任何功能，請洽管理者。</p>${s.role === 'store' ? '<p class="hint" id="noFeatHint">如果是自己關掉的，可到選單裡你的店名旁「功能開關」打開。</p>' : ''}</div>`;
-  frame(s, bannerHtml() + html, '', { cur: 'home', title: '待辦與異常', sub: s.name });
+    : `<div class="card"><p>目前還沒有開通任何功能，請洽管理者。</p>${s.role === 'store' && (!s.person || s.isManager) ? '<p class="hint" id="noFeatHint">如果是自己關掉的，可到選單裡你的店名旁「功能開關」打開。</p>' : ''}</div>`;
+  frame(s, bannerHtml() + html, '', { cur: 'home', title: '待辦與異常', sub: s.person ? s.person.name + '・' + s.name : s.name });
   if (cards.length) loadTodos(tok);
 }
 
 // ---------- 功能開關（門市自己開關，只影響自己這一店；2026-10-14） ----------
 // 管理者在後台開通的才會列出來；關掉＝這家店的側邊欄與首頁不再出現、直接打網址也進不去。每個開關一切就送出，失敗就復原
 async function viewFeatures(s) {
-  if (s.role !== 'store') return go('#/');
+  if (s.role !== 'store' || (s.person && !s.isManager)) return go('#/');      // 個人登入只有店長可以開關整店功能
   const main = frame(s, `${bannerHtml()}<div class="card"><h2>功能開關</h2>
     <p class="hint">只影響你這家店。管理者沒有開通的功能不會出現在這裡，要開請洽管理者。</p>
     <div id="ftMsg" class="err" role="alert"></div><div id="ftList"><div class="hint">讀取中…</div></div></div>`, '', { cur: '', title: '功能開關' });
@@ -228,17 +237,157 @@ async function viewAdmin(s, tab, tok) {
   const main = frame(s, `<div id="admBody"></div>`, tabsHtml('admin', ADMIN_TABS, cur), { cur: 'admin', title: '後台管理' });
   const view = (await import(`../admin/${cur}.js`)).default;
   if (tok !== renderToken) return;
-  view({ el: main.querySelector('#admBody'), api, session: s, refreshUi: async () => { await loadUi(); } });
+  view({ el: main.querySelector('#admBody'), api, session: s, ui: UI, refreshUi: async () => { await loadUi(); } });
+}
+
+// ---------- 個人帳號登入（管理系統帳號）----------
+// 入場券一次性、60 秒：從網址 #sso=<64 hex> 或嵌入時 parent 的 postMessage 拿到，立刻兌換成營運系統自己的登入。
+let SSO_ERR = '';        // 個人登入失敗的白話訊息（登入頁／嵌入等待畫面顯示）
+let PENDING = null;      // 多店要選時：{ select_token, stores }（只放記憶體，不進任何儲存）
+let SSO_BUSY = false;
+const TICKET_RE = /^[0-9a-f]{64}$/;
+
+// 網址帶 #sso= 就讀走並「立刻」用 replaceState 清掉（券不留在網址列、歷史紀錄）。回 ticket、'' 表示格式不對、null 表示網址沒有券
+function takeTicketFromHash() {
+  if (!/^#sso=/.test(location.hash)) return null;
+  const m = /^#sso=([0-9a-f]{64})$/.exec(location.hash);
+  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* 舊瀏覽器 */ }
+  return m ? m[1] : '';
+}
+async function goDzyLogin() {
+  if (MOCK) { const m = await import('./mock.js'); location.hash = '#sso=' + await m.mintTicket(m.mockPersona()); return; }   // 示範模式：假的管理系統，直接發一張假券
+  location.href = DZY_LOGIN_URL + '?return=' + encodeURIComponent(location.origin + location.pathname + location.search);
+}
+// 兌換並採用。fromParent＝嵌入握手：已有登入時，伺服器回的 sub 相同就保留原本的（可能已換過店），不同就先登出舊的再換
+async function runTicket(ticket, fromParent) {
+  if (SSO_BUSY) return;
+  SSO_BUSY = true; SSO_ERR = '';
+  try {
+    let r = await ssoRedeem(ticket);
+    const old = getSession();
+    if (r.select_token) {
+      if (fromParent && old && (r.stores || []).some(x => x.code === old.code)) r = await ssoSelect(r.select_token, old.code);   // 重新握手：先試著進原本那家店
+      else { PENDING = { select_token: r.select_token, stores: r.stores || [] }; return; }
+    }
+    const { kept } = await adoptResult(r, fromParent);
+    PENDING = null;
+    if (!kept && old) { location.hash = ONLY_DUTY ? '#/duty/' : '#/'; location.reload(); return; }   // 換了人／換了登入方式：整頁重載，不留上一個人的畫面與暫存
+    if (!kept) location.hash = ONLY_DUTY ? '#/duty/' : '#/';
+  } catch (e) {
+    if (getSession() && fromParent) console.error('嵌入重新握手失敗：' + e.message);   // 已有登入就不打擾，使用者繼續用目前的
+    else SSO_ERR = e.message;
+  } finally { SSO_BUSY = false; render(); }
+}
+async function onHash() {
+  const t = takeTicketFromHash();
+  if (t === null) return render();
+  if (t) return runTicket(t, false);
+  SSO_ERR = '入場券格式不正確，請重新用管理系統帳號登入'; render();
+}
+
+// ---------- 嵌入管理系統（?embed=dzy）：postMessage 握手 ----------
+// 載入後對 parent 送 ready；只收 origin 與 source 都對的訊息（照公告專區）。每次收到新券都會兌換，sub 不同就先登出舊 session。
+const sendReady = () => { try { window.parent.postMessage({ type: 'dzy-store-ready', v: 1 }, EMBED_ORIGIN); } catch (e) { /* parent 不接受就算了 */ } };
+function installEmbed() {
+  document.body.classList.add('embed');
+  window.addEventListener('message', e => {
+    if (e.origin !== EMBED_ORIGIN || e.source !== window.parent) return;
+    const m = e.data;
+    if (!m || typeof m !== 'object' || m.v !== 1) return;
+    if (m.type === 'dzy-store-sso' && typeof m.ticket === 'string' && TICKET_RE.test(m.ticket)) runTicket(m.ticket, true);
+    else if (m.type === 'dzy-store-logout') embedLogout();
+  });
+  sendReady();
+}
+async function embedLogout() {
+  PENDING = null; SSO_ERR = '';
+  if (getSession()) await logout();
+  location.hash = '#/'; location.reload();
+}
+
+function viewEmbedWait() {
+  const main = frame(null, `<div class="page"><div class="lcard"><h1>${esc(UI.systemName)}</h1>
+    <p class="muted" id="embedStatus" role="status">${esc(SSO_ERR || '正在連線管理系統…')}</p>
+    ${SSO_ERR ? '<button class="lbtn plain" id="embedRetry" type="button">重新連線</button>' : ''}</div></div>`);
+  const b = main.querySelector('#embedRetry');
+  if (b) b.onclick = () => { SSO_ERR = ''; sendReady(); render(); };
+}
+
+// 多店：登入後選一家
+function viewSelect() {
+  const main = frame(null, `<div class="page"><div class="lcard"><h1>選擇要進入的門市</h1><p class="muted">你的帳號可以進入下面這些門市，請選一家。</p>
+    <div id="selErr" class="err" role="alert"></div>
+    ${PENDING.stores.map(x => `<button class="lbtn plain" type="button" data-store="${esc(x.code)}">${esc(x.name)}</button>`).join('')}
+    <div class="login-links"><button type="button" id="selCancel" class="linkbtn">取消</button></div></div></div>`);
+  main.querySelectorAll('[data-store]').forEach(b => {
+    b.onclick = () => busy(b, async () => {
+      try {
+        const old = getSession();
+        const d = await ssoSelect(PENDING.select_token, b.dataset.store);
+        await adoptResult(d, false);
+        PENDING = null;
+        if (old) { location.hash = ONLY_DUTY ? '#/duty/' : '#/'; location.reload(); return; }
+        location.hash = ONLY_DUTY ? '#/duty/' : '#/'; render();
+      } catch (er) { setMsg(main.querySelector('#selErr'), er.message); if (er.code === 'AUTH') PENDING = null; }
+    });
+  });
+  main.querySelector('#selCancel').onclick = () => { PENDING = null; SSO_ERR = ''; render(); };
+}
+// 換店（已登入的個人帳號）：同分頁換新 token，舊 token 在伺服器立即刪除
+function viewSwitch(s) {
+  const list = s.stores || [];
+  const main = frame(s, `${bannerHtml()}<div class="card"><h2>換店</h2><p class="hint">選一家要進入的門市；功能與權限會依你在那家店的設定重新計算。</p>
+    <div id="swErr" class="err" role="alert"></div>
+    <div class="sw-list">${list.map(x => `<button class="btn ghost sw-btn" type="button" data-store="${esc(x.code)}"${x.code === s.code ? ' disabled' : ''}>${esc(x.name)}${x.code === s.code ? '（目前）' : ''}</button>`).join('')}</div></div>`, '', { cur: '', title: '換店' });
+  main.querySelectorAll('[data-store]').forEach(b => {
+    b.onclick = () => busy(b, async () => {
+      try {
+        const d = await ssoSwitch(b.dataset.store);
+        setSession(toSession(d));
+        location.hash = ONLY_DUTY ? '#/duty/' : '#/'; location.reload();
+      } catch (er) { setMsg(main.querySelector('#swErr'), er.message); }
+    });
+  });
+}
+function viewNoDuty(s) {
+  const many = s.person && (s.stores || []).length > 1;
+  frame(s, `<div class="card"><h2>出勤核定</h2><p class="hint" id="onlyNoDuty">你的帳號在這家店（${esc(s.name)}）沒有出勤核定的權限。${many ? '可以換到別家店試試。' : '如需使用請洽總部。'}</p>
+    ${many ? '<a class="btn ghost" href="#/switch" id="noDutySwitch">換店</a>' : ''}</div>`, '', { cur: '', title: '出勤核定' });
+}
+async function viewStaffPerm(s, tok) {
+  if (!canStaffPerm(s)) return go('#/');
+  const main = frame(s, '<div id="spBody"></div>', '', { cur: 'staffperm', title: '本店同仁權限' });
+  const view = (await import('./staffperm.js')).default;
+  if (tok !== renderToken) return;
+  view({ el: main.querySelector('#spBody'), api, session: s, ui: UI });
+}
+
+// 個人登入：開頁時向伺服器重讀自己的權限（店長改過本店同仁權限、總部改過作廢／考勤，重新開頁就立刻看到；伺服器每個請求本來就會重算，這裡只是讓畫面跟上）
+async function refreshMe() {
+  const s = getSession();
+  if (!s || !s.person) return;
+  try {
+    const d = await api('GET', '/me');
+    const cur = getSession();
+    if (cur && cur.token === s.token) setSession({ ...cur, name: d.name || cur.name, brand: d.brand || cur.brand, features: d.features || [], canVoid: !!d.canVoid, isManager: !!d.isManager, scheduleAdmin: !!d.scheduleAdmin, dutyUnlocked: !!d.dutyUnlocked, dutyManager: d.dutyManager !== false, stores: d.stores || cur.stores });
+  } catch (e) { /* 登入失效 api 已處理；連不上就先沿用舊的 */ }
 }
 
 export async function render() {
   const tok = ++renderToken;
   let s = getSession();
-  if (!s) return viewLogin();
+  if (PENDING) return viewSelect();
+  if (!s) return EMBED ? viewEmbedWait() : viewLogin();
   if (s.mustChangePassword) return viewPassword(s);
   const r = route();
   window.scrollTo(0, 0);
-  if (r.page === 'password') return viewPassword(s);
+  if (r.page === 'switch') return s.person ? viewSwitch(s) : go('#/');
+  if (ONLY_DUTY) {                          // ?only=duty：只有出勤核定（含換考勤店）；首頁與其他功能都不顯示
+    if (!(s.features || []).includes('duty')) return viewNoDuty(s);
+    if (r.page !== 'duty') { history.replaceState(null, '', '#/duty/'); return render(); }
+  }
+  if (r.page === 'password') return s.person ? go('#/') : viewPassword(s);
+  if (r.page === 'staffperm') return viewStaffPerm(s, tok);
   if (r.page === 'features') return viewFeatures(s);
   if (r.page === 'admin') return viewAdmin(s, r.tab, tok);
   if (r.page) return viewModule(s, r.page, r.tab, tok);
@@ -247,9 +396,13 @@ export async function render() {
 
 async function boot() {
   if (MOCK) { const db = document.getElementById('demoBar'); db.textContent = '示範模式：資料只存在這個瀏覽器，不會送到真的系統'; db.hidden = false; document.body.classList.add('has-demo'); }
-  initAuth(() => { location.hash = '#/'; render(); }, () => render());
+  initAuth(() => { location.hash = '#/'; if (EMBED) sendReady(); render(); }, () => render());      // 嵌入時登入過期 → 再對 parent 要一張新券
   await loadUi();
-  window.addEventListener('hashchange', render);
-  render();
+  window.addEventListener('hashchange', onHash);
+  if (EMBED) installEmbed();
+  await refreshMe();
+  const t = takeTicketFromHash();                                  // 從管理系統帶券回來：先兌換再畫第一個畫面
+  if (t === null) return render();
+  if (t) await runTicket(t, false); else { SSO_ERR = '入場券格式不正確，請重新用管理系統帳號登入'; render(); }
 }
 boot();

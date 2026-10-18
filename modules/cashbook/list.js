@@ -1,6 +1,7 @@
 // 明細分頁：看、改、作廢。沒有刪除鍵——送出後的每一筆都留在帳上（2026-09-08 Eason 指示：刪除一律留痕）。
 // 作廢的筆灰掉、劃線、標「已作廢」，不列入合計，但它還在。清單是分隔線列表，點該列才展開操作鍵（一頁看得到 6～7 筆）。
 import { esc } from '../../js/ui.js';
+import { getSession } from '../../js/auth.js';
 import { money } from './calc.js';
 import { S, call, isLocked, monthOf, loadMonth, subjectsOf, msgOf } from './state.js';
 import { runBusy } from './busy.js';
@@ -20,12 +21,14 @@ function editForm(r) {
   </div>`;
 }
 
+// 個人登入且沒有收支作廢權限（canVoid）就不顯示「作廢」鍵；伺服器端另外擋（前端只是輔助）
+const canVoid = () => { const s = getSession(); return !(s && s.person) || !!s.canVoid; };
 function rowHtml(r, locked) {
   const voided = r.status === '作廢';
   const open = (S.openId === r.id || S.editingId === r.id) && !voided && !locked;
   const meta = `${r.subject}　#${r.seq}${r.hasInvoice ? `　發票（稅 ${r.tax}）` : '　收據'}${r.photo ? '　📎' : ''}`;
   const actions = !open ? '' : S.editingId === r.id ? editForm(r)
-    : `<div class="cb-actions"><button class="btn ghost sm" type="button" data-act="edit" data-id="${esc(r.id)}">修改</button><button class="btn ghost sm" type="button" data-act="void" data-id="${esc(r.id)}" data-busy="作廢中">作廢</button></div>`;
+    : `<div class="cb-actions"><button class="btn ghost sm" type="button" data-act="edit" data-id="${esc(r.id)}">修改</button>${canVoid() ? `<button class="btn ghost sm" type="button" data-act="void" data-id="${esc(r.id)}" data-busy="作廢中">作廢</button>` : ''}</div>`;
   return `<li class="cb-item ${r.kind === '收入' ? 'income' : 'expense'}${voided ? ' voided' : ''}${open ? ' open' : ''}" data-id="${esc(r.id)}">
     <span class="d">${esc(r.date.slice(5))}</span>
     <span class="b"><span class="n">${esc(r.name)}</span><span class="m">${voided ? '<span class="cb-void">已作廢</span>　' : ''}${esc(meta)}${r.voidReason ? `<br>作廢原因：${esc(r.voidReason)}` : ''}</span></span>

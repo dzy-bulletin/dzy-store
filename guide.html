@@ -36,7 +36,7 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
 <header><h1>門市操作手冊</h1><p>登入、貨單辨識、收支登記、出勤核定、耗損登記</p></header>
 <div class="wrap">
 <nav class="toc" aria-label="目錄"><b>想看哪一段</b>
-  <a href="#login">登入與改密碼</a><a href="#home">首頁</a><a href="#purchase">貨單辨識</a><a href="#cashbook">收支登記</a><a href="#duty">出勤核定</a><a href="#transfer">門市調撥</a><a href="#loss">耗損登記</a><a href="#inventory">庫存盤點</a><a href="#board">叫貨看板</a><a href="#schedule">自動排班</a><a href="#staff">新進與離職同仁</a><a href="#help">遇到問題</a></nav>
+  <a href="#login">登入與改密碼</a><a href="#home">首頁</a><a href="#purchase">貨單辨識</a><a href="#cashbook">收支登記</a><a href="#duty">出勤核定</a><a href="#transfer">門市調撥</a><a href="#loss">耗損登記</a><a href="#inventory">庫存盤點</a><a href="#board">叫貨看板</a><a href="#schedule">自動排班</a><a href="#staff">新進與離職同仁</a><a href="#person">用個人帳號登入</a><a href="#help">遇到問題</a></nav>
 
 <section id="login"><h2>一、登入與改密碼</h2>
   <h3>第一次登入</h3>
@@ -180,7 +180,7 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
   <h3>員工名冊</h3>
   <p>切到 <b>員工名冊</b>：</p>
   <ul>
-    <li><b>新進同仁報到</b>：<b>建議改在「自動排班 › 同仁」新增</b>（見「十一、新進與離職同仁」），可以一次填好報到日與正職／計時。這裡只建打卡帳號，建好後請他打開 LINE「鼎兆元打卡」綁定；舊版專屬打卡連結收在「舊版專屬打卡連結」裡，沒用 LINE 打卡的人才需要。</li>
+    <li><b>新進同仁報到</b>：<b>請到管理系統新增</b>（見「十一、新進與離職同仁」）。這裡的「管理系統連不上時才用（備案）」預設收合，展開才有 <span class="btn">建立帳號</span>，只建打卡帳號，建好後請他打開 LINE「鼎兆元打卡」綁定，並通知總部到管理系統建檔；舊版專屬打卡連結收在「舊版專屬打卡連結」裡，沒用 LINE 打卡的人才需要。</li>
     <li><b>同仁異動</b>：選同仁按 <span class="btn">設為離職</span>，他立刻不能打卡，過去的紀錄都保留。設錯了，在「已離職」清單按 <span class="btn">恢復在職</span>。同仁要離職，請先看「十一、新進與離職同仁」的順序。</li>
   </ul>
   <h3>公告</h3>
@@ -375,13 +375,20 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
 </section>
 
 <section id="staff"><h2>十一、新進與離職同仁</h2>
-  <p>同仁的報到、身分、離職都在 <b>自動排班 › 同仁</b> 處理。有打卡系統、也開通「出勤核定」的店，系統會在背後同時建好打卡帳號（沒開通出勤核定的店不能在這裡新增，請先找管理者開通），<b>不用再到「出勤核定 › 員工名冊」做一次</b>。</p>
-  <h3>新進同仁</h3>
+  <p><b>新同仁請統一在管理系統新增</b>，營運系統只當備案。報到後的身分、排班資料與離職日在 <b>自動排班 › 同仁</b> 處理。</p>
+  <h3>新進同仁（建議：管理系統）</h3>
   <ol>
-    <li>到 <b>自動排班</b> → 上方切到 <b>同仁</b> → 「新增同仁」那張卡片。</li>
-    <li>填 <b>姓名（全名）</b>、<b>報到日期（必填，報到日之前不會排到他）</b>、<b>身分</b>（正職或計時；計時另外填每期目標工時、契約每週工時），有的話再填生日、手機、只能上的班。</li>
-    <li>按 <span class="btn">新增同仁</span>，確認後就建好了。畫面會寫出他的員工編號；請他打開 LINE「鼎兆元打卡」，第一次打卡時<b>人在店裡</b>、輸入全名綁定。</li>
-    <li>排進班表：這一期<b>還沒鎖定</b>就到「班表」按 <span class="btn">自動排班</span>；<b>已經鎖定</b>要先解除鎖定（要出勤核定密碼，LINE 上那一期會暫時撤下）→ 自動排班 → 沒有紅字再鎖定並發布。</li>
+    <li>到 <b>自動排班</b> → 上方切到 <b>同仁</b> → 「新增同仁」那張卡片，按最上面的 <span class="btn">到管理系統新增（建議）</span>（會開新分頁，到管理系統的人員管理）。</li>
+    <li>在管理系統新增這位同仁：會同時建好打卡帳號與管理系統帳號，本人當天就能認領。</li>
+    <li>回到營運系統，請他打開 LINE「鼎兆元打卡」，第一次打卡時<b>人在店裡</b>、輸入全名綁定。</li>
+    <li>回到「同仁」找到他，設定正職或計時、報到日期；這一期<b>還沒鎖定</b>就到「班表」按 <span class="btn">自動排班</span>；<b>已經鎖定</b>要先解除鎖定（要出勤核定密碼，LINE 上那一期會暫時撤下）→ 自動排班 → 沒有紅字再鎖定並發布。</li>
+  </ol>
+  <h3>管理系統連不上時（備案）</h3>
+  <ol>
+    <li>同一張「新增同仁」卡片下方，展開 <b>管理系統連不上時才用（備案）</b>（預設收合）。上方紅框提醒：這裡新增只會建打卡帳號，新人要等總部在管理系統建檔後才能認領帳號。</li>
+    <li>填 <b>姓名（全名）</b>、<b>報到日期（必填，報到日之前不會排到他）</b>、<b>身分</b>（正職或計時；計時另外填每期目標工時、契約每週工時），有的話再填生日、手機、只能上的班。按 <span class="btn">新增同仁</span>，確認後就建好了，畫面會寫出他的員工編號。</li>
+    <li><b>事後一定要通知總部</b>到管理系統把他建檔，他才能認領管理系統帳號。</li>
+    <li>有打卡系統、也開通「出勤核定」的店才會同時建打卡帳號（沒開通出勤核定的店不能在這裡新增，請先找管理者開通）。</li>
   </ol>
   <div class="tip">期中才報到的同仁，例假與休息日依在職天數比例計算。同名的人不能同時在職（薪資和班表會對錯人），真的同名請加姓氏或括號區分。</div>
   <h3>離職同仁</h3>
@@ -394,12 +401,43 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
   <h3>另外兩件事</h3>
   <ul>
     <li><b>正職改計時（或反過來）</b>：在他的卡片改身分，「身分從哪天開始」要填<b>某一期的第一天</b>，期中換會被擋。</li>
-    <li><b>沒有 LINE 打卡的店</b>（例如墨竹亭六張犁）：一樣在「同仁」新增，只會存在排班裡，不會建打卡帳號。</li>
+    <li><b>沒有 LINE 打卡的店</b>（例如墨竹亭六張犁）：一樣先在管理系統新增；若用備案表單，只會存在排班裡，不會建打卡帳號。</li>
   </ul>
-  <figure class="shot"><img src="img/guide/28-schedule-hire.jpg" width="780" height="1688" loading="lazy" alt="自動排班 › 同仁：新增同仁"><figcaption>新增同仁</figcaption></figure>
+  <figure class="shot"><img src="img/guide/28-schedule-hire.jpg" width="780" height="1688" loading="lazy" alt="自動排班 › 同仁：新增同仁"><figcaption>新增同仁：上方「到管理系統新增（建議）」，備案表單收合在下方</figcaption></figure>
 </section>
 
-<section id="help"><h2>十二、遇到問題</h2>
+<section id="person"><h2>十二、用個人帳號登入、本店同仁權限</h2>
+  <p>總部開通「管理系統帳號登入」之後，登入畫面會多一個 <span class="btn">用管理系統帳號登入</span>。用自己的管理系統帳號進來，系統就知道<b>是誰</b>在操作：出勤核定、紀錄都會記你的名字，也不用再輸入出勤核定密碼。</p>
+  <h3>怎麼登入</h3>
+  <ol>
+    <li>在登入畫面按 <span class="btn">用管理系統帳號登入</span>，會跳到管理系統；已經登入管理系統的話，會自動帶你回來。</li>
+    <li>只能進一家店的人，直接進首頁；能進兩家以上的人，會先看到「選擇要進入的門市」，點你要進的那一家。</li>
+    <li>左側欄下方（手機是頂端）會寫「<b>姓名・店名</b>」。要換另一家店，按 <span class="btn">換店</span>。</li>
+    <li>個人登入沒有「改密碼」；密碼在管理系統改。</li>
+  </ol>
+  <figure class="shot"><img src="img/guide/32-sso-select.jpg" width="780" height="1688" loading="lazy" alt="選擇要進入的門市：列出可進的店"><figcaption>多家店時先選店</figcaption></figure>
+  <div class="tip">在管理系統裡點「門市營運」也可以直接進來，不用再登入一次；只看出勤核定的「考勤管理」則只會出現出勤核定。</div>
+  <h3>本店同仁權限（只有店長看得到）</h3>
+  <p>店長在左側欄按 <b>本店同仁權限</b>，決定本店每位同仁能用哪些功能：</p>
+  <ol>
+    <li>表格最上面一列是 <b>本店預設</b>：沒有另外設定的同仁，都跟這一列。</li>
+    <li>每位同仁一列，勾選的功能他才看得到、用得到。取消任何一項，他就變成「自訂」；全部取消是「全部關」。</li>
+    <li>想讓某位同仁回到跟大家一樣，按他那列的 <span class="btn">回到預設</span>。</li>
+    <li>改完立刻存檔，同仁重新開頁就生效。店長不能改自己那一列。</li>
+    <li>「出勤核定」「收支作廢」兩欄標示「由總部設定」，店長只能看、不能改；收支作廢只有店長與總部授權的人有。</li>
+  </ol>
+  <figure class="shot"><img src="img/guide/33-staffperm.jpg" width="780" height="2580" loading="lazy" alt="本店同仁權限：本店預設與每位同仁逐項勾選"><figcaption>本店同仁權限（表格可左右滑動）</figcaption></figure>
+  <h3>加入支援同仁</h3>
+  <ol>
+    <li>別家店的同仁來支援時，在「加入支援同仁」輸入他的 <b>DZY 編號</b>（例如 DZY023）。</li>
+    <li>選 <b>支援到期日</b>（最長 90 天，到期後可以再加一次續期），勾他在本店能用的功能。</li>
+    <li>按 <span class="btn">加入支援同仁</span>。到期自動失效；提早結束按他那列的 <span class="btn">取消支援</span>。</li>
+  </ol>
+  <figure class="shot"><img src="img/guide/34-staffperm-support.jpg" width="780" height="1688" loading="lazy" alt="加入支援同仁：DZY 編號、到期日、勾選功能"><figcaption>加入支援同仁</figcaption></figure>
+  <div class="tip">人員轉調或離職後，原本的主管就看不到他；還沒核完的出勤，請人資主管或管理員補核。</div>
+</section>
+
+<section id="help"><h2>十三、遇到問題</h2>
   <ul>
     <li><b>登入不了</b>：確認門市代號、密碼。忘記密碼請找管理者重設。被鎖住時，確認密碼正確再輸入一次就能進去。</li>
     <li><b>左側欄看不到某個系統</b>：那項功能還沒開給你們店，請洽管理者。</li>

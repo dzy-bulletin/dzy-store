@@ -4,8 +4,9 @@ let hooks = { getToken: () => null, onAuth: () => {}, onMust: () => {} };
 export function setHooks(h) { hooks = { ...hooks, ...h }; }
 
 // 回傳 data；失敗丟 Error（.code=error 代碼，.message=後端白話訊息）
-export async function api(method, path, body) {
-  const token = hooks.getToken();
+// tokenOverride：用指定的 token 打（嵌入模式要登出「舊的」或「剛建的多餘」session 時用），不影響目前登入
+export async function api(method, path, body, tokenOverride) {
+  const token = tokenOverride || hooks.getToken();
   let res;
   try {
     if (MOCK) {
@@ -32,7 +33,7 @@ function settle(res, path, token) {
   const err = new Error((res && res.message) || '發生錯誤，請稍後再試');
   err.code = (res && res.error) || 'SERVER_ERROR';
   // 這幾支的 AUTH 只是「密碼不對」，不代表登入過期，不能踢人
-  const wrongPw = path === '/duty/unlock' || path === '/password' || path === '/login';
+  const wrongPw = path === '/duty/unlock' || path === '/password' || path === '/login' || path === '/sso' || path === '/sso/select';   // /sso 的 AUTH＝入場券不能用，不是目前的登入過期
   // 只有「現在這個登入」的請求才踢人：登出後還在路上的舊請求回來 AUTH，不能把剛重新登入的人也踢掉
   if (err.code === 'AUTH' && token && token === hooks.getToken() && !wrongPw) hooks.onAuth();
   if (err.code === 'MUST_CHANGE_PASSWORD') hooks.onMust();

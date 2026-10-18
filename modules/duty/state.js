@@ -83,3 +83,6 @@ export function loadLeave() {
   return S.leaveP;
 }
 export function staleLeave() { S.leave = null; S.leaveP = null; S.leaveStale = true; }   // leaveStale：下次換日期先重抓額度再畫名單
+
+// 個人登入且不是店長／人資主管／管理員：伺服器會擋打卡 QR、公告、新增同仁、設離職（proxy/duty.js manager_only），畫面就不顯示；門市帳號維持原樣
+export const dutyManager = s => !(s && s.person && s.dutyManager === false);

@@ -1,19 +1,23 @@
 // 員工名冊：新進同仁報到（manager.html:1930–2010）＋同仁異動（離職＝停用不是真刪、可恢復，manager.html:2012–2120）。
-// 2026-10-11 起建議改在自動排班 › 同仁新增（一次填報到日與身分）；這裡保留。建立後專屬打卡連結收合成次要資訊（LINE 打卡上線後少用）；連結裡的 k 是該員工自己的打卡金鑰（不是主管金鑰）。
+// 2026-10-18 起新人統一在管理系統新增，這裡只剩備案（收合）；建立帳號只建打卡帳號，要通知總部在管理系統建檔。建立後專屬打卡連結收合成次要資訊（LINE 打卡上線後少用）；連結裡的 k 是該員工自己的打卡金鑰（不是主管金鑰）。
 import { esc, confirmBox } from '../../js/ui.js';
-import { S, call, h, failBar } from './state.js';
+import { DZY_ORIGIN } from '../../js/config.js';
+import { S, dutyManager, call, h, failBar } from './state.js';
 import { clockLink } from './calc.js';
 
 export function renderRoster(ctx) {
-  const el = ctx.el;
-  el.innerHTML = `<div class="card" id="duAdd"><h2>新進同仁報到</h2>
-    <p class="hint"><b>建議改在「自動排班 › 同仁」新增</b>，可以一次填好報到日與正職／計時，打卡帳號也會一起建好。這裡只建打卡帳號，之後還要到自動排班補資料。</p>
-    <div class="row"><input type="text" id="aeName" class="grow" placeholder="同仁姓名" autocomplete="off" maxlength="20" aria-label="同仁姓名"><button type="button" class="btn" id="aeBtn">建立帳號</button></div>
-    <div class="du-msg" id="aeResult" hidden></div></div>
+  const el = ctx.el, dm = dutyManager(ctx.session);      // 非店長／人資／管理員：名冊與 LINE 綁定紀錄照常看，不顯示新增同仁與設離職／恢復
+  el.innerHTML = `${dm ? `<div class="card" id="duAdd"><h2>新進同仁報到</h2>
+    <div class="row"><a class="btn" id="aeDzy" href="${DZY_ORIGIN}/#/staff" target="_blank" rel="noopener">到管理系統新增（建議）</a></div>
+    <p class="hint">新同仁請在管理系統新增，會同時建好打卡帳號與管理系統帳號，本人當天就能認領。</p>
+    <details class="fb-box" id="aeFallback"><summary>管理系統連不上時才用（備案）</summary>
+    <div class="note warn mt" id="aeWarn">這裡新增只會建打卡帳號；新人要等總部在管理系統建檔後才能認領帳號，請事後通知總部。</div>
+    <div class="row mt"><input type="text" id="aeName" class="grow" placeholder="同仁姓名" autocomplete="off" maxlength="20" aria-label="同仁姓名"><button type="button" class="btn" id="aeBtn">建立帳號</button></div>
+    <div class="du-msg" id="aeResult" hidden></div></details></div>` : ''}
     <div id="duRosterFail"></div>
-    <div class="card" id="rosterCard"><h2>同仁異動</h2>
-    <p class="hint">同仁離職就在這裡設為離職，他<b>立刻無法打卡</b>、也不再出現在核定清單；<b>過去的打卡紀錄與已核定的工時都會保留</b>。設錯可以按恢復。</p>
-    <div class="row"><select id="reSelect" class="grow" aria-label="選擇同仁"><option value="">選擇同仁…</option></select><button type="button" class="btn du-danger" id="reBtn" disabled>設為離職</button></div>
+    <div class="card" id="rosterCard"><h2>${dm ? '同仁異動' : '員工名冊'}</h2>
+    ${dm ? `<p class="hint">同仁離職就在這裡設為離職，他<b>立刻無法打卡</b>、也不再出現在核定清單；<b>過去的打卡紀錄與已核定的工時都會保留</b>。設錯可以按恢復。</p>
+    <div class="row"><select id="reSelect" class="grow" aria-label="選擇同仁"><option value="">選擇同仁…</option></select><button type="button" class="btn du-danger" id="reBtn" disabled>設為離職</button></div>` : '<p class="hint">新增同仁與設離職／恢復在職，要由店長、人資主管或管理員操作。</p>'}
     <div class="du-msg" id="reResult" hidden></div><div id="reInactive"></div></div>
     <div id="duLineFail"></div>
     <div class="card" id="lineBindCard"><h2>LINE 綁定紀錄</h2>
@@ -21,7 +25,7 @@ export function renderRoster(ctx) {
     <div class="du-msg" id="lbResult" hidden></div><div id="lbList"></div></div>`;
   const live = () => el.isConnected;
   const q = s => el.querySelector(s);
-  const aeBox = q('#aeResult'), reBox = q('#reResult'), sel = q('#reSelect'), reBtn = q('#reBtn'), gone = q('#reInactive');
+  const aeBox = q('#aeResult'), reBox = q('#reResult'), sel = q('#reSelect'), reBtn = q('#reBtn'), gone = q('#reInactive');   // 非主管時前四個是 null，下面都只在 dm 時用
   let myName = '';
   const show = (box, html, isErr) => { box.hidden = false; box.className = 'du-msg' + (isErr ? ' bad' : ' good'); box.innerHTML = html; };
   const shortDate = iso => { const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? Number(m[2]) + '/' + Number(m[3]) : ''; };
@@ -29,9 +33,14 @@ export function renderRoster(ctx) {
   // ---- 同仁異動 ----
   function drawRoster(rows) {
     const actives = rows.filter(r => r.active && r.name !== myName), off = rows.filter(r => !r.active);
-    sel.innerHTML = '<option value="">選擇同仁…</option>' + actives.map(r => `<option value="${esc(r.emp_id)}">${esc(r.name)}（${esc(r.emp_id)}）</option>`).join('');
-    reBtn.disabled = actives.length === 0;
-    if (!off.length) { gone.innerHTML = ''; return; }
+    if (dm) {
+      sel.innerHTML = '<option value="">選擇同仁…</option>' + actives.map(r => `<option value="${esc(r.emp_id)}">${esc(r.name)}（${esc(r.emp_id)}）</option>`).join('');
+      reBtn.disabled = actives.length === 0;
+    }
+    if (!dm) gone.innerHTML = `<div class="du-subtitle">在職（${actives.length}）</div>` + actives.map(r => `<div class="du-item"><span class="du-item-body">${esc(r.name)}（${esc(r.emp_id)}）</span></div>`).join('');
+    if (!off.length) { if (dm) gone.innerHTML = ''; return; }
+    if (!dm) gone.innerHTML += '<div class="du-subtitle">已離職（' + off.length + '）</div>' + off.map(r => `<div class="du-item"><span class="du-item-body">${esc(r.name)}（${esc(r.emp_id)}）</span></div>`).join('');
+    if (!dm) return;
     gone.innerHTML = `<div class="du-subtitle">已離職（${off.length}）</div>` + off.map(r => {
       const when = shortDate(r.removed_at), by = r.removed_by ? '由 ' + esc(r.removed_by) + ' 設定' : '';
       const meta = when || by ? `<span class="du-when">${[when, by].filter(Boolean).join('・')}</span>` : '';
@@ -57,7 +66,7 @@ export function renderRoster(ctx) {
     } catch (e) { show(reBox, '✕ ' + esc(e.message || '設定失敗，請再試一次'), true); }
     finally { srcBtn.disabled = false; srcBtn.textContent = label; }
   }
-  reBtn.onclick = async () => {
+  if (dm) reBtn.onclick = async () => {
     const empId = sel.value;
     if (!empId) return show(reBox, '✕ 請先選擇同仁', true);
     const name = sel.options[sel.selectedIndex].text.replace(/（.*$/, '');
@@ -101,7 +110,7 @@ export function renderRoster(ctx) {
     try {
       const res = await call('mgr_add_employee', { name });
       const link = clockLink(S.meta.clockStore, res.key);
-      show(aeBox, '✓ 已建立 <b>' + esc(res.name) + '</b>（編號 ' + esc(res.emp_id) + '）<br>請他打開 LINE「鼎兆元打卡」，第一次打卡時人在店裡、輸入全名綁定。記得到「自動排班 › 同仁」補報到日期與正職／計時。'
+      show(aeBox, '✓ 已建立 <b>' + esc(res.name) + '</b>（編號 ' + esc(res.emp_id) + '）<br>請他打開 LINE「鼎兆元打卡」，第一次打卡時人在店裡、輸入全名綁定。記得到「自動排班 › 同仁」補報到日期與正職／計時，並通知總部到管理系統把他建檔。'
         + '<details id="aeLinkBox"><summary>舊版專屬打卡連結（沒用 LINE 打卡的人才需要）</summary>用 Safari 開 → 加入主畫面，以後都從主畫面進：'
         + '<span class="du-link" id="aeLink">' + esc(link) + '</span><button type="button" class="btn sm ghost" id="aeCopy">複製連結</button></details>');
       nameIn.value = '';
@@ -115,8 +124,7 @@ export function renderRoster(ctx) {
     } catch (e) { show(aeBox, '✕ ' + esc(e.message || '建立失敗，請再試一次'), true); }
     finally { aeBtn.disabled = false; aeBtn.textContent = '建立帳號'; }
   }
-  aeBtn.onclick = create;
-  nameIn.onkeydown = e => { if (e.key === 'Enter') create(); };
+  if (dm) { aeBtn.onclick = create; nameIn.onkeydown = e => { if (e.key === 'Enter') create(); }; }
   load();
   loadBinds();
 }

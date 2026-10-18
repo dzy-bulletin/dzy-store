@@ -1,4 +1,4 @@
-import { S, reset, refreshReqBadge } from './state.js';
+import { S, reset, refreshReqBadge, dutyManager } from './state.js';
 import { renderOverview, storeBar } from './overview.js';
 import { renderApprove } from './approve.js';
 import { renderDevice } from './device.js';
@@ -7,6 +7,7 @@ import { renderNotice } from './notice.js';
 import { renderRequest } from './request.js';
 import { api } from '../../js/api.js';
 import { busy, setMsg } from '../../js/ui.js';
+import { getSession } from '../../js/auth.js';
 
 // 旗標：'1'＝已解鎖；'m'＝已用預設 0000 解鎖、但還沒改成自己的（只能看到改密碼表單）。登出時 clearSession 會一併清掉。
 const KEY = 'dzystore_dutyok';
@@ -19,8 +20,9 @@ export default {
   id: 'duty',
   tabs: TABS,
   // 管理者多一個「各店總覽」放第一格（2026-10-11 Eason）；其餘分頁要先選門市，畫面上方有門市切換
-  tabsFor: s => (s && s.role === 'admin' ? [{ id: 'overview', label: '各店總覽' }, ...TABS] : TABS),
-  locked: () => flag() !== '1',
+  tabsFor: s => { const t = dutyManager(s) ? TABS : TABS.filter(x => x.id !== 'notice'); return s && s.role === 'admin' ? [{ id: 'overview', label: '各店總覽' }, ...t] : t; },
+  // 個人登入（管理系統帳號）：有出勤核定入口就已解鎖，不問核定密碼、也沒有「改核定密碼」
+  locked: () => { const s = getSession(); return !(s && s.person && s.dutyUnlocked) && flag() !== '1'; },
   renderGate(ctx) { flag() === 'm' ? changeForm(ctx) : unlockForm(ctx); },
   render(ctx) {
     const key = ctx.session.token || ctx.session.code;
@@ -33,6 +35,7 @@ export default {
       if (!body) return;
       ctx = Object.assign({}, ctx, { el: body });
     }
+    if (ctx.tab === 'notice' && !dutyManager(ctx.session)) ctx = Object.assign({}, ctx, { tab: 'approve' });
     ({ approve: renderApprove, request: renderRequest, device: renderDevice, roster: renderRoster, notice: renderNotice }[ctx.tab] || renderApprove)(ctx);
     if (ctx.tab !== 'request') refreshReqBadge();      // 申請審核分頁自己讀清單時會更新，不重複問
   },

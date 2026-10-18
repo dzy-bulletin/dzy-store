@@ -4,6 +4,7 @@ import { api } from '../../js/api.js';
 import { S, loadAnnual, load, mutate, movePeriod, setDutyFlag, WD, md, hm, DAY_LABEL, LEAVE_LABEL, call } from './state.js';
 import { weekday, periodEnd } from './period.js';
 import { termAt } from './rules.js';
+import { getSession } from '../../js/auth.js';
 
 const PUB_TEXT = { pending: '等待送到 LINE', sent: '已發布到 LINE', failed: '送 LINE 失敗', stale: '已被較新版本取代' };
 
@@ -22,6 +23,8 @@ export function renderBoard(ctx) {
   const activeShifts = D.shifts.filter((s) => s.active);
   const staff = D.staff.filter((st) => D.dates.some((d) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date)));
   const locked = D.meta.locked;
+  const ses = ctx.session || getSession();
+  const canLock = !(ses && ses.person) || !!ses.scheduleAdmin;       // 個人登入：鎖定／解鎖／重送只有店長、人資主管、管理員（伺服器另外擋，這裡只是不顯示）
   const byCell = {}, byDay = {};
   for (const r of D.results) {
     if (r.emp_id && r.date) (byCell[r.emp_id + '|' + r.date] = byCell[r.emp_id + '|' + r.date] || []).push(r);
@@ -78,8 +81,8 @@ export function renderBoard(ctx) {
     </div>
     <div class="row sc-acts">
       ${locked ? '' : `<button type="button" class="btn" id="scAuto">自動排班</button><label class="sc-chk"><input type="checkbox" id="scAll"> 連手動改過的也重排</label>`}
-      <button type="button" class="btn ${locked ? 'ghost' : ''}" id="scLock">${locked ? '解除鎖定' : '鎖定並發布'}</button>
-      ${pub && (pub.status === 'failed' || pub.status === 'pending') ? '<button type="button" class="btn ghost" id="scResend">立即重送</button>' : ''}
+      ${canLock ? `<button type="button" class="btn ${locked ? 'ghost' : ''}" id="scLock">${locked ? '解除鎖定' : '鎖定並發布'}</button>` : ''}
+      ${canLock && pub && (pub.status === 'failed' || pub.status === 'pending') ? '<button type="button" class="btn ghost" id="scResend">立即重送</button>' : ''}
       <button type="button" class="btn ghost" id="scPdf">匯出 PDF</button>
       <span class="grow"></span>
       <div class="sc-seg" role="group" aria-label="檢視方式"><button type="button" id="scViewGrid" class="${view === 'grid' ? 'on' : ''}">整期</button><button type="button" id="scViewDay" class="${view === 'day' ? 'on' : ''}">單日</button></div>
@@ -224,7 +227,7 @@ export function renderBoard(ctx) {
     rerender();
   };
   const paintMsg = () => { const m = q('#scMsg'); m.className = S.err ? 'err' : 'okmsg'; m.textContent = S.err || S.msg || ''; };
-  q('#scLock').onclick = () => busy(q('#scLock'), async () => {
+  if (q('#scLock')) q('#scLock').onclick = () => busy(q('#scLock'), async () => {
     if (!locked && counts.block) { say(`還有 ${counts.block} 個地方不合規定，修正後才能鎖定`, true); return rerender(); }
     if (locked && !(await confirmBox('解除鎖定後，同仁在 LINE 上會暫時看不到這一期的班表，改好要再鎖定。確定嗎？', '解除鎖定'))) return;
     await doLock();

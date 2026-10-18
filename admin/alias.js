@@ -1,19 +1,24 @@
 import { esc, busy, setMsg, fmtTime } from '../js/ui.js';
 
 // 門市對照：每個門市帳號對應哪一家打卡店別（出勤核定要連到打卡系統的哪一店）
-export default async function view({ el, api }) {
+export default async function view({ el, api, ui }) {
   let d;
+  let um = { items: [] };
   try { d = await api('GET', '/admin/alias'); } catch (e) { el.innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
+  um = null;
+  if (ui && ui.sso) { try { um = await api('GET', '/admin/unit-map'); } catch (e) { um = null; } }      // 沒開個人帳號登入（或舊版伺服器）就不顯示這欄
+  const unitOf = code => ((um && um.items) || []).find(x => x.code === code);
   el.innerHTML = `<div class="card"><h2>門市對照</h2>
     <p class="hint">打卡店別：每個門市帳號要連到打卡系統的哪一家店，沒設定的店出勤核定進不去。調撥節點：門市調撥要連到哪個節點。耗損系統店別：墨竹亭四家店選對應店別（共用 mzt-loss 的品項表）；小辛辣等沒對應的選「無」，資料存在營運系統自己的資料庫。</p><div id="alMsg" role="alert" class="err"></div>
-    <div class="scroll"><table id="aliasTable"><thead><tr><th>代號</th><th>店名</th><th>打卡店別</th><th>調撥節點</th><th>耗損系統店別</th></tr></thead><tbody>
+    <div class="scroll"><table id="aliasTable"><thead><tr><th>代號</th><th>店名</th><th>打卡店別</th><th>調撥節點</th><th>耗損系統店別</th>${um ? '<th>管理系統單位</th>' : ''}</tr></thead><tbody>
     ${d.aliases.map(a => `<tr data-code="${esc(a.code)}"><td><b>${esc(a.code)}</b></td><td>${esc(a.name)}</td><td>
       <select class="aliasSel" aria-label="${esc(a.code)} 打卡店別"><option value="__none"${a.value === null ? ' selected' : ''}>無</option>
       ${d.stores.map(s => `<option value="${esc(s.value)}"${a.value === s.value ? ' selected' : ''}>${esc(s.label)}${s.value ? '（' + esc(s.value) + '）' : ''}</option>`).join('')}</select></td>
       <td><select class="aliasTrSel" aria-label="${esc(a.code)} 調撥節點"><option value="__none"${!a.transfer ? ' selected' : ''}>無</option>
       ${(d.transferNodes || []).map(n => `<option value="${esc(n.code)}"${a.transfer === n.code ? ' selected' : ''}>${esc(n.code)} ${esc(n.name)}</option>`).join('')}</select></td>
       <td><select class="lossSel" aria-label="${esc(a.code)} 耗損系統店別"><option value="__none"${!(d.lossAliases || {})[a.code] ? ' selected' : ''}>無（用營運系統自有）</option>
-      ${(d.lossStores || []).map(s => `<option value="${esc(s.value)}"${(d.lossAliases || {})[a.code] === s.value ? ' selected' : ''}>${esc(s.label)}</option>`).join('')}</select></td></tr>`).join('')}
+      ${(d.lossStores || []).map(s => `<option value="${esc(s.value)}"${(d.lossAliases || {})[a.code] === s.value ? ' selected' : ''}>${esc(s.label)}</option>`).join('')}</select></td>
+      ${um ? `<td><div class="row" style="flex-wrap:nowrap"><input class="unitIn" type="text" size="14" value="${esc((unitOf(a.code) || {}).unit || '')}" data-old="${esc((unitOf(a.code) || {}).unit || '')}" placeholder="例如 mala-gf" aria-label="${esc(a.code)} 管理系統單位" autocomplete="off"><button type="button" class="btn ghost sm" data-save>存</button></div></td>` : ''}</tr>`).join('')}
     </tbody></table></div></div>
     <div class="card"><h2>打卡金鑰代管狀態</h2><p class="hint">只顯示「已設／未設」。金鑰由管理者在公司 Mac mini 終端機輸入，這裡看不到內容。</p>
     <div class="scroll"><table id="vaultTable"><thead><tr><th>打卡店別</th><th>名稱</th><th>狀態</th><th>更新時間</th></tr></thead><tbody>
@@ -30,6 +35,22 @@ export default async function view({ el, api }) {
     ${(d.boardVault || []).map(v => `<tr data-vault="${esc(v.name)}"><td>${esc(v.label)}</td><td><code>${esc(v.name)}</code></td><td>${v.name === 'board:_' ? '—' : esc(v.store || '（無）')}</td>
       <td><span class="tag ${v.set || v.shared ? 'ok' : 'bad'}">${v.set ? '已設' : v.shared ? '用共用' : '未設'}</span></td><td>${v.updatedAt ? esc(fmtTime(v.updatedAt)) : '—'}</td></tr>`).join('')}
     </tbody></table></div></div>`;
+  el.querySelectorAll('.unitIn').forEach(inp => {      // 管理系統單位：一家門市對一個單位；清空＝取消對照
+    const btn = inp.closest('td').querySelector('[data-save]');
+    btn.onclick = () => busy(btn, async () => {
+      const code = inp.closest('tr').dataset.code, m = el.querySelector('#alMsg'), old = inp.dataset.old, now = inp.value.trim();
+      const other = [...el.querySelectorAll('.unitIn')].find(x => x !== inp && x.dataset.old && x.dataset.old === now);      // 一個單位只能對一家門市
+      if (other) { inp.value = old; return setMsg(m, `單位 ${now} 已經對給 ${other.closest('tr').dataset.code} 了，一個單位只能對一家門市`); }
+      try {
+        if (old && old !== now) await api('POST', '/admin/unit-map', { unit: old, code: null });
+        if (now) {
+          try { await api('POST', '/admin/unit-map', { unit: now, code }); }
+          catch (er) { if (old && old !== now) { try { await api('POST', '/admin/unit-map', { unit: old, code }); } catch (x) { /* 還原失敗：重新整理會看到真實狀態 */ } } throw er; }
+        }
+        inp.dataset.old = now; setMsg(m, now ? `${code} 對照管理系統單位 ${now}，已存檔` : `${code} 已取消管理系統單位對照`, true);
+      } catch (er) { inp.value = old; setMsg(m, er.message); }
+    });
+  });
   el.querySelectorAll('.lossSel').forEach(sel => {
     sel.onchange = async () => {
       const code = sel.closest('tr').dataset.code, m = el.querySelector('#alMsg');
