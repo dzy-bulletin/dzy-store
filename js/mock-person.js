@@ -65,10 +65,17 @@ export function storesOf(db, p, eff) {
   return [...cand].filter(c => db.accounts[c] && access(db, p, c, eff).features.length)
     .sort((a, b) => (order[db.accounts[a].brand] || 5) - (order[db.accounts[b].brand] || 5) || (a < b ? -1 : 1)).map(c => ({ code: c, name: db.accounts[c].name }));
 }
+// 「全部門市」考勤：這個人可核的人分布在兩家以上打卡店（示範人物的 attStores）；少於兩家回空陣列（同 server/person.js attStoresFor）
+export function attStoresOf(db, p) {
+  const l = (p && p.attStores || []).filter(c => db.accounts[c] && db.accounts[c].active && db.accounts[c].role === 'store' && (db.accounts[c].features || []).includes('duty'));
+  const order = { mala: 1, mzt: 2, yiwu: 3, cf: 4 };
+  l.sort((a, b) => (order[db.accounts[a].brand] || 5) - (order[db.accounts[b].brand] || 5) || (a < b ? -1 : 1));
+  return l.length >= 2 ? l.map(c => ({ code: c, name: db.accounts[c].name })) : [];
+}
 export function sessionBody(db, p, code, eff, token) {
   const a = db.accounts[code], x = access(db, p, code, eff);
   return Object.assign(token ? { token: token.token, expiresAt: token.expiresAt } : {}, { code, name: a.name, role: 'store', brand: a.brand, mustChangePassword: false, features: x.features,
-    person: { sub: p.sub, name: p.name }, canVoid: x.canVoid, isManager: x.isManager, scheduleAdmin: x.scheduleAdmin, dutyUnlocked: x.features.includes('duty'), dutyManager: x.dutyManager, stores: storesOf(db, p, eff) });
+    person: { sub: p.sub, name: p.name }, canVoid: x.canVoid, isManager: x.isManager, scheduleAdmin: x.scheduleAdmin, dutyUnlocked: x.features.includes('duty'), dutyManager: x.dutyManager, stores: storesOf(db, p, eff), attStores: attStoresOf(db, p) });
 }
 const newSession = (db, p, code) => {
   const t = { token: hex(32), expiresAt: new Date(Date.now() + 12 * 3600e3).toISOString(), code, duty: false, sub: p.sub };

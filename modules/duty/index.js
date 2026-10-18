@@ -1,5 +1,5 @@
-import { S, reset, refreshReqBadge, dutyManager } from './state.js';
-import { renderOverview, storeBar } from './overview.js';
+import { S, reset, refreshReqBadge, dutyManager, multiStores, allModeOf, setAll } from './state.js';
+import { renderOverview, storeBar, personStoreBar } from './overview.js';
 import { renderApprove } from './approve.js';
 import { renderDevice } from './device.js';
 import { renderRoster } from './roster.js';
@@ -20,7 +20,8 @@ export default {
   id: 'duty',
   tabs: TABS,
   // 管理者多一個「各店總覽」放第一格（2026-10-11 Eason）；其餘分頁要先選門市，畫面上方有門市切換
-  tabsFor: s => { const t = dutyManager(s) ? TABS : TABS.filter(x => x.id !== 'notice'); return s && s.role === 'admin' ? [{ id: 'overview', label: '各店總覽' }, ...t] : t; },
+  // 個人登入的「全部門市」：整店功能（裝置核准、員工名冊、公告）不顯示，只剩核定工時與申請審核
+  tabsFor: s => { let t = dutyManager(s) ? TABS : TABS.filter(x => x.id !== 'notice'); if (allModeOf(s)) t = t.filter(x => x.id === 'approve' || x.id === 'request'); return s && s.role === 'admin' ? [{ id: 'overview', label: '各店總覽' }, ...t] : t; },
   // 個人登入（管理系統帳號）：有出勤核定入口就已解鎖，不問核定密碼、也沒有「改核定密碼」
   locked: () => { const s = getSession(); return !(s && s.person && s.dutyUnlocked) && flag() !== '1'; },
   renderGate(ctx) { flag() === 'm' ? changeForm(ctx) : unlockForm(ctx); },
@@ -35,6 +36,9 @@ export default {
       if (!body) return;
       ctx = Object.assign({}, ctx, { el: body });
     }
+    const multi = !S.admin && multiStores(ctx.session).length > 0;
+    setAll(multi && allModeOf(ctx.session));            // 換模式就整包重來
+    if (multi) ctx = Object.assign({}, ctx, { el: personStoreBar(ctx) });
     if (ctx.tab === 'notice' && !dutyManager(ctx.session)) ctx = Object.assign({}, ctx, { tab: 'approve' });
     ({ approve: renderApprove, request: renderRequest, device: renderDevice, roster: renderRoster, notice: renderNotice }[ctx.tab] || renderApprove)(ctx);
     if (ctx.tab !== 'request') refreshReqBadge();      // 申請審核分頁自己讀清單時會更新，不重複問

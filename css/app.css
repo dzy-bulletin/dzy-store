@@ -384,6 +384,9 @@ nav.tabs a .badge{display:inline-block;margin-left:5px;min-width:18px;height:18p
 .du-store-bar label{font-weight:700;font-size:13px}
 .du-store-bar select{min-width:200px;max-width:100%}
 .du-ov-back{font-size:13px;margin-left:auto}
+.du-where{display:inline-block;margin-left:8px;padding:1px 8px;border-radius:999px;background:#eef3f8;color:#3b5a78;font-size:12px;font-weight:700;vertical-align:middle;white-space:nowrap}
+.du-fail-stores{margin-top:0}
+.du-rq-msg{white-space:pre-line}
 @media (max-width:480px){.du-ov-tbl th,.du-ov-tbl td{padding:8px 4px;font-size:12.5px}.du-ov-tbl .du-hint{display:none}.du-ov-back{margin-left:0}}
 
 /* 功能開關（門市自己開關）＋後台標示「門市已自行關閉」 */

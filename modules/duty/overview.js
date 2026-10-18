@@ -1,7 +1,8 @@
 // 出勤核定：管理者的「各店總覽」與門市切換（2026-10-11 Eason：系統管理員看得到所有門市的出勤核定狀況、也能代核）。
 // 總覽每家店一列：本月沒核定幾天、待審申請幾筆、待核准手機幾支（跟首頁待辦同三支查詢）；點數字或「進入」就切到那家店的分頁。
 // 其他分頁上方有門市選單；選了之後每次呼叫都帶 asStore，伺服器照那家店的打卡對照轉送。
-import { S, call, setStore, h, failBar } from './state.js';
+import { S, call, setStore, h, failBar, multiStores, rememberOne } from './state.js';
+import { ssoSwitch, setSession, toSession } from '../../js/auth.js';
 import { api } from '../../js/api.js';
 
 function loadStores() {
@@ -103,6 +104,36 @@ export function storeBar(ctx) {
     return null;
   }
   bar.append(h('div', 'du-hint', '你正以管理者身分看「' + S.asName + '」：在這裡核定、核准或修改，會直接寫進該店的打卡系統。'));
+  const body = h('div');
+  el.append(body);
+  return body;
+}
+
+// 個人登入、可核的人分布在兩家以上打卡店（2026-10-19）：上方門市選單，最上面「全部門市（N 家）」、預設選它。
+// 選單一門市＝回到原本的單店畫面（目前登入的店直接切；別家店走「換店」換新 token）。回傳放分頁內容的容器。
+export function personStoreBar(ctx) {
+  const s = ctx.session, list = multiStores(s), el = ctx.el;
+  el.innerHTML = '';
+  const bar = h('div', 'du-store-bar');
+  bar.append(h('label', null, '正在看的門市', { for: 'duStoreSel' }));
+  const sel = h('select', null, null, { id: 'duStoreSel' });
+  sel.append(h('option', null, '全部門市（' + list.length + ' 家）', { value: 'ALL' }));
+  const opts = list.some(x => x.code === s.code) ? list : [{ code: s.code, name: s.name }, ...list];
+  for (const st of opts) sel.append(h('option', null, st.name, { value: st.code }));
+  sel.value = S.all ? 'ALL' : s.code;
+  sel.onchange = async () => {
+    if (sel.value === 'ALL') { rememberOne(''); return ctx.rerender(); }
+    if (sel.value === s.code) { rememberOne(s.token); return ctx.rerender(); }
+    sel.disabled = true;
+    try {
+      const d = await ssoSwitch(sel.value);
+      setSession(toSession(d)); rememberOne(d.token);
+      location.reload();
+    } catch (e) { sel.disabled = false; sel.value = S.all ? 'ALL' : s.code; bar.append(h('div', 'du-fail-msg', '換店失敗：' + ((e && e.message) || '請稍後再試'))); }
+  };
+  bar.append(sel);
+  el.append(bar);
+  if (S.all) bar.append(h('div', 'du-hint', '合併顯示你可核定的 ' + list.length + ' 家門市，每位同仁標出打卡地點。打卡 QR、公告、員工名冊、裝置核准、新增同仁這些整店功能，請切到單一門市。'));
   const body = h('div');
   el.append(body);
   return body;

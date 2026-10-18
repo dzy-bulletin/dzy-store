@@ -225,9 +225,19 @@ function homeFor(me) {
     if (bad('duty')) errors.push({ module: 'duty', message: ERR.duty });
     else {
       const d = dutyDb();
-      const n = new Set(dutyDo(d, 'mgr_pending_approvals', {}).data.items.map(x => x.date)).size;
+      const per = me.person && PM ? PM.personaOf(db, me.person.sub) : null, multi = per ? PM.attStoresOf(db, per) : [];
+      let days, nq;
+      if (multi.length >= 2) {      // 個人登入且可核兩家以上：待核定天數與待審申請合併各店（讀不到的店略過、標部分讀不到）
+        const dates = new Set(); nq = 0;
+        multi.forEach(st => {
+          if ((db.dutyDown || []).includes(st.code)) { if (!errors.some(e => e.module === 'duty')) errors.push({ module: 'duty', message: ERR.duty }); return; }
+          const ds = dutyStore(st.code);
+          withFake(st.code, () => { dutyDo(ds, 'mgr_pending_approvals', {}).data.items.forEach(x => dates.add(x.date)); nq += dutyDo(ds, 'mgr_req_pending', {}).data.items.length; });
+        });
+        days = dates.size;
+      } else { days = new Set(dutyDo(d, 'mgr_pending_approvals', {}).data.items.map(x => x.date)).size; nq = dutyDo(d, 'mgr_req_pending', {}).data.items.length; }
+      const n = days;
       if (n) add('duty', 'todo', `本月還有 ${n} 天沒核定`, n, '#/duty/approve');
-      const nq = dutyDo(d, 'mgr_req_pending', {}).data.items.length;
       if (nq) add('duty', 'todo', `${nq} 筆加班請假申請待審`, nq, '#/duty/request');
       if (d.devices.length) add('duty', 'todo', `${d.devices.length} 支新手機等核准`, d.devices.length, '#/duty/device');
     }
@@ -505,7 +515,48 @@ const DUTY_FAKE_D = {
   E03: { shift: ['', ''], segs: [], ref: null },
   E04: { shift: ['', ''], segs: [], ref: null, attempts: 2 },
 };
-const fakeOf = emp => ((E2E().duty || {}).fake || DUTY_FAKE_D)[emp];
+let curFake = null;     // 第二家以後的店（全部門市）用自己的打卡假資料，dutyDo 執行期間暫時指定
+const fakeOf = emp => (curFake || (E2E().duty || {}).fake || DUTY_FAKE_D)[emp];
+// 全部門市的示範：第二家（TEST2）有自己的名冊、打卡、申請，王小明（E01）同一天也在這家打卡；申請編號 R1 刻意和 TEST1 相同，驗證合併頁不會用編號混淆
+const DUTY2_FAKE = {
+  E01: { shift: ['13:00', '21:00'], segs: [{ in: '13:00', out: '21:00', cross: false }], ref: 8 },
+  E21: { shift: ['10:00', '19:00'], segs: [{ in: '10:05', out: '19:00', cross: false }], ref: 8.9 },
+};
+function dutyStore(code) {
+  if (!code || code === 'TEST1') return dutyDb();
+  if (!db.duty2) db.duty2 = {};
+  if (!db.duty2[code]) {
+    const at = (n, hm) => taipeiDay(n) + 'T' + hm + ':00+08:00';
+    db.duty2[code] = { brk: ['', ''], faults: [], calls: {}, approved: {}, leave: {}, devices: [], notices: [], binds: [],
+      roster: [{ emp_id: 'E01', name: '王小明', active: true, created_by: '', removed_at: '', removed_by: '' }, { emp_id: 'E21', name: '周小芳', active: true, created_by: '', removed_at: '', removed_by: '' }],
+      reqs: [{ id: 'R1', created_at: at(-1, '20:10'), emp_id: 'E21', name: '周小芳', kind: 'ot', date: taipeiDay(-1), leave_type: '', start: '19:00', end: '21:00', hours: 2, miss_type: '', reason: '盤點加班', attach_id: '', status: 'pending' }] };
+  }
+  return db.duty2[code];
+}
+function withFake(code, fn) { const prev = curFake; curFake = code && code !== 'TEST1' ? DUTY2_FAKE : null; try { return fn(); } finally { curFake = prev; } }
+const ALL_OPS = { mgr_day: 'employees', mgr_pending_approvals: 'items', mgr_req_pending: 'items', mgr_req_day: null, payroll_leave_options: null };
+// action=all（對照 server/proxy/duty.js handleAll）：e2e 可把門市代號放進 db.dutyDown，模擬那家打卡暫時讀不到
+function dutyAll(b, s) {
+  const per = PM && PM.personaOf(db, s.sub);
+  const stores = per ? PM.attStoresOf(db, per) : [];
+  if (stores.length < 2) return fail('FORBIDDEN', '你可核定的門市不到兩家，請直接用單一門市');
+  if (!Object.prototype.hasOwnProperty.call(ALL_OPS, b.op)) return fail('BAD_INPUT', '這個動作不支援全部門市');
+  const list = ALL_OPS[b.op], out = { stores: [], failed: [] };
+  if (list) out[list] = []; else out.by_store = {};
+  for (const st of stores) {
+    const d = dutyStore(st.code);
+    d.calls[b.op] = (d.calls[b.op] || 0) + 1;
+    if ((db.dutyDown || []).includes(st.code)) { out.failed.push({ store: st.code, storeName: st.name, message: '打卡系統暫時沒有回應，請稍後再試' }); out.stores.push({ store: st.code, storeName: st.name, ok: false }); continue; }
+    const r = withFake(st.code, () => dutyDo(d, b.op, b.date !== undefined ? { date: b.date } : {}));
+    if (!r.ok) { out.failed.push({ store: st.code, storeName: st.name, message: r.message }); out.stores.push({ store: st.code, storeName: st.name, ok: false }); continue; }
+    out.stores.push({ store: st.code, storeName: st.name, ok: true, meta: { clockStore: st.code, label: st.name, breakStart: d.brk[0], breakEnd: d.brk[1] } });
+    if (b.op === 'mgr_day' && out.date === undefined) out.date = r.data.date;
+    if (b.op === 'mgr_pending_approvals') { if (out.ym === undefined) { out.ym = r.data.ym; out.today = r.data.today; } }
+    if (list) r.data[list].forEach(it => out[list].push({ ...it, store: st.code, storeName: st.name })); else { const o = { ...r.data }; delete o.meta; out.by_store[st.code] = o; }
+  }
+  if (out.failed.length === stores.length) return fail('UPSTREAM', '打卡系統暫時沒有回應，請稍後再試');
+  return ok(out);
+}
 function dutyDb() {
   const E = E2E().duty;
   if (!db.duty && E) db.duty = { brk: [...E.brk], faults: [], calls: {}, approved: {}, leave: {}, roster: clone(E.roster), devices: clone(E.devices), notices: clone(E.notices), binds: clone(E.binds || []), reqs: clone(E.reqs || []) };
@@ -574,15 +625,25 @@ function duty(action, me, s, b) {
     if (!acc || acc.role !== 'store' || !acc.active) return fail('NOT_FOUND', '找不到這家門市，請重新整理');
     b = Object.assign({}, b); delete b.asStore;
   }
-  const d = dutyDb();
+  if (action === 'all') return dutyAll(b, s);
+  // 個人登入帶 store＝全部門市的寫入／附件：目標店必須在他可核的店裡（同 server/proxy/duty.js），整店功能不給跨店
+  let tgt = '';
+  if (me.person && typeof b.store === 'string' && b.store && b.store.toUpperCase() !== s.code) {
+    tgt = b.store.toUpperCase();
+    const per = PM && PM.personaOf(db, s.sub);
+    if (['mgr_qr_token', 'mgr_notices', 'mgr_add_notice', 'mgr_add_employee', 'mgr_set_active', 'mgr_set_notice_active', 'mgr_roster', 'mgr_pending_devices', 'mgr_device_decision', 'mgr_line_binds', 'mgr_line_unbind'].includes(action)) return fail('FORBIDDEN', '這些整店功能請切到單一門市再做');
+    if (!per || !PM.attStoresOf(db, per).some(x => x.code === tgt)) return fail('FORBIDDEN', '你沒有這家店的出勤核定權限');
+    if ((db.dutyDown || []).includes(tgt)) return fail('UPSTREAM', '打卡系統暫時沒有回應，請稍後再試');
+  }
+  const d = tgt ? dutyStore(tgt) : dutyDb();
   d.calls[action] = (d.calls[action] || 0) + 1;
   const fi = d.faults.findIndex(f => f.action === action);
   const fault = fi >= 0 ? d.faults[fi] : null;
   if (fault && fault.once) d.faults.splice(fi, 1);
   if (fault && fault.mode === 'timeout') return fail('TIMEOUT', '打卡系統回應太久，請稍後再試');
   if (fault && fault.mode === 'down') return fail('UPSTREAM', '打卡系統暫時沒有回應，請稍後再試');
-  const r = dutyDo(d, action, b);
-  if (r.ok) r.data.meta = { clockStore: '', label: '麻的小辛辣 新竹光復店', breakStart: d.brk[0], breakEnd: d.brk[1] };
+  const r = tgt ? withFake(tgt, () => dutyDo(d, action, b)) : dutyDo(d, action, b);
+  if (r.ok) r.data.meta = { clockStore: tgt, label: tgt ? (db.accounts[tgt] || {}).name : '麻的小辛辣 新竹光復店', breakStart: d.brk[0], breakEnd: d.brk[1] };
   return r;
 }
 function dutyDo(d, action, b) {

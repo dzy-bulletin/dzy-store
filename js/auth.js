@@ -10,7 +10,7 @@ export function getSession() {
   } catch (e) { return null; }
 }
 export function setSession(s) { try { sessionStorage.setItem(KEYS.session, JSON.stringify(s)); } catch (e) {} }
-export function clearSession() { try { sessionStorage.removeItem(KEYS.session); sessionStorage.removeItem('dzystore_dutyok'); } catch (e) {} }
+export function clearSession() { try { sessionStorage.removeItem(KEYS.session); sessionStorage.removeItem('dzystore_dutyok'); sessionStorage.removeItem('dzystore_dutyone'); } catch (e) {} }
 export function rememberedCode() { try { return localStorage.getItem(KEYS.code) || ''; } catch (e) { return ''; } }
 
 export function initAuth(onLost, onMust) {
@@ -21,7 +21,7 @@ export function initAuth(onLost, onMust) {
 export function toSession(d) {
   const s = { token: d.token, expiresAt: d.expiresAt, code: d.code, name: d.name, role: d.role, brand: d.brand || 'hq',
     mustChangePassword: !!d.mustChangePassword, features: d.features || [] };
-  if (d.person) Object.assign(s, { person: d.person, canVoid: !!d.canVoid, isManager: !!d.isManager, scheduleAdmin: !!d.scheduleAdmin, dutyUnlocked: !!d.dutyUnlocked, dutyManager: d.dutyManager !== false, stores: d.stores || [] });
+  if (d.person) Object.assign(s, { person: d.person, canVoid: !!d.canVoid, isManager: !!d.isManager, scheduleAdmin: !!d.scheduleAdmin, dutyUnlocked: !!d.dutyUnlocked, dutyManager: d.dutyManager !== false, stores: d.stores || [], attStores: d.attStores || [] });
   return s;
 }
 export async function login(code, password) {

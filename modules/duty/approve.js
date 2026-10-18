@@ -1,7 +1,7 @@
 // 核定工時：照原系統 ~/mala-clock-in/manager.html 搬。日期列（前一天／後一天／今天）、本月待核定提醒、員工卡（收合展開、時段、
 // 核定時數即時算、休息、假別、出差、遲到分鐘）、送出核定。外觀換成營運系統風格，規則與文案不改。
 import { confirmBox } from '../../js/ui.js';
-import { S, dutyManager, call, brk, h, failBar, loadLeave, staleLeave } from './state.js';
+import { S, dutyManager, call, callAll, brk, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey } from './state.js';
 import * as C from './calc.js';
 import { qrButton } from './qr.js';
 import { api } from '../../js/api.js';
@@ -15,16 +15,17 @@ export function renderApprove(ctx) {
     <div id="duPend"></div><div id="duDayBox"></div>`;
   const dateIn = el.querySelector('#duDate'), pendEl = el.querySelector('#duPend'), box = el.querySelector('#duDayBox');
   const live = () => el.isConnected;
-  if (dutyManager(ctx.session)) el.querySelector('#duQrSlot').append(qrButton(el));      // 打卡 QR（同仁定位抓不到時給他掃），日期列上方
+  if (dutyManager(ctx.session) && !S.all) el.querySelector('#duQrSlot').append(qrButton(el));      // 打卡 QR（同仁定位抓不到時給他掃），日期列上方
 
   // ---------- 本月待核定提醒（manager.html:1604–1745）：沒有待核定＝整塊不畫 ----------
   function loadPending() {
-    call('mgr_pending_approvals').then(r => { if (!live()) return; S.pend = Array.isArray(r.items) ? r.items : []; drawPending(); },
+    (S.all ? callAll('mgr_pending_approvals') : call('mgr_pending_approvals')).then(r => { if (!live()) return; S.pend = Array.isArray(r.items) ? r.items : []; S.pendFailed = S.all ? (r.failed || []) : []; drawPending(); },
       e => { if (live()) failBar(pendEl, '本月待核定提醒', e, loadPending); });
   }
   function drawPending() {
     pendEl.innerHTML = '';
     const items = S.pend || [];
+    if (S.all) failedStores(pendEl, S.pendFailed, loadPending);
     if (!items.length) return;
     const groups = [], by = {};
     items.forEach(it => { if (!by[it.date]) { by[it.date] = { date: it.date, names: [] }; groups.push(by[it.date]); } by[it.date].names.push(it); });
@@ -34,9 +35,9 @@ export function renderApprove(ctx) {
       const row = h('div', 'du-pa-group'), names = h('div', 'du-pa-names');
       row.append(h('div', 'du-pa-date', C.weekdayLabel(g.date)));
       g.names.forEach(n => {
-        const chip = h('button', 'du-chip', n.name, { type: 'button' });
-        chip.dataset.date = g.date; chip.dataset.emp = String(n.emp_id);
-        chip.onclick = () => { S.focusEmp = String(n.emp_id); loadDay(g.date); };
+        const chip = h('button', 'du-chip', n.name + (n.storeName ? '・' + n.storeName : ''), { type: 'button' });
+        chip.dataset.date = g.date; chip.dataset.emp = String(n.emp_id); if (n.store) chip.dataset.store = n.store;
+        chip.onclick = () => { S.focusEmp = rowKey(n); loadDay(g.date); };
         names.append(chip);
       });
       row.append(names); card.append(row);
@@ -52,7 +53,7 @@ export function renderApprove(ctx) {
   box.addEventListener('emp-approved', e => {
     const d = e.detail; if (!d || !S.pend) return;
     const n = S.pend.length;
-    S.pend = S.pend.filter(it => !(it.date === d.date && String(it.emp_id) === String(d.emp_id)));
+    S.pend = S.pend.filter(it => !(it.date === d.date && String(it.emp_id) === String(d.emp_id) && (it.store || '') === (d.store || '')));
     if (S.pend.length !== n) drawPending();
   });
 
@@ -64,9 +65,10 @@ export function renderApprove(ctx) {
     (function next() {
       const d = targets.shift(); if (!d) return;
       if (!cacheable(d) || S.dayCache[d]) return next();
-      call('mgr_day', { date: d }).then(r => { if (r && r.date) S.dayCache[r.date] = r.employees; next(); }, () => next());
+      dayRead(d).then(r => { if (r && r.date && !(r.failed && r.failed.length)) S.dayCache[r.date] = r.employees; next(); }, () => next());      // 全部門市有店讀不到的那天不快取（讀不到的店不能被當成「這天沒人」記住）
     })();
   }
+  const dayRead = body => (S.all ? callAll('mgr_day', typeof body === 'string' ? { date: body } : body) : call('mgr_day', typeof body === 'string' ? { date: body } : body));
   function loadDay(dateOverride) {
     const tok = ++S.dayTok;
     // 假別額度被清掉（核定過請假）時先重抓，再畫名單：不然新卡片拿不到額度，額度與期限的硬擋整批失效（2026-10-12 Codex 審查）
@@ -74,29 +76,30 @@ export function renderApprove(ctx) {
     loadDayNow(dateOverride, tok);
   }
   function loadDayNow(dateOverride, tok) {
-    if (dateOverride && S.dayCache[dateOverride]) { drawDay(dateOverride, S.dayCache[dateOverride]); prefetch(dateOverride); return; }
+    if (dateOverride && S.dayCache[dateOverride]) { drawDay(dateOverride, S.dayCache[dateOverride], []); prefetch(dateOverride); return; }
     box.innerHTML = '<div class="card du-center" id="duLoading">載入中…</div>';
     const body = dateOverride ? { date: dateOverride } : {};
-    call('mgr_day', body).then(r => {
+    dayRead(body).then(r => {
       if (tok !== S.dayTok || !live()) return;
-      if (cacheable(r.date)) S.dayCache[r.date] = r.employees;
-      drawDay(r.date, r.employees); prefetch(r.date);
+      const failed = S.all ? (r.failed || []) : [];
+      if (cacheable(r.date) && !failed.length) S.dayCache[r.date] = r.employees;
+      drawDay(r.date, r.employees, failed); prefetch(r.date);
     }, e => {
       if (tok !== S.dayTok || !live()) return;
       box.innerHTML = ''; const c = h('div', 'card'); box.append(c);
       failBar(c, '這天的名單', e, () => loadDay(dateOverride));
     });
   }
-  function drawDay(date, employees) {
+  function drawDay(date, employees, failed) {
     S.date = date; dateIn.value = date;
-    renderEmployees(box, date, employees);
+    renderEmployees(box, date, employees, failed, () => { loadPending(); loadDay(date); });
     applyDayRequests(date);
     applyDayPlan(date);
   }
   // 自動排班的班表（2026-10-11）：每人加一行「班表：早班 10:00–19:00」，打卡跟班表差超過 15 分鐘標橘色。只提示，不擋核定。
   // 這家店沒開自動排班、或讀不到，就安靜略過。
   function applyDayPlan(date) {
-    if (!((ctx.session && ctx.session.features) || []).includes('schedule')) return;
+    if (S.all || !((ctx.session && ctx.session.features) || []).includes('schedule')) return;      // 全部門市：班表比對只在單一門市（各店班表要各自讀，暫不合併）
     const tok = S.dayTok;
     api('POST', '/m/schedule/dayPlan', S.asStore ? { date, store: S.asStore } : { date }).then(res => {   // 管理者代看：讀該店的班表
       if (tok !== S.dayTok || S.date !== date || !live() || !res || !res.plan) return;
@@ -111,12 +114,21 @@ export function renderApprove(ctx) {
   // 那天已核准的加班請假／忘打卡申請 → 對應同仁卡片顯示並預填（不快取：主管剛核准完切過來要看得到）。失敗就安靜略過，不擋核定。
   function applyDayRequests(date) {
     const tok = S.dayTok;
+    const put = (store, byEmp) => Object.keys(byEmp || {}).forEach(id => {
+      const key = rowKey({ store, emp_id: id });
+      const card = [].filter.call(box.querySelectorAll('.du-card'), c => c.dataset.empId === key)[0];
+      if (card && card.__applyReq) card.__applyReq(byEmp[id]);
+    });
+    if (S.all) {          // 全部門市：by_store[店].by_emp，各店的 emp_id 分開對（同號員編不會對錯人）
+      callAll('mgr_req_day', { date }).then(res => {
+        if (tok !== S.dayTok || S.date !== date || !live() || !res || !res.by_store) return;
+        Object.keys(res.by_store).forEach(st => put(st, res.by_store[st] && res.by_store[st].by_emp));
+      }, () => {});
+      return;
+    }
     call('mgr_req_day', { date }).then(res => {
       if (tok !== S.dayTok || S.date !== date || !live() || !res || !res.by_emp) return;
-      Object.keys(res.by_emp).forEach(id => {
-        const card = [].filter.call(box.querySelectorAll('.du-card'), c => c.dataset.empId === String(id))[0];
-        if (card && card.__applyReq) card.__applyReq(res.by_emp[id]);
-      });
+      put('', res.by_emp);
     }, () => {});
   }
 
@@ -132,9 +144,10 @@ export function renderApprove(ctx) {
   else { box.innerHTML = '<div class="card du-center" id="duLoading">載入中…</div>'; loadLeave().then(() => { if (live()) loadDay(S.date); }); }
 }
 
-function renderEmployees(box, date, employees) {
+function renderEmployees(box, date, employees, failed, retry) {
   box.innerHTML = '';
-  if (!employees || !employees.length) { box.append(h('div', 'card du-center', '這天沒有任何同仁打卡紀錄。')); return; }
+  if (S.all) failedStores(box, failed, retry);
+  if (!employees || !employees.length) { box.append(h('div', 'card du-center', failed && failed.length ? '讀得到的門市這天沒有任何同仁打卡紀錄。' : '這天沒有任何同仁打卡紀錄。')); return; }
   const pendingCount = employees.filter(e => !e.approved).length;
   const bar = h('div', 'du-listbar');
   const count = h('span', 'du-count'); count.innerHTML = '共 ' + employees.length + ' 人・待核定 <b>' + pendingCount + '</b> 人';
@@ -150,7 +163,7 @@ function renderEmployees(box, date, employees) {
   const nextPending = () => [].filter.call(list.querySelectorAll('.du-card'), c => c.__pending && c.__hasPunch)[0];
   const openNext = () => { const c = nextPending(); if (c) c.__setExpanded(true); return c; };
   if (S.focusEmp) {                                           // 待核定提醒點姓名跳過來：改開那張並捲過去，消費一次就清掉
-    const fid = S.focusEmp; S.focusEmp = null;
+    const fid = String(S.focusEmp); S.focusEmp = null;
     const fc = [].filter.call(list.querySelectorAll('.du-card'), c => c.dataset.empId === fid)[0];
     if (fc) { fc.__setExpanded(true); if (fc.scrollIntoView) fc.scrollIntoView({ block: 'center' }); } else openNext();
   } else openNext();
@@ -175,12 +188,13 @@ function periodRow(p, onChange) {
 }
 
 function buildCard(emp, date) {
-  const br = brk();
-  const card = h('div', 'du-card'); card.dataset.empId = String(emp.emp_id);
+  const br = brk(emp.store);
+  const card = h('div', 'du-card'); card.dataset.empId = rowKey(emp); if (emp.store) card.dataset.store = emp.store;
   card.__segments = emp.segments || [];
 
   // ---- 頭部（收合時看得到：姓名、班別、打卡摘要、精簡徽章）----
   const nameEl = h('div', 'du-name', emp.name);
+  if (emp.store) nameEl.append(h('span', 'du-where', '打卡地點：' + emp.storeName, { 'data-where': emp.store }));      // 全部門市：這個人在哪一家店打的卡（同一人同一天在多家打卡會依店分列）
   if (emp.shift_in && emp.shift_out)
     nameEl.append(h('span', 'du-shift', emp.shift_in + '–' + emp.shift_out + (C.shiftCoversBreak(br, emp.shift_in, emp.shift_out) ? '・休' + C.breakHoursText(br) + 'h' : '')));
   const punchEl = h('div', 'du-punch');
@@ -234,7 +248,7 @@ function buildCard(emp, date) {
 
   // ---- 請假註記／出差／遲到分鐘 ----
   const leaveSel = h('select', 'du-leave', null, { 'aria-label': '請假註記' });
-  const LO = S.leave;                               // payroll_leave_options 的回應；null＝拿不到，用內建清單、沒有額度與期限檢查
+  const LO = leaveFor(emp.store);                               // payroll_leave_options 的回應；null＝拿不到，用內建清單、沒有額度與期限檢查
   [''].concat(C.leaveNames(LO)).forEach(t => {
     const o = h('option', null, t || '無'); o.value = t;
     if (t && LO) {                                  // 額度用完就反灰選不了；已經選過這個假別的既有紀錄，即使現在超額也要能顯示，否則重開頁掉值（manager.html:1184–1207）
@@ -345,13 +359,13 @@ function buildCard(emp, date) {
     submit.disabled = true; submit.textContent = '送出中…';
     const approveDate = date;                       // 送出當下鎖定日期，避免回呼時已切到別天
     try {
-      const res = await call('mgr_approve', { date: approveDate, emp_id: emp.emp_id, periods, late_min: lateIn.value, leave_type: leaveSel.value, leave_hours: leaveSel.value ? leaveHours.value : '' });
+      const res = await call('mgr_approve', { store: emp.store, date: approveDate, emp_id: emp.emp_id, periods, late_min: lateIn.value, leave_type: leaveSel.value, leave_hours: leaveSel.value ? leaveHours.value : '' });
       delete S.dayCache[approveDate];
       if (leaveSel.value || emp.leave_type) staleLeave();      // 有請假的核定會動到額度，下次進核定頁重抓
       say('ok', '✓ 已核定 ' + res.approved_hours + ' 小時・' + res.status_text + C.leaveSuffix(res.leave_type, res.leave_hours) + '（' + res.manager_name + '）');
       setBadge(res, res.leave_type, res.leave_hours);
       card.__pending = false;
-      card.dispatchEvent(new CustomEvent('emp-approved', { bubbles: true, detail: { emp_id: emp.emp_id, date: approveDate } }));
+      card.dispatchEvent(new CustomEvent('emp-approved', { bubbles: true, detail: { emp_id: emp.emp_id, date: approveDate, store: emp.store } }));
     } catch (e) { say('bad', '✕ 核定失敗：' + e.message); }
     finally { submit.disabled = false; submit.textContent = '重新送出核定'; }
   };
