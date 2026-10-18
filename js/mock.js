@@ -314,7 +314,8 @@ function admin(method, p, q, b, me) {
   if (method === 'GET' && p === '/admin/alias') {
     const stores = [['', '光復小辛辣', 'duty:_'], ['cf', '央廚', 'duty:cf'], ['hq', '總部', 'duty:hq'], ['mztjs', '墨竹亭金山', 'duty:mztjs'], ['mztgf', '墨竹亭光復', 'duty:mztgf']];
     return ok({ aliases: Object.values(db.accounts).filter(a => a.role === 'store').sort((x, y) => x.code.localeCompare(y.code))
-        .map(a => ({ code: a.code, name: a.name, system: 'clock', value: Object.prototype.hasOwnProperty.call(db.alias, a.code) ? db.alias[a.code] : null, transfer: (db.aliasTr || DEFAULT_TRANSFER_ALIAS)[a.code] || null })),
+        .map(a => ({ code: a.code, name: a.name, system: 'clock', value: Object.prototype.hasOwnProperty.call(db.alias, a.code) ? db.alias[a.code] : null, transfer: (db.aliasTr || DEFAULT_TRANSFER_ALIAS)[a.code] || null }))
+        .concat([{ code: 'HQ', name: '總部（服務帳號）', system: 'clock', value: null, transfer: null }]),      // 真伺服器的 service 帳號也在這張表（不能登入、但要能設打卡對照），不是門市所以沒有管理系統單位
       stores: stores.map(([value, label]) => ({ value, label })),
       ...lossAlias.info(db),
       vault: stores.map(([, label, name]) => ({ name, label, set: !!db.vault[name], updatedAt: db.vault[name] || null })),

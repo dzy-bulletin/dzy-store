@@ -195,11 +195,19 @@ export function storePermRoute(db, method, p, q, b, s, per, me, eff, log) {
   return null;
 }
 
+// 與 server/admin.js UNIT_CHOICES 同一份（外加兩個測試用單位，e2e 的 TEST1／TEST2 對到它們）
+const UNIT_CHOICES = [
+  { unit: 'mala-gf', label: '小辛辣 新竹光復' }, { unit: 'mzt-gf', label: '墨竹亭 新竹光復' }, { unit: 'mzt-js', label: '墨竹亭 新竹金山' },
+  { unit: 'mzt-lzl', label: '墨竹亭 台北六張犁' }, { unit: 'mzt-wx', label: '墨竹亭 台中文心' }, { unit: 'mzt-rg', label: '墨竹亭 內湖瑞光' },
+  { unit: 'mzt-mc', label: '墨竹亭 台中美村' }, { unit: 'yiwu-js', label: '一悟燒肉 新竹金山' }, { unit: 'yiwu-wx', label: '一悟燒肉 竹北文興' },
+  { unit: 'ck', label: '中央工廠（央廚）' }, { unit: 'mala-test', label: '（測試）小辛辣' }, { unit: 'mzt-test', label: '（測試）墨竹亭' }
+];
+
 // 後台：管理系統單位對照、逐店關閉門市帳號登入
 export function adminRoute(db, method, p, b, me, log) {
   if (p === '/admin/unit-map') {
     const stores = Object.values(db.accounts).filter(a => a.role === 'store' && a.active).sort((x, y) => (x.code < y.code ? -1 : 1)).map(a => ({ code: a.code, name: a.name }));
-    if (method === 'GET') return ok({ items: Object.keys(db.unitMap).sort().map(u => ({ unit: u, code: db.unitMap[u], name: (db.accounts[db.unitMap[u]] || {}).name })), stores });
+    if (method === 'GET') return ok({ items: Object.keys(db.unitMap).sort().map(u => ({ unit: u, code: db.unitMap[u], name: (db.accounts[db.unitMap[u]] || {}).name })), stores, units: UNIT_CHOICES });
     const unit = typeof b.unit === 'string' ? b.unit.trim() : '';
     if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(unit)) return fail('BAD_INPUT', '管理系統單位代碼格式不正確（小寫英數字與連字號，例如 mala-gf）');
     if (b.code === null) { delete db.unitMap[unit]; log(me.code, 'admin', 'unit-map-set', true); return ok(); }
