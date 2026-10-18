@@ -290,6 +290,7 @@ async function onHash() {
 const sendReady = () => { try { window.parent.postMessage({ type: 'dzy-store-ready', v: 1 }, EMBED_ORIGIN); } catch (e) { /* parent 不接受就算了 */ } };
 function installEmbed() {
   document.body.classList.add('embed');
+  if (ONLY_DUTY) document.body.classList.add('embed-duty');   // 考勤管理：不顯示功能列
   window.addEventListener('message', e => {
     if (e.origin !== EMBED_ORIGIN || e.source !== window.parent) return;
     const m = e.data;
