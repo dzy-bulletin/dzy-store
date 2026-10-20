@@ -166,20 +166,23 @@ function applyBadges(items) {
 // ---------- 嵌入管理系統：選單交給管理系統畫在頁頂（2026-10-20） ----------
 // 每次畫面或待辦數字變了，就把 #nav 目前的項目（id＝data-nav、名稱、數字）送給管理系統；
 // 管理系統回 dzy-store-tabs 才加 embed-tabs 藏自己的選單；點管理系統的分頁會送 dzy-store-go 過來。
+// 考勤管理（?only=duty）：送出勤核定的子分頁（nav.tabs，#/duty/<tab>）；申請審核的待審數字由 duty/state.js setReqBadge 改完發 dzystore-nav 事件再送一次（2026-10-20）
 function navItems() {
-  return [...document.querySelectorAll('#nav a[data-nav]')].map(a => {
+  const sel = ONLY_DUTY ? 'nav.tabs a[data-tab]' : '#nav a[data-nav]';
+  return [...document.querySelectorAll(sel)].map(a => {
     const b = a.querySelector('.badge');
     const label = [...a.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim();
-    return { id: a.dataset.nav, label, badge: b ? Number(b.textContent) || 0 : 0, err: !!(b && b.classList.contains('err')) };
+    return { id: ONLY_DUTY ? a.dataset.tab : a.dataset.nav, label, badge: b ? Number(b.textContent) || 0 : 0, err: !!(b && b.classList.contains('err')) };
   });
 }
 function postNav() {
-  if (!EMBED || ONLY_DUTY) return;
-  const on = document.querySelector('#nav a[data-nav].on');
-  try { window.parent.postMessage({ type: 'dzy-store-nav', v: 1, items: navItems(), cur: on ? on.dataset.nav : '' }, EMBED_ORIGIN); } catch (e) { /* parent 不接受就算了 */ }
+  if (!EMBED) return;
+  const on = ONLY_DUTY ? document.querySelector('nav.tabs a[data-tab].on') : document.querySelector('#nav a[data-nav].on');
+  try { window.parent.postMessage({ type: 'dzy-store-nav', v: 1, items: navItems(), cur: on ? (ONLY_DUTY ? on.dataset.tab : on.dataset.nav) : '' }, EMBED_ORIGIN); } catch (e) { /* parent 不接受就算了 */ }
 }
 function goNav(id) {
-  const a = typeof id === 'string' && /^[a-z][a-z0-9-]{0,30}$/.test(id) ? document.querySelector(`#nav a[data-nav="${id}"]`) : null;
+  const ok = typeof id === 'string' && /^[a-z][a-z0-9-]{0,30}$/.test(id);
+  const a = !ok ? null : ONLY_DUTY ? document.querySelector(`nav.tabs a[data-tab="${id}"]`) : document.querySelector(`#nav a[data-nav="${id}"]`);
   if (a) go(a.getAttribute('href'));
 }
 
@@ -319,9 +322,10 @@ function installEmbed() {
     if (!m || typeof m !== 'object' || m.v !== 1) return;
     if (m.type === 'dzy-store-sso' && typeof m.ticket === 'string' && TICKET_RE.test(m.ticket)) runTicket(m.ticket, true);
     else if (m.type === 'dzy-store-logout') embedLogout();
-    else if (m.type === 'dzy-store-tabs' && !ONLY_DUTY) document.body.classList.add('embed-tabs');
-    else if (m.type === 'dzy-store-go' && !ONLY_DUTY) goNav(m.id);
+    else if (m.type === 'dzy-store-tabs') document.body.classList.add('embed-tabs');
+    else if (m.type === 'dzy-store-go') goNav(m.id);
   });
+  window.addEventListener('dzystore-nav', postNav);   // 模組改了分頁數字（出勤核定 setReqBadge）
   sendReady();
 }
 async function embedLogout() {

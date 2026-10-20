@@ -70,6 +70,7 @@ export function setReqBadge(n) {
   if (!a) return;
   a.querySelectorAll('.badge').forEach(b => b.remove());
   if (n > 0) { const i = document.createElement('i'); i.className = 'badge'; i.textContent = String(n); i.setAttribute('aria-label', n + ' 筆待審'); a.append(i); }
+  window.dispatchEvent(new Event('dzystore-nav'));   // 嵌入管理系統時：頁頂分頁的數字跟著更新（shell.js postNav）
 }
 export function refreshReqBadge() {
   if (S.admin && !S.asStore) return;

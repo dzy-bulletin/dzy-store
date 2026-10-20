@@ -418,6 +418,10 @@ body.embed:not(.embed-duty) .sidebar nav a .badge{position:absolute;top:2px;left
 @media (max-width:860px){body.embed:not(.embed-duty) #nav{flex-wrap:wrap}body.embed:not(.embed-duty) #nav a{flex:1 0 calc(20% - 2px);white-space:normal;word-break:break-all}}
 /* 管理系統確認由它畫頁頂分頁（收到 dzy-store-tabs）才藏自己的選單（2026-10-20） */
 body.embed.embed-tabs:not(.embed-duty) .sidebar{display:none}
+/* 考勤管理（only=duty）：分頁與頁名由管理系統頁頂畫，這裡藏分頁列與「出勤核定」大標題，只留「姓名・門市　換店」一行（Eason 2026-10-20 選 A 版） */
+body.embed.embed-duty.embed-tabs nav.tabs,body.embed.embed-duty.embed-tabs .topbar .page-title{display:none}
+body.embed.embed-duty.embed-tabs .topbar{padding-top:10px}
+body.embed.embed-duty.embed-tabs .embed-who{justify-content:flex-end}
 .sp-store{max-width:320px;margin-bottom:6px}
 .sp-tbl{width:100%;border-collapse:collapse}
 .sp-tbl th,.sp-tbl td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle;font-size:13.5px}
