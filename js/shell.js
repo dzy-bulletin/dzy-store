@@ -65,6 +65,7 @@ function frame(s, inner, nav, opts) {
   }
   applyTheme(s ? s.brand : null, UI.logoUrl);
   bindLogout();
+  postNav();
   return app.querySelector('main') || app.querySelector('.login-view');
 }
 function bindLogout() {
@@ -160,7 +161,28 @@ function applyBadges(items) {
     i.className = 'badge' + (by[id].err ? ' err' : ''); i.textContent = String(by[id].n); i.setAttribute('aria-label', `${by[id].n} 件待處理`);
     a.appendChild(i);
   });
+  postNav();
 }
+// ---------- 嵌入管理系統：選單交給管理系統畫在頁頂（2026-10-20） ----------
+// 每次畫面或待辦數字變了，就把 #nav 目前的項目（id＝data-nav、名稱、數字）送給管理系統；
+// 管理系統回 dzy-store-tabs 才加 embed-tabs 藏自己的選單；點管理系統的分頁會送 dzy-store-go 過來。
+function navItems() {
+  return [...document.querySelectorAll('#nav a[data-nav]')].map(a => {
+    const b = a.querySelector('.badge');
+    const label = [...a.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim();
+    return { id: a.dataset.nav, label, badge: b ? Number(b.textContent) || 0 : 0, err: !!(b && b.classList.contains('err')) };
+  });
+}
+function postNav() {
+  if (!EMBED || ONLY_DUTY) return;
+  const on = document.querySelector('#nav a[data-nav].on');
+  try { window.parent.postMessage({ type: 'dzy-store-nav', v: 1, items: navItems(), cur: on ? on.dataset.nav : '' }, EMBED_ORIGIN); } catch (e) { /* parent 不接受就算了 */ }
+}
+function goNav(id) {
+  const a = typeof id === 'string' && /^[a-z][a-z0-9-]{0,30}$/.test(id) ? document.querySelector(`#nav a[data-nav="${id}"]`) : null;
+  if (a) go(a.getAttribute('href'));
+}
+
 async function loadTodos(tok) {
   let d = null;
   try { d = await api('GET', '/home'); } catch (e) { /* 讀不到：每組顯示「暫時讀不到」 */ }
@@ -297,6 +319,8 @@ function installEmbed() {
     if (!m || typeof m !== 'object' || m.v !== 1) return;
     if (m.type === 'dzy-store-sso' && typeof m.ticket === 'string' && TICKET_RE.test(m.ticket)) runTicket(m.ticket, true);
     else if (m.type === 'dzy-store-logout') embedLogout();
+    else if (m.type === 'dzy-store-tabs' && !ONLY_DUTY) document.body.classList.add('embed-tabs');
+    else if (m.type === 'dzy-store-go' && !ONLY_DUTY) goNav(m.id);
   });
   sendReady();
 }

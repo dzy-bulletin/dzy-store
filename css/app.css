@@ -416,6 +416,8 @@ body.embed:not(.embed-duty) .sidebar nav a .badge{position:absolute;top:2px;left
 @media (min-width:861px){body.embed:not(.embed-duty) #nav a{font-size:14px;max-width:150px}}
 /* 手機：功能最多十格，一排五格、超過自動折到第二排（不用縮到看不清，也不撐出橫向捲動） */
 @media (max-width:860px){body.embed:not(.embed-duty) #nav{flex-wrap:wrap}body.embed:not(.embed-duty) #nav a{flex:1 0 calc(20% - 2px);white-space:normal;word-break:break-all}}
+/* 管理系統確認由它畫頁頂分頁（收到 dzy-store-tabs）才藏自己的選單（2026-10-20） */
+body.embed.embed-tabs:not(.embed-duty) .sidebar{display:none}
 .sp-store{max-width:320px;margin-bottom:6px}
 .sp-tbl{width:100%;border-collapse:collapse}
 .sp-tbl th,.sp-tbl td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle;font-size:13.5px}
