@@ -398,7 +398,7 @@ async function refreshMe() {
   try {
     const d = await api('GET', '/me');
     const cur = getSession();
-    if (cur && cur.token === s.token) setSession({ ...cur, name: d.name || cur.name, brand: d.brand || cur.brand, features: d.features || [], canVoid: !!d.canVoid, isManager: !!d.isManager, scheduleAdmin: !!d.scheduleAdmin, dutyUnlocked: !!d.dutyUnlocked, dutyManager: d.dutyManager !== false, stores: d.stores || cur.stores, attStores: d.attStores || [] });
+    if (cur && cur.token === s.token) setSession({ ...cur, name: d.name || cur.name, brand: d.brand || cur.brand, features: d.features || [], canVoid: !!d.canVoid, isManager: !!d.isManager, scheduleAdmin: !!d.scheduleAdmin, dutyUnlocked: !!d.dutyUnlocked, dutyManager: d.dutyManager !== false, dutyHours: d.dutyHours !== false, stores: d.stores || cur.stores, attStores: d.attStores || [] });
   } catch (e) { /* 登入失效 api 已處理；連不上就先沿用舊的 */ }
 }
 

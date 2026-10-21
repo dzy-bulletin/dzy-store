@@ -127,3 +127,5 @@ export function staleLeave() { S.leave = null; S.leaveP = null; S.leaveBy = {}; 
 
 // 個人登入且不是店長／人資主管／管理員：伺服器會擋打卡 QR、公告、新增同仁、設離職（proxy/duty.js manager_only），畫面就不顯示；門市帳號維持原樣
 export const dutyManager = s => !(s && s.person && s.dutyManager === false);
+// 有沒有核定工時的對象（2026-10-21 工時與申請分開核）：個人登入且伺服器明說 false＝只有申請審核權（區督導、區經理、研發總監）；門市登入、管理者、舊伺服器沒這欄＝有
+export const dutyHours = s => !(s && s.person && s.dutyHours === false);

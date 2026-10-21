@@ -11,7 +11,7 @@ const addDays = (ymd, n) => new Date(Date.parse(ymd + 'T00:00:00Z') + n * 86400e
 export const SUB_RE = /^(DZY\d{3,}|U:[A-Za-z0-9_-]{1,64})$/;
 export const MAX_SUPPORT_DAYS = 90;
 
-// 假人物（欄位照契約 ident；attStores 是示範用：這個人考勤名單裡有人的門市代號）
+// 假人物（欄位照契約 ident；attStores 是示範用：這個人考勤名單裡有人的門市代號；reqOnly＝只有申請審核權、沒有核定工時對象，示範 dutyHours=false）
 export const PERSONAS = {
   DZY023: { name: '陳小明', unit: 'mzt-test', title: 'sm', epoch: '2026-03-01', units_managed: ['mzt-test'], void_units: [] },
   DZY031: { name: '李計時', unit: 'mzt-test', title: 'pt', epoch: '2026-05-01', units_managed: [], void_units: [] },
@@ -75,7 +75,7 @@ export function attStoresOf(db, p) {
 export function sessionBody(db, p, code, eff, token) {
   const a = db.accounts[code], x = access(db, p, code, eff);
   return Object.assign(token ? { token: token.token, expiresAt: token.expiresAt } : {}, { code, name: a.name, role: 'store', brand: a.brand, mustChangePassword: false, features: x.features,
-    person: { sub: p.sub, name: p.name }, canVoid: x.canVoid, isManager: x.isManager, scheduleAdmin: x.scheduleAdmin, dutyUnlocked: x.features.includes('duty'), dutyManager: x.dutyManager, stores: storesOf(db, p, eff), attStores: attStoresOf(db, p) });
+    person: { sub: p.sub, name: p.name }, canVoid: x.canVoid, isManager: x.isManager, scheduleAdmin: x.scheduleAdmin, dutyUnlocked: x.features.includes('duty'), dutyManager: x.dutyManager, dutyHours: !p.reqOnly, stores: storesOf(db, p, eff), attStores: attStoresOf(db, p) });
 }
 const newSession = (db, p, code) => {
   const t = { token: hex(32), expiresAt: new Date(Date.now() + 12 * 3600e3).toISOString(), code, duty: false, sub: p.sub };
