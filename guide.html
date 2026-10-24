@@ -33,7 +33,7 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
 </style>
 </head>
 <body>
-<header><h1>門市操作手冊</h1><p>登入、貨單辨識、收支登記、出勤核定、耗損登記</p></header>
+<header><h1>門市操作手冊</h1><p>登入、貨單辨識、收支登記、耗損登記</p></header>
 <div class="wrap">
 <nav class="toc" aria-label="目錄"><b>想看哪一段</b>
   <a href="#login">登入與改密碼</a><a href="#home">首頁</a><a href="#purchase">貨單辨識</a><a href="#cashbook">收支登記</a><a href="#duty">出勤核定</a><a href="#transfer">門市調撥</a><a href="#loss">耗損登記</a><a href="#inventory">庫存盤點</a><a href="#board">叫貨看板</a><a href="#schedule">自動排班</a><a href="#staff">新進與離職同仁</a><a href="#person">用個人帳號登入</a><a href="#help">遇到問題</a></nav>
@@ -65,7 +65,6 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
     <li>想再用的時候，回到「功能開關」把勾打開，馬上就回來。</li>
     <li>這個開關只影響你們這一家店，不會動到別家店。</li>
     <li>管理者沒有開通的功能不會出現在這裡；要開通請洽管理者。</li>
-    <li>出勤核定關掉不需要核定密碼，但打開之後要使用，還是要輸入核定密碼。</li>
   </ol>
   <figure class="shot"><img src="img/guide/01-login.jpg" width="780" height="1688" loading="lazy" alt="登入畫面：門市代號與密碼欄、登入鈕"><figcaption>登入畫面</figcaption></figure>
   <figure class="shot"><img src="img/guide/02-change-password.jpg" width="780" height="1688" loading="lazy" alt="第一次登入的強制改密碼畫面"><figcaption>第一次登入：設定自己的新密碼</figcaption></figure>
@@ -84,7 +83,6 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
   <ul>
     <li><b>貨單辨識</b>：拍進貨單照片傳給總部。</li>
     <li><b>收支登記</b>：記每天店裡的現金支出與收入。</li>
-    <li><b>出勤核定</b>：主管核定同仁的上下班工時、管理裝置與名冊。</li>
   </ul>
   <p>如果左側欄少了某個系統，表示你們店還沒開這項功能，請洽管理者。</p>
   <figure class="shot"><img src="img/guide/03-home.jpg" width="780" height="1854" loading="lazy" alt="首頁的待辦與異常，依系統分組"><figcaption>首頁：待辦與異常</figcaption></figure>
@@ -155,41 +153,13 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
 </section>
 
 <section id="duty"><h2>五、出勤核定</h2>
-  <p>給值班主管用：核定同仁的工時、管理打卡用的手機（裝置）、維護員工名冊、發布打卡公告。</p>
-  <h3>第一次進入：設定核定通行碼</h3>
-  <ol>
-    <li>點首頁的 <b>出勤核定</b>。</li>
-    <li>輸入核定通行碼 <code>0000</code>（四個零），按 <span class="btn">進入</span>。</li>
-    <li>系統會請你改成自己的核定通行碼：輸入兩次新的（至少 4 碼，<b>不能是 0000</b>），按 <span class="btn">儲存並進入</span>。</li>
-    <li>之後進入都輸入你設定的新通行碼。登入期間只需要輸入一次。</li>
-  </ol>
-  <div class="tip">核定通行碼和登入密碼是兩組，請不要設成一樣。忘記時請管理者在後台「重設為 0000」，再從上面第 2 步開始。</div>
-  <h3>核定工時</h3>
-  <ol>
-    <li>切到 <b>核定工時</b>。上面的日期列可以按 <span class="btn">‹</span> 前一天、<span class="btn">›</span> 後一天，或按 <span class="btn">今天</span>，也能直接選日期。</li>
-    <li>如果上方出現「<b>本月還有 N 天沒核定</b>」，點裡面的同仁名字，會直接跳到那一天並展開那位同仁。</li>
-    <li>每位同仁一張卡，點一下展開。卡片上看得到當天的打卡與參考時數。系統會幫你展開「下一位還沒核定的人」，核完自動翻到下一位。</li>
-    <li>檢查上班時段（有預設班別會先填好）。要多一段按 <span class="btn">＋ 加一段</span>，要刪掉一段按該段右邊的 <span class="btn">－</span>。<b>核定時數</b>會即時算給你看。</li>
-    <li>同仁請假就在「<b>請假註記</b>」選假別、填時數（每 0.25 小時一格）。出差一樣選「出差」，時數填幾小時就核定幾小時，出差那段不用再填進上班時段。</li>
-    <li>「<b>遲到分鐘</b>」留空＝系統自動判定；填 0＝認定不算遲到；填數字＝以你填的為準。</li>
-    <li>按 <span class="btn">送出核定</span>，確認畫面核對無誤後按 <b>送出</b>。成功後卡片會顯示「已核定」。要修改就再展開、改完按 <span class="btn">重新送出核定</span>。</li>
-  </ol>
-  <div class="tip">有休息時間的店（例如中央廚房），預設班別會自動分成兩段、中間標示休息。當天沒休息就按 <span class="btn">今天沒休息 → 併成一段</span>。</div>
-  <h3>裝置核准</h3>
-  <p>同仁換手機或第一次打卡，要先經過主管核准。切到 <b>裝置核准</b>，看到「新裝置待核准」的卡片，確認是本人的手機後按 <span class="btn">核准</span>；不認得的按 <span class="btn">拒絕</span>。卡片若寫「有打卡超出門市範圍」，核准只會解除裝置這一關，超出範圍的那幾筆仍然不會入帳。</p>
-  <h3>員工名冊</h3>
-  <p>切到 <b>員工名冊</b>：</p>
+  <p>出勤核定（核定工時、裝置核准、員工名冊、公告）已統一搬到<b>管理系統</b>：<b>人資部門 → 考勤管理</b>，請到那裡操作。這裡的選單與首頁不再有「出勤核定」。</p>
   <ul>
-    <li><b>新進同仁報到</b>：<b>請到管理系統新增</b>（見「十一、新進與離職同仁」）。這裡的「管理系統連不上時才用（備案）」預設收合，展開才有 <span class="btn">建立帳號</span>，只建打卡帳號，建好後請他打開 LINE「鼎兆元打卡」綁定，並通知總部到管理系統建檔；舊版專屬打卡連結收在「舊版專屬打卡連結」裡，沒用 LINE 打卡的人才需要。</li>
-    <li><b>同仁異動</b>：選同仁按 <span class="btn">設為離職</span>，他立刻不能打卡，過去的紀錄都保留。設錯了，在「已離職」清單按 <span class="btn">恢復在職</span>。同仁要離職，請先看「十一、新進與離職同仁」的順序。</li>
+    <li>管理系統網址：<code>https://dzy.mozhuting.com/#/attendance</code>（用自己的管理系統帳號登入）。</li>
+    <li>以前收藏的「出勤核定」舊網址，點進去會看到同樣的提示和前往按鈕。</li>
+    <li>首頁的「沒核定天數」「加班請假申請待審」「新手機等核准」提醒，也改在管理系統首頁看。</li>
   </ul>
-  <h3>公告</h3>
-  <p>切到 <b>公告</b>：輸入內容（最多 120 字），需要時選「顯示到」的日期（留空＝一直顯示），按 <span class="btn">發布公告</span>，同仁打卡頁最上方就會看到。下面的清單可以按 <span class="btn">下架</span>，之後也能按 <span class="btn">重新顯示</span>。</p>
-  <div class="warn">連續輸入錯誤核定通行碼 5 次，會暫時鎖住 15 分鐘。</div>
-  <figure class="shot"><img src="img/guide/10-duty-approve.jpg" width="780" height="3114" loading="lazy" alt="核定工時：同仁卡片與送出核定"><figcaption>核定工時</figcaption></figure>
-  <figure class="shot"><img src="img/guide/11-duty-device.jpg" width="780" height="1688" loading="lazy" alt="裝置核准"><figcaption>裝置核准</figcaption></figure>
-  <figure class="shot"><img src="img/guide/12-duty-roster.jpg" width="780" height="1688" loading="lazy" alt="員工名冊"><figcaption>員工名冊</figcaption></figure>
-  <figure class="shot"><img src="img/guide/13-duty-notice.jpg" width="780" height="1688" loading="lazy" alt="公告發布"><figcaption>公告</figcaption></figure>
+  <div class="tip">這個頁面的其他功能（貨單、收支、排班等）操作不變。排班鎖定／解除時要輸入的「出勤核定密碼」說明，見「十、自動排班」。</div>
 </section>
 
 <section id="transfer"><h2>六、門市調撥</h2>
@@ -363,7 +333,7 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
     <li><b>還有 N 個地方不合規定，修正後才能鎖定</b>：打開「提醒」看紅字，改掉那幾格。</li>
     <li><b>排不出來：…</b>：人手不夠或指定休假太多。照訊息減少指定休假、調低最少人數，或增加同仁可上的班。</li>
     <li><b>這一期已鎖定，要先解除鎖定才能修改</b>：照上面「已經鎖定還要改」。</li>
-    <li><b>出勤核定密碼還是預設的 0000</b>：先到「出勤核定」改成自己的密碼，再回來鎖定。</li>
+    <li><b>出勤核定密碼還是預設的 0000</b>：按鈕下方會直接出現「設定新的出勤核定密碼（4 碼以上）」和「再輸入一次」，輸入新密碼（不可以是 0000）按 <span class="btn">儲存並繼續</span>，系統改好密碼後會接著完成鎖定（或解除、重送）。</li>
     <li><b>送 LINE 失敗</b>／<b>等待送到 LINE</b>很久：按 <span class="btn">立即重送</span>；系統也會每 5 分鐘自動再試，首頁待辦會提醒。</li>
     <li><b>這一期已發布，但上一期改過之後……不合規定了</b>：改了上一期，跨期的換班間隔或連續天數出問題。解除這一期的鎖定、修正後再鎖定。</li>
     <li><b>這家店沒有 LINE 打卡，鎖定不送 LINE</b>：例如墨竹亭六張犁，班表照樣可以排、可以匯出 PDF。</li>

@@ -1,4 +1,7 @@
-import { MOCK, EMBED, EMBED_ORIGIN, DZY_LOGIN_URL, ONLY_DUTY } from './config.js';
+import { MOCK, EMBED, EMBED_ORIGIN, DZY_ORIGIN, DZY_LOGIN_URL, ONLY_DUTY } from './config.js';
+// 管理系統考勤管理（出勤核定統一後的去處，2026-10-24 總審：網址改用 config 常數，不寫死）
+const ATT_URL = DZY_ORIGIN + '/#/attendance';
+const attLinkAttr = () => (EMBED ? 'target="_top"' : 'target="_blank" rel="noopener"');
 import { api } from './api.js';
 import { initAuth, getSession, setSession, clearSession, rememberedCode, login, logout, changePassword, toSession, ssoRedeem, ssoSelect, ssoSwitch, adoptResult } from './auth.js';
 import { MODULES, ADMIN_TABS } from './registry.js';
@@ -29,7 +32,7 @@ const NAV_ICONS = { staffperm: '👥', home: '🏠', purchase: '🧾', cashbook:
 function sidebarHtml(s, cur) {
   const feats = new Set(s.features || []);
   const mods = [...(UI.cards || [])].sort((a, b) => a.order - b.order)
-    .filter(c => c.visible && feats.has(c.id) && MODULES.some(m => m.id === c.id) && (!ONLY_DUTY || c.id === 'duty'));   // ?only=duty：只剩出勤核定
+    .filter(c => c.visible && feats.has(c.id) && MODULES.some(m => m.id === c.id) && (ONLY_DUTY ? c.id === 'duty' : c.id !== 'duty'));   // ?only=duty：只剩出勤核定；一般模式不列出勤核定（已移到管理系統考勤管理，2026-10-24，spec §17.3）
   const p = s.person, many = p && (s.stores || []).length > 1;
   const item = (key, href, label) => `<a href="${href}" data-nav="${key}" class="${cur === key ? 'on' : ''}"${cur === key ? ' aria-current="page"' : ''}><span class="ic">${NAV_ICONS[key] || '•'}</span>${esc(label)}</a>`;
   return `<aside class="sidebar" id="sidebar">
@@ -196,9 +199,12 @@ async function loadTodos(tok) {
 function viewHome(s, tok) {
   const feats = new Set(s.features || []);
   const cards = [...(UI.cards || [])].sort((a, b) => a.order - b.order)
-    .filter(c => c.visible && feats.has(c.id) && MODULES.some(m => m.id === c.id));
+    .filter(c => c.visible && feats.has(c.id) && MODULES.some(m => m.id === c.id) && c.id !== 'duty');   // 首頁不列出勤核定（2026-10-24，spec §17.3）
+  // 個人登入且唯一的功能是出勤核定（一般模式）：指去管理系統考勤管理，不說「沒有開通任何功能」（2026-10-24 總審）
+  const onlyDuty = !!s.person && feats.size === 1 && feats.has('duty');
   const html = cards.length
     ? `<div id="todoBody" aria-live="polite">${cards.map(c => `<section class="card todo-group" data-module="${c.id}"><h2>${esc(c.label)}</h2><div class="todo-body"><div class="hint">讀取中…</div></div></section>`).join('')}</div>`
+    : onlyDuty ? `<div class="card"><p id="homeOnlyDuty">出勤相關的工作在管理系統：人資部門 → 考勤管理</p><a class="btn" id="homeOnlyDutyGo" href="${ATT_URL}" ${attLinkAttr()}>前往考勤管理</a></div>`
     : `<div class="card"><p>目前還沒有開通任何功能，請洽管理者。</p>${s.role === 'store' && (!s.person || s.isManager) ? '<p class="hint" id="noFeatHint">如果是自己關掉的，可到選單裡你的店名旁「功能開關」打開。</p>' : ''}</div>`;
   frame(s, bannerHtml() + html, '', { cur: 'home', title: '待辦與異常', sub: s.person ? s.person.name + '・' + s.name : s.name });
   if (cards.length) loadTodos(tok);
@@ -383,6 +389,11 @@ function viewNoDuty(s) {
   frame(s, `<div class="card"><h2>出勤核定</h2><p class="hint" id="onlyNoDuty">你的帳號在這家店（${esc(s.name)}）沒有出勤核定的權限。${many ? '可以換到別家店試試。' : '如需使用請洽總部。'}</p>
     ${many ? '<a class="btn ghost" href="#/switch" id="noDutySwitch">換店</a>' : ''}</div>`, '', { cur: '', title: '出勤核定' });
 }
+// 舊網址 #/duty/...（非 ?only=duty）：不渲染出勤核定，改提示已移到管理系統考勤管理（2026-10-24，spec §17.3）
+function viewDutyMoved(s) {
+  frame(s, `<div class="card"><h2>出勤核定</h2><p id="dutyMoved">出勤核定已移到管理系統：人資部門 → 考勤管理</p>
+    <a class="btn" id="dutyMovedGo" href="${ATT_URL}" ${attLinkAttr()}>前往考勤管理</a></div>`, '', { cur: '', title: '出勤核定' });
+}
 async function viewStaffPerm(s, tok) {
   if (!canStaffPerm(s)) return go('#/');
   const main = frame(s, '<div id="spBody"></div>', '', { cur: 'staffperm', title: '本店同仁權限' });
@@ -415,6 +426,7 @@ export async function render() {
     if (!(s.features || []).includes('duty')) return viewNoDuty(s);
     if (r.page !== 'duty') { history.replaceState(null, '', '#/duty/'); return render(); }
   }
+  if (r.page === 'duty' && !ONLY_DUTY) return viewDutyMoved(s);   // 一般模式進 #/duty/...（ONLY_DUTY 已在上面處理，2026-10-24，spec §17.3）
   if (r.page === 'password') return s.person ? go('#/') : viewPassword(s);
   if (r.page === 'staffperm') return viewStaffPerm(s, tok);
   if (r.page === 'features') return viewFeatures(s);

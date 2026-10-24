@@ -88,6 +88,10 @@ export function renderBoard(ctx) {
       <div class="sc-seg" role="group" aria-label="檢視方式"><button type="button" id="scViewGrid" class="${view === 'grid' ? 'on' : ''}">整期</button><button type="button" id="scViewDay" class="${view === 'day' ? 'on' : ''}">單日</button></div>
     </div>
     <div id="scPw" hidden class="row mt"><input type="password" id="scPwIn" autocomplete="off" placeholder="出勤核定密碼" aria-label="出勤核定密碼"><button type="button" class="btn" id="scPwBtn">確認</button></div>
+    <div id="scNew" hidden class="mt"><p class="hint">出勤核定密碼還是預設的 0000，請在這裡改成只有主管知道的新密碼（至少 4 碼，不可以是 0000），改好會接著完成剛才的動作。</p>
+      <div class="fld"><label for="scNewIn">設定新的出勤核定密碼（4 碼以上）</label><input type="password" id="scNewIn" autocomplete="new-password"></div>
+      <div class="fld mt"><label for="scNewIn2">再輸入一次</label><input type="password" id="scNewIn2" autocomplete="new-password"></div>
+      <div class="row mt"><button type="button" class="btn" id="scNewBtn">儲存並繼續</button></div></div>
     ${D.meta.needs_recheck ? '<div class="note warn mt" role="alert">這一期已發布，但上一期改過之後，跨期的換班間隔或連續上班天數不合規定了。請解除鎖定、修正後再鎖定。</div>' : ''}
     <div class="sc-months mt">${monthsHtml}</div>
     <div id="scMsg" class="${S.err ? 'err' : 'okmsg'}" role="status">${esc(S.err || S.msg || '')}</div>
@@ -213,16 +217,18 @@ export function renderBoard(ctx) {
   });
 
   // 鎖定／解鎖：要出勤核定密碼（同一次登入只問一次）
-  const pwBox = q('#scPw');
+  // 2026-10-24 總審：出勤核定畫面已移到管理系統，密碼還是預設 0000 時就地改（同出勤核定 changeForm 的規則，POST /duty/password），改好接著做剛才的動作
+  const pwBox = q('#scPw'), newBox = q('#scNew');
   let pending = null;
+  const askNew = (retry) => { pending = retry; pwBox.hidden = true; newBox.hidden = false; q('#scNewIn').focus(); say('出勤核定密碼還是預設的 0000，請先設定新的出勤核定密碼', true); paintMsg(); };
   const doLock = async () => {
     try {
       if (locked) { await mutate('unlock'); say(pub && pub.kind === 'publish' ? '已解除鎖定，LINE 上的這一期班表會撤下' : '已解除鎖定'); }
       else { const r = await mutate('lock'); say(r.publish ? '已鎖定，正在送到 LINE' : '已鎖定'); }
     } catch (e) {
       if (e.code === 'FORBIDDEN' && /核定/.test(e.message)) { setDutyFlag(''); pending = doLock; pwBox.hidden = false; q('#scPwIn').focus(); say('請輸入出勤核定密碼', true); paintMsg(); return; }
-      if (e.code === 'DUTY_MUST_CHANGE') { say('出勤核定密碼還是預設的 0000，請先到「出勤核定」改成自己的密碼', true); }
-      else say(e.message, true);
+      if (e.code === 'DUTY_MUST_CHANGE') { setDutyFlag('m'); askNew(doLock); return; }
+      say(e.message, true);
     }
     rerender();
   };
@@ -235,15 +241,31 @@ export function renderBoard(ctx) {
   q('#scPwBtn').onclick = () => busy(q('#scPwBtn'), async () => {
     try {
       const r = await api('POST', '/duty/unlock', { password: q('#scPwIn').value });
-      if (r && r.mustChange) { setDutyFlag('m'); say('出勤核定密碼還是預設的 0000，請先到「出勤核定」改成自己的密碼', true); pwBox.hidden = true; paintMsg(); return; }
+      if (r && r.mustChange) { setDutyFlag('m'); askNew(pending); return; }
       setDutyFlag('1'); pwBox.hidden = true;
       if (pending) await pending();
     } catch (e) { say(e.message, true); paintMsg(); }
   });
+  q('#scNewBtn').onclick = () => busy(q('#scNewBtn'), async () => {
+    const a = q('#scNewIn').value, b = q('#scNewIn2').value;
+    if (a === '0000') { say('新的核定密碼不可以是預設的 0000', true); return paintMsg(); }
+    if (a.length < 4) { say('新的核定密碼至少要 4 碼', true); return paintMsg(); }
+    if (a !== b) { say('兩次輸入的不一樣', true); return paintMsg(); }
+    try {
+      await api('POST', '/duty/password', { newPassword: a });
+      setDutyFlag('1'); newBox.hidden = true; say('已改好出勤核定密碼');
+      if (pending) await pending(); else rerender();
+    } catch (e) {
+      if (e.code === 'FORBIDDEN' && /核定/.test(e.message)) { setDutyFlag(''); newBox.hidden = true; pwBox.hidden = false; q('#scPwIn').focus(); }      // 解鎖狀態不在了：先重新輸入目前密碼
+      say(e.message, true); paintMsg();
+    }
+  });
   if (q('#scResend')) q('#scResend').onclick = () => busy(q('#scResend'), async () => {
     try { const r = await call('resend', { period: S.period }); await load(); say(r.publication && r.publication.status === 'sent' ? '已送到 LINE' : '還是送不出去，系統會每 5 分鐘自動再試'); }
     catch (e) {
-      if (e.code === 'FORBIDDEN' && /核定/.test(e.message)) { pending = async () => { try { await call('resend', { period: S.period }); await load(); say('已重送'); } catch (e2) { say(e2.message, true); } rerender(); }; pwBox.hidden = false; say('請輸入出勤核定密碼', true); paintMsg(); return; }
+      const retry = async () => { try { await call('resend', { period: S.period }); await load(); say('已重送'); } catch (e2) { say(e2.message, true); } rerender(); };
+      if (e.code === 'FORBIDDEN' && /核定/.test(e.message)) { pending = retry; pwBox.hidden = false; say('請輸入出勤核定密碼', true); paintMsg(); return; }
+      if (e.code === 'DUTY_MUST_CHANGE') { setDutyFlag('m'); askNew(retry); return; }
       say(e.message, true);
     }
     rerender();

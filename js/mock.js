@@ -178,9 +178,10 @@ function route(method, p, q, b, token) {
     if (me.role !== 'store') return fail('FORBIDDEN', '管理者帳號請到後台管理的功能開關設定');
     if (per && !pa.isManager) return fail('FORBIDDEN', '只有這家店的店長可以開關功能');
     me.storeOff = me.storeOff || [];
-    if (method === 'GET') return ok({ items: MODS.filter(f => me.features.includes(f)).map(id => ({ id, on: !me.storeOff.includes(id) })) });
+    if (method === 'GET') return ok({ items: MODS.filter(f => f !== 'duty' && me.features.includes(f)).map(id => ({ id, on: !me.storeOff.includes(id) })) });
     if (method === 'POST') {
       if (typeof b.on !== 'boolean') return fail('BAD_INPUT', '開關狀態必須是 true 或 false');
+      if (b.feature === 'duty') return fail('BAD_INPUT', '出勤核定由管理系統考勤管理統一管理');   // 與伺服器一致（2026-10-24，spec §17.4）
       if (!MODS.includes(b.feature) || !me.features.includes(b.feature)) return fail('BAD_INPUT', '這個功能沒有開通，要使用請洽管理者');
       me.storeOff = me.storeOff.filter(f => f !== b.feature);
       if (!b.on) me.storeOff.push(b.feature);
@@ -219,29 +220,9 @@ function homeFor(me) {
   const has = id => eff(me).includes(id);
   const bad = id => (db.homeFaults || []).includes(id);
   const items = [], errors = [];
-  const ERR = { duty: '出勤核定暫時讀不到', purchase: '貨單辨識暫時讀不到', cashbook: '收支登記暫時讀不到' };
+  const ERR = { purchase: '貨單辨識暫時讀不到', cashbook: '收支登記暫時讀不到' };
   const add = (module, level, text, count, link) => items.push({ module, level, text, count, link });
-  if (has('duty') && me.role !== 'admin') {    // 管理者沒有自己的打卡對照：真後端回 FORBIDDEN＝不適用，首頁不列（各店狀況在出勤核定 › 各店總覽）
-    if (bad('duty')) errors.push({ module: 'duty', message: ERR.duty });
-    else {
-      const d = dutyDb();
-      const per = me.person && PM ? PM.personaOf(db, me.person.sub) : null, multi = per ? PM.attStoresOf(db, per) : [];
-      let days, nq;
-      if (multi.length >= 2) {      // 個人登入且可核兩家以上：待核定天數與待審申請合併各店（讀不到的店略過、標部分讀不到）
-        const dates = new Set(); nq = 0;
-        multi.forEach(st => {
-          if ((db.dutyDown || []).includes(st.code)) { if (!errors.some(e => e.module === 'duty')) errors.push({ module: 'duty', message: ERR.duty }); return; }
-          const ds = dutyStore(st.code);
-          withFake(st.code, () => { dutyDo(ds, 'mgr_pending_approvals', {}).data.items.forEach(x => dates.add(x.date)); nq += dutyDo(ds, 'mgr_req_pending', {}).data.items.length; });
-        });
-        days = dates.size;
-      } else { days = new Set(dutyDo(d, 'mgr_pending_approvals', {}).data.items.map(x => x.date)).size; nq = dutyDo(d, 'mgr_req_pending', {}).data.items.length; }
-      const n = days;
-      if (n) add('duty', 'todo', `本月還有 ${n} 天沒核定`, n, '#/duty/approve');
-      if (nq) add('duty', 'todo', `${nq} 筆加班請假申請待審`, nq, '#/duty/request');
-      if (d.devices.length) add('duty', 'todo', `${d.devices.length} 支新手機等核准`, d.devices.length, '#/duty/device');
-    }
-  }
+  // 出勤待辦（沒核定天數、加班請假申請、新手機）已移到管理系統首頁，這裡不再列 duty（2026-10-24，spec §17.4，與伺服器 /home 一致）
   if (has('purchase')) {
     if (bad('purchase')) errors.push({ module: 'purchase', message: ERR.purchase });
     else {
