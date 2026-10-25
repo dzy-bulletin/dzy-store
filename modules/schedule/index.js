@@ -40,7 +40,7 @@ export function tabsFor(s) {
   const cross = Object.keys(GO).filter((id) => GO[id][0] !== mode && !!pickSchedStore(s, GO[id][0])).map((id) => ({ id, label: GO[id][1] }));
   let own;
   if (mode === 'self') own = [].concat(s.schedSelfOn ? [{ id: 'self', label: '我的班表' }] : [], s.schedApproveOn ? [{ id: 'approve', label: '部屬核准' }] : []);
-  else if (mode === 'fixed') own = [{ id: 'fixed', label: '央廚班表' }].concat(s.scheduleAdmin ? [{ id: 'fixedstaff', label: '固定班別' }] : []);
+  else if (mode === 'fixed') own = [{ id: 'fixed', label: '央廚班表' }].concat(s.scheduleAdmin ? [{ id: 'fixedstaff', label: '固定班別' }, { id: 'shifts', label: '班別設定' }] : []);   // 班別設定：央廚自己的班別時段（2026-10-25 Eason）
   else own = STORE_TABS;
   const all = own.concat(cross);
   return all.length ? all : STORE_TABS;

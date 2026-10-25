@@ -5,6 +5,7 @@ import { shiftMinutes, breakOk, breakWarn } from './hours.js';
 
 export function renderShifts(ctx) {
   const el = ctx.el, D = S.data;
+  const fixed = !!(ctx.session && ctx.session.schedMode === 'fixed');      // 央廚固定排班：只管班別時段（新增後到「固定班別」選用）；沒有營業額目標
   const row = (s) => `<div class="card sc-shift" data-id="${esc(s ? s.id : '')}"><div class="grid2">
       <div class="fld"><label>班別名稱</label><input type="text" class="s-name" maxlength="12" value="${esc(s ? s.name : '')}" placeholder="例：早班"></div>
       <div class="fld"><label>上班</label><input type="time" class="s-start" value="${esc(s ? s.start : '10:00')}"></div>
@@ -16,11 +17,13 @@ export function renderShifts(ctx) {
       ${s ? `<label class="sc-chk"><input type="checkbox" class="s-active" ${s.active ? 'checked' : ''}> 使用中</label>` : ''}
       <button type="button" class="btn sm s-save">${s ? '儲存' : '新增班別'}</button><span class="s-msg okmsg" role="status"></span></div></div>`;
 
-  el.innerHTML = `<div class="card"><h2>班別</h2><p class="hint">一個班沒排休息最多 6 小時，超過要有至少 30 分鐘休息；4～6 小時沒排休息會提醒（勞基法 §35：連續工作 4 小時要休息 30 分鐘，餐飲可依但書在工作時間內讓同仁輪流休息）。改班別時間只影響還沒鎖定的期；已發布的班表照鎖定當時的內容。</p></div>
+  const rule = '一個班沒排休息最多 6 小時，超過要有至少 30 分鐘休息；4～6 小時沒排休息會提醒（勞基法 §35：連續工作 4 小時要休息 30 分鐘，餐飲可依但書在工作時間內讓同仁輪流休息）。';
+  const tail = fixed ? '新增的班別會出現在「固定班別」與「央廚班表」的選單裡。已經有人在用的班要換時間，建議新增一個新班別，再到「固定班別」改選——改選後系統會自動重產他從明天起的平日班並送到 LINE；直接改舊班別的時間，已送到 LINE 的班表不會自動重送。' : '改班別時間只影響還沒鎖定的期；已發布的班表照鎖定當時的內容。';
+  el.innerHTML = `<div class="card"><h2>班別</h2><p class="hint" id="scShiftHint">${rule}${tail}</p></div>
     ${D.shifts.map(row).join('')}${row(null)}
-    <div class="card"><h2>每工時營業額目標</h2><p class="hint">班表上低於這個數字會標橘色。空白＝不比較。</p>
+    ${fixed ? '' : `<div class="card"><h2>每工時營業額目標</h2><p class="hint">班表上低於這個數字會標橘色。空白＝不比較。</p>
       <div class="row"><input type="number" min="0" id="cfgRatio" value="${D.cfg && D.cfg.ratio_target != null ? D.cfg.ratio_target : ''}" aria-label="每工時營業額目標"> 元
-      <button type="button" class="btn" id="cfgSave">儲存</button><span id="cfgMsg" class="okmsg" role="status"></span></div></div>`;
+      <button type="button" class="btn" id="cfgSave">儲存</button><span id="cfgMsg" class="okmsg" role="status"></span></div></div>`}`;
 
   el.querySelectorAll('.sc-shift').forEach((c) => {
     const f = (s) => c.querySelector(s);
@@ -37,6 +40,7 @@ export function renderShifts(ctx) {
       catch (e) { const m = f('.s-msg'); m.className = 's-msg err'; m.textContent = e.message; }
     });
   });
+  if (fixed) return;
   el.querySelector('#cfgSave').onclick = () => busy(el.querySelector('#cfgSave'), async () => {
     const m = el.querySelector('#cfgMsg');
     try { const v = el.querySelector('#cfgRatio').value; await call('saveCfg', { ratio_target: v === '' ? null : Number(v) }); await load(); m.className = 'okmsg'; m.textContent = '已儲存'; }

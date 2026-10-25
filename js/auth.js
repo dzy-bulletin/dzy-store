@@ -19,7 +19,7 @@ export function initAuth(onLost, onMust) {
 
 // 總部自填／央廚固定排班的店才有的欄位（docs/schedule-hq/spec.md §5）：沒有就是 undefined（存進 sessionStorage 時自然掉）
 export const schedPart = d => ({ schedMode: d.schedMode || undefined, schedSelfOn: d.schedMode ? !!d.schedSelfOn : undefined, schedApproveOn: d.schedMode ? !!d.schedApproveOn : undefined,
-  schedStores: Array.isArray(d.schedStores) && d.schedStores.length ? d.schedStores : undefined });
+  schedStores: Array.isArray(d.schedStores) && d.schedStores.length ? d.schedStores : undefined, schedView: d.schedView ? true : undefined });
 // 伺服器回的登入結果 → 存進 sessionStorage 的 session。個人登入（管理系統帳號）多帶姓名、各項權限、可進的店
 export function toSession(d) {
   const s = { token: d.token, expiresAt: d.expiresAt, code: d.code, name: d.name, role: d.role, brand: d.brand || 'hq',

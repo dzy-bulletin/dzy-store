@@ -467,13 +467,14 @@ export async function render() {
       if (mode === 'store') rememberSchedStore(s.code);
       // 網址的分頁屬於別種排班的店（例如管理系統首頁提醒直接開 #/schedule/approve）→ 自動換到那種店（能進才換；沒有就留在這裡，由模組顯示第一個分頁）
       const want = r.page === 'schedule' ? SCHED_TAB_MODE[r.tab] : undefined;      // 只看排班的網址（#/duty/approve 這類別的功能網址會轉回排班，不算）
-      if (want && want !== mode) {
+      const fixedShifts = r.tab === 'shifts' && mode === 'fixed' && s.scheduleAdmin;      // 央廚的「班別設定」也用 shifts 分頁（2026-10-25），不要當成門市分頁換店
+      if (want && want !== mode && !fixedShifts) {
         const t = pickSchedStore(s, want);
         if (t && autoSwitchOk(t.code)) return autoSwitch(s, t.code, location.hash);
         if (!t) return viewSchedNoAccess(s, r.tab);      // 沒有那邊的排班權限：說清楚，不要悄悄顯示別種排班的畫面
       }
       // 個人登入：門市排班只給能排班的人；只能看的主管（區督導、總監…）不看門市排班——有總部／央廚入口的轉過去，沒有就說明
-      if (mode === 'store' && !s.scheduleAdmin) {
+      if (mode === 'store' && !s.scheduleAdmin && !s.schedView) {      // schedView：督導／總監唯讀看門市班表（2026-10-25 Eason）
         const t = pickSchedStore(s, 'self') || pickSchedStore(s, 'fixed');
         if (t && autoSwitchOk(t.code)) return autoSwitch(s, t.code, '#/schedule/');
         return viewNoOnly(s, true);
