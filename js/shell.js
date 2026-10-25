@@ -9,7 +9,7 @@ const MOVED = {
 const ONLY_LABEL = { duty: '出勤核定', schedule: '排班' };
 const attLinkAttr = () => (EMBED ? 'target="_top"' : 'target="_blank" rel="noopener"');
 import { api } from './api.js';
-import { initAuth, getSession, setSession, clearSession, rememberedCode, login, logout, changePassword, toSession, ssoRedeem, ssoSelect, ssoSwitch, adoptResult } from './auth.js';
+import { initAuth, getSession, setSession, clearSession, rememberedCode, login, logout, changePassword, toSession, ssoRedeem, ssoSelect, ssoSwitch, adoptResult, schedPart, pickSchedStore, rememberSchedStore } from './auth.js';
 import { MODULES, ADMIN_TABS } from './registry.js';
 import { esc, busy, setMsg, applyUi } from './ui.js';
 import { applyTheme } from './theme.js';
@@ -192,7 +192,10 @@ function postNav() {
 function goNav(id) {
   const ok = typeof id === 'string' && /^[a-z][a-z0-9-]{0,30}$/.test(id);
   const a = !ok ? null : ONLY ? document.querySelector(`nav.tabs a[data-tab="${id}"]`) : document.querySelector(`#nav a[data-nav="${id}"]`);
-  if (a) go(a.getAttribute('href'));
+  if (a) return go(a.getAttribute('href'));
+  // 管理系統首頁提醒（self／approve／fixed／fixedstaff）：目前這家店的分頁沒有這個 id（例如人資主管停在門市）→ 直接改網址，交給 render()
+  // 「分頁屬於別種排班的店 → 自動換店」接手（有權限才換；沒權限顯示沒有權限畫面，不是悄悄留在原地）
+  if (ok && ONLY === 'schedule' && Object.prototype.hasOwnProperty.call(SCHED_TAB_MODE, id)) go('#/schedule/' + id);
 }
 
 async function loadTodos(tok) {
@@ -393,6 +396,23 @@ function viewSwitch(s) {
     });
   });
 }
+// 排班管理的頁頂分頁屬於哪種排班（docs/schedule-hq/spec.md §5）；跨入口分頁（go-*）不在表裡，由模組自己處理
+const SCHED_TAB_MODE = { board: 'store', needs: 'store', staff: 'store', shifts: 'store', self: 'self', approve: 'self', fixed: 'fixed', fixedstaff: 'fixed' };
+// 自動換店的保險：5 秒內不對同一家店重複換（權限或設定對不上時不要無限重載）
+const AUTO_SW = 'dzystore_autosw';
+function autoSwitchOk(code) { try { const x = JSON.parse(sessionStorage.getItem(AUTO_SW) || 'null'); return !(x && x.code === code && Date.now() - x.at < 5000); } catch (e) { return true; } }
+async function autoSwitch(s, code, hash) {
+  try { sessionStorage.setItem(AUTO_SW, JSON.stringify({ code, at: Date.now() })); } catch (e) { /* 無痕模式 */ }
+  frame(s, '<div class="card"><p class="hint" id="autoSwitch" style="margin:0">切換中…</p></div>', '', { cur: 'schedule', title: '排班管理' });
+  try { const d = await ssoSwitch(code); setSession(toSession(d)); location.hash = hash || '#/schedule/'; location.reload(); }
+  catch (e) { frame(s, `<div class="card"><div class="err" id="autoSwitchErr" role="alert">${esc(e.message)}</div></div>`, '', { cur: 'schedule', title: '排班管理' }); }
+}
+// 排班管理：網址／頁頂點的分頁屬於別種排班的店，但這個人在那邊沒有排班權限
+const SCHED_TAB_LABEL = { board: '門市班表', needs: '指定與需求', staff: '門市同仁', shifts: '班別與設定', self: '我的班表', approve: '部屬核准', fixed: '央廚班表', fixedstaff: '固定班別' };
+function viewSchedNoAccess(s, tab) {
+  frame(s, `<div class="card"><h2>排班管理</h2><p class="hint" id="schedNoAccess">你沒有「${esc(SCHED_TAB_LABEL[tab] || '這個頁面')}」的排班權限。</p>
+    <a class="btn ghost" href="#/schedule/" id="schedNoAccessBack">回到這家店的排班</a></div>`, '', { cur: '', title: '排班管理' });
+}
 // ?only=… 但這家店沒有該功能的權限（出勤核定／排班）：說明＋多店可換店
 function viewNoOnly(s, adminOnly) {
   const many = s.person && (s.stores || []).length > 1;
@@ -423,7 +443,7 @@ async function refreshMe() {
   try {
     const d = await api('GET', '/me');
     const cur = getSession();
-    if (cur && cur.token === s.token) setSession({ ...cur, name: d.name || cur.name, brand: d.brand || cur.brand, features: d.features || [], canVoid: !!d.canVoid, isManager: !!d.isManager, scheduleAdmin: !!d.scheduleAdmin, dutyUnlocked: !!d.dutyUnlocked, dutyManager: d.dutyManager !== false, dutyHours: d.dutyHours !== false, stores: d.stores || cur.stores, attStores: d.attStores || [], dutyView: d.dutyView || null });
+    if (cur && cur.token === s.token) setSession({ ...cur, name: d.name || cur.name, brand: d.brand || cur.brand, features: d.features || [], canVoid: !!d.canVoid, isManager: !!d.isManager, scheduleAdmin: !!d.scheduleAdmin, dutyUnlocked: !!d.dutyUnlocked, dutyManager: d.dutyManager !== false, dutyHours: d.dutyHours !== false, stores: d.stores || cur.stores, attStores: d.attStores || [], dutyView: d.dutyView || null, ...schedPart(d) });
   } catch (e) { /* 登入失效 api 已處理；連不上就先沿用舊的 */ }
 }
 
@@ -437,8 +457,28 @@ export async function render() {
   window.scrollTo(0, 0);
   if (r.page === 'switch') return s.person ? viewSwitch(s) : go('#/');
   if (ONLY) {                               // ?only=duty／schedule：只有該功能（含換店）；首頁與其他功能都不顯示
-    if (!(s.features || []).includes(ONLY)) return viewNoOnly(s);
-    if (ONLY === 'schedule' && s.person && !s.scheduleAdmin) return viewNoOnly(s, true);      // 個人登入：門市排班只給能排班的人；只能看的主管（區督導、總監…）不看門市排班
+    if (!(s.features || []).includes(ONLY)) {
+      // 區督導、總監這類：這家店沒有排班權、但在總部（或央廚、別家門市）有 → 直接切過去（優先總部），不要先顯示沒有權限
+      if (ONLY === 'schedule' && s.person) { const t = pickSchedStore(s, 'self') || pickSchedStore(s, 'fixed') || pickSchedStore(s, 'store'); if (t && autoSwitchOk(t.code)) return autoSwitch(s, t.code, '#/schedule/'); }
+      return viewNoOnly(s);
+    }
+    if (ONLY === 'schedule' && s.person) {
+      const mode = s.schedMode || 'store';
+      if (mode === 'store') rememberSchedStore(s.code);
+      // 網址的分頁屬於別種排班的店（例如管理系統首頁提醒直接開 #/schedule/approve）→ 自動換到那種店（能進才換；沒有就留在這裡，由模組顯示第一個分頁）
+      const want = r.page === 'schedule' ? SCHED_TAB_MODE[r.tab] : undefined;      // 只看排班的網址（#/duty/approve 這類別的功能網址會轉回排班，不算）
+      if (want && want !== mode) {
+        const t = pickSchedStore(s, want);
+        if (t && autoSwitchOk(t.code)) return autoSwitch(s, t.code, location.hash);
+        if (!t) return viewSchedNoAccess(s, r.tab);      // 沒有那邊的排班權限：說清楚，不要悄悄顯示別種排班的畫面
+      }
+      // 個人登入：門市排班只給能排班的人；只能看的主管（區督導、總監…）不看門市排班——有總部／央廚入口的轉過去，沒有就說明
+      if (mode === 'store' && !s.scheduleAdmin) {
+        const t = pickSchedStore(s, 'self') || pickSchedStore(s, 'fixed');
+        if (t && autoSwitchOk(t.code)) return autoSwitch(s, t.code, '#/schedule/');
+        return viewNoOnly(s, true);
+      }
+    }
     if (r.page !== ONLY) { history.replaceState(null, '', `#/${ONLY}/`); return render(); }
   }
   if (!ONLY && MOVED[r.page]) return viewMoved(s, r.page);   // 一般模式進 #/duty/…、#/schedule/…（ONLY 已在上面處理）

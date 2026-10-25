@@ -7,6 +7,9 @@ import { renderBoard } from './board.js';
 import { renderNeeds } from './needs.js';
 import { renderStaff } from './staff.js';
 import { renderShifts } from './shifts.js';
+import { renderSelf, renderApprove } from './self.js';
+import { renderFixed, renderFixedStaff } from './fixed.js';
+import { ssoSwitch, setSession, toSession, pickSchedStore } from '../../js/auth.js';
 
 const VIEWS = { board: renderBoard, needs: renderNeeds, staff: renderStaff, shifts: renderShifts };
 
@@ -29,11 +32,39 @@ function ensureCss() {
   document.head.appendChild(l);
 }
 
+// 頁頂分頁（docs/schedule-hq/spec.md §5）：依「目前所在的店」的排班方式送不同的分頁；跨入口分頁 go-store／go-hq／go-cf 點了就換店（整頁重載）
+const STORE_TABS = [{ id: 'board', label: '班表' }, { id: 'needs', label: '指定與需求' }, { id: 'staff', label: '同仁' }, { id: 'shifts', label: '班別與設定' }];
+const GO = { 'go-store': ['store', '門市排班'], 'go-hq': ['self', '總部排班'], 'go-cf': ['fixed', '央廚排班'] };
+export function tabsFor(s) {
+  const mode = (s && s.schedMode) || 'store';
+  const cross = Object.keys(GO).filter((id) => GO[id][0] !== mode && !!pickSchedStore(s, GO[id][0])).map((id) => ({ id, label: GO[id][1] }));
+  let own;
+  if (mode === 'self') own = [].concat(s.schedSelfOn ? [{ id: 'self', label: '我的班表' }] : [], s.schedApproveOn ? [{ id: 'approve', label: '部屬核准' }] : []);
+  else if (mode === 'fixed') own = [{ id: 'fixed', label: '央廚班表' }].concat(s.scheduleAdmin ? [{ id: 'fixedstaff', label: '固定班別' }] : []);
+  else own = STORE_TABS;
+  const all = own.concat(cross);
+  return all.length ? all : STORE_TABS;
+}
+// 點跨入口分頁：換到那種排班的店（沿用個人登入的換店流程），整頁重載後停在該入口第一個分頁
+function goCross(ctx) {
+  const target = pickSchedStore(ctx.session, GO[ctx.tab][0]);
+  if (!target) { ctx.el.innerHTML = '<div class="card"><p class="hint" style="margin:0" id="goNo">你沒有那邊的排班權限。</p></div>'; return; }
+  ctx.el.innerHTML = '<div class="card"><p class="hint" style="margin:0" id="goWait">切換中…</p></div>';
+  ssoSwitch(target.code).then((d) => { setSession(toSession(d)); location.hash = '#/schedule/'; location.reload(); },
+    (e) => { if (ctx.el.isConnected) ctx.el.innerHTML = `<div class="card"><div class="err" id="goErr" role="alert">${esc(e.message)}</div></div>`; });
+}
+
 export default {
   id: 'schedule',
-  tabs: [{ id: 'board', label: '班表' }, { id: 'needs', label: '指定與需求' }, { id: 'staff', label: '同仁' }, { id: 'shifts', label: '班別與設定' }],
+  tabs: STORE_TABS,
+  tabsFor,
   render(ctx) {
     ensureCss();
+    if (GO[ctx.tab]) return goCross(ctx);
+    if (ctx.tab === 'self') return renderSelf(ctx);
+    if (ctx.tab === 'approve') return renderApprove(ctx);
+    if (ctx.tab === 'fixed') return renderFixed(ctx);
+    if (ctx.tab === 'fixedstaff') return renderFixedStaff(ctx);
     const key = ctx.session.token || ctx.session.code;
     if (S.key !== key) reset(key);                                   // 換了登入就重來，不留上一家店的資料
     const draw = () => {

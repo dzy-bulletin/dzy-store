@@ -4,6 +4,7 @@ import { checkPeriod, comboError, minutesOf } from '../modules/schedule/rules.js
 import { autoSchedule } from '../modules/schedule/auto.js';
 import { periodDates, periodOf, todayTaipei, addDays, weekday, parseLabel, shiftPeriod } from '../modules/schedule/period.js';
 import { shiftMinutes, breakOk } from '../modules/schedule/hours.js';
+import { hqAction, seedHq } from './mock-schedule-hq.js';
 
 const E2E = () => (typeof window !== 'undefined' && window.__E2E_DATA) || {};
 const ok = (data) => ({ ok: true, data: data === undefined ? {} : data });
@@ -47,6 +48,8 @@ function ctxOf(st, period, hol) {
 
 export async function schedule(action, me, b, db, s, hooks) {
   const hol = await holidays();
+  if (/^(self|fixed)[A-Z]/.test(action)) return hqAction(action, me, b, db, hol, (hooks && hooks.pa) || {});      // 總部自填／央廚固定排班（docs/schedule-hq/spec.md）
+  if (db.accounts[me.code] && db.accounts[me.code].mode) seedHq(db, me.code, hol);      // 這兩家店的班別、同仁用自己的假資料
   const st = storeOf(db, me.code);
   const clockAlias = me.code === 'TEST2' ? null : '';
   const period = b.period || periodOf(todayTaipei()) || 'T00';
@@ -236,7 +239,12 @@ export async function schedule(action, me, b, db, s, hooks) {
     }
     case 'dayPlan': {
       const out = {};
-      for (const x of st.staff) { const c = (st.days[x.emp_id] || {})[b.date]; if (!c) continue; const sh = c.shift_id ? st.shifts[c.shift_id] : null; out[x.emp_id] = { name: x.name, day_type: c.day_type, leave: c.leave, shift_id: c.shift_id, shift_name: sh ? sh.name : null, start: sh ? sh.start : null, end: sh ? sh.end : null }; }
+      // 總部自填店：只回已核准月份的格子；人資主管／管理員看全部，其他人只回自己與自己能核准的人（同 server/schedule.js dayPlan）
+      const pa = (hooks && hooks.pa) || {};
+      const mine = st.mode === 'self' && !pa.approveAll ? new Set([].concat(pa.selfIds || [], pa.approveIds || [])) : null;
+      for (const x of st.staff) {
+        if (st.mode === 'self') { const r = ((st.selfMonths || {})[x.emp_id] || {})[b.date.slice(0, 7)]; if (!(r && r.status === 'approved' && b.date >= st.modeFrom) || (mine && !mine.has(x.emp_id))) continue; }
+        const c = (st.days[x.emp_id] || {})[b.date]; if (!c) continue; const sh = c.shift_id ? st.shifts[c.shift_id] : null; out[x.emp_id] = { name: x.name, day_type: c.day_type, leave: c.leave, shift_id: c.shift_id, shift_name: sh ? sh.name : null, start: sh ? sh.start : null, end: sh ? sh.end : null }; }
       return ok({ date: b.date, plan: out });
     }
     default: return fail('NOT_FOUND', '找不到這個功能');

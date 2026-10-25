@@ -23,23 +23,38 @@ export const PERSONAS = {
   DZY070: { name: '黃人資', unit: 'hq-hr', title: 'hm', epoch: '2025-01-01', hr_head: true, units_managed: [], void_units: [], attStores: ['TEST1', 'TEST2'] },
   DZY080: { name: '何新人', unit: 'ck-test', title: 'pt', epoch: '2026-10-01', units_managed: [], void_units: [] },
   DZY090: { name: '劉離職', unit: 'mzt-test', title: 'pt', epoch: '2025-01-01', units_managed: [], void_units: [], active: false },
+  // 總部自填排班／央廚固定排班的示範身分（docs/schedule-hq/spec.md；ident.self 的 clock＝hq；approvePeople＝考勤核定他工時的人）
+  DZY101: { name: '許總部', unit: 'hq-ops', title: 'ft', epoch: '2026-01-01', units_managed: [], void_units: [], self: [{ clock: 'hq', emp_id: 'H101', approval: true }], hqStores: ['TESTHQ'] },
+  DZY102: { name: '唐總監', unit: 'hq-ops', title: 'dir', epoch: '2025-01-01', units_managed: [], void_units: [], self: [{ clock: 'hq', emp_id: 'H102', approval: true }],
+    approvePeople: [{ clock: 'hq', emp_id: 'H101', name: '許總部' }, { clock: 'hq', emp_id: 'H104', name: '全能主管' }], hqStores: ['TESTHQ'] },
+  DZY103: { name: '孫執行長', unit: 'hq-ops', title: 'ceo', epoch: '2025-01-01', units_managed: [], void_units: [], self: [{ clock: 'hq', emp_id: 'H103', approval: false }],
+    approvePeople: [{ clock: 'hq', emp_id: 'H102', name: '唐總監' }], hqStores: ['TESTHQ'] },
+  DZY104: { name: '全能主管', unit: 'hq-ops', title: 'sm', epoch: '2025-06-01', units_managed: ['mzt-test'], void_units: [], self: [{ clock: 'hq', emp_id: 'H104', approval: true }], hqStores: ['TESTHQ', 'TESTCF'] },
+  DZY105: { name: '人資副', unit: 'hq-hr', title: 'hm', epoch: '2025-01-01', hr_head: true, units_managed: [], void_units: [], hqStores: ['TESTHQ'] },
+  DZY106: { name: '陳兩號', unit: 'hq-ops', title: 'ft', epoch: '2026-01-01', units_managed: [], void_units: [], self: [{ clock: 'hq', emp_id: 'H106', approval: true }, { clock: 'hq', emp_id: 'H106B', approval: true }], hqStores: ['TESTHQ'] },      // 一人兩個總部員編（我的班表上方可切換）
+  DZY107: { name: '馮區督', unit: 'mala-test', title: 'ft', epoch: '2026-01-01', units_managed: [], void_units: [], self: [{ clock: 'hq', emp_id: 'H107', approval: true }], hqStores: ['TESTHQ'] },      // 在門市沒有排班權、在總部有「我的班表」（區督導、總監這類）
+  DZY111: { name: '葉廠長', unit: 'cf-ops', title: 'sm', epoch: '2025-03-01', units_managed: [], void_units: [], hqStores: ['TESTCF'] },      // 廠長：TESTCF 帳號的 managers 列了他（示範店不放進單位對照，免得後台門市對照頁多一列）
   'U:u_admin01': { name: '系統管理員', unit: '', title: '', epoch: '', admin: true, units_managed: ['mala-test', 'mzt-test'], void_units: ['mala-test', 'mzt-test'] },
 };
 export const UNIT_MAP = { 'mala-test': 'TEST1', 'mzt-test': 'TEST2' };
 export const STORE_DEFAULT = { TEST1: ['purchase', 'cashbook'], TEST2: ['purchase', 'cashbook', 'loss', 'inventory'] };
 
 export const seed = () => ({ personas: clone(PERSONAS), unitMap: clone(UNIT_MAP), storePerm: {}, storeDefault: clone(STORE_DEFAULT), storeLoginOff: [], tickets: {}, selects: {} });
-export const personaOf = (db, sub) => (db.personas || {})[sub] ? Object.assign({ sub }, db.personas[sub]) : null;
+// 總部自填／央廚固定排班的示範身分是後加的：舊的假資料庫（已經有 personas）也要找得到它們
+const HQ_SUBS = ['DZY101', 'DZY102', 'DZY103', 'DZY104', 'DZY105', 'DZY106', 'DZY107', 'DZY111'];
+export const personaOf = (db, sub) => { const x = (db.personas || {})[sub] || (HQ_SUBS.includes(sub) ? PERSONAS[sub] : null); return x ? Object.assign({ sub }, x) : null; };
 const unitOf = (db, code) => Object.keys(db.unitMap).find(u => db.unitMap[u] === code) || null;
 const parseUntil = (u, today) => typeof u === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(u) && today <= u;
 
 // 某人在某店的權限（對照 server/person.js personAccess：預設／自訂／全部關／支援到期／上限；出勤核定與作廢不進 store_perm）
 export function access(db, p, code, eff) {
   const acc = db.accounts[code];
-  if (!acc || !acc.active || acc.role !== 'store') return { features: [], canVoid: false, isManager: false, scheduleAdmin: false, dutyManager: false };
-  const upper = eff(acc), unit = unitOf(db, code), today = taipeiToday();
-  const isAdmin = !!p.admin, isManager = isAdmin || (!!unit && p.units_managed.includes(unit));
-  const hr = !!p.hr_head, dutyEntry = (p.attStores || []).includes(code) || isManager || isAdmin || hr;
+  if (!acc || !acc.active || (acc.role !== 'store' && acc.role !== 'service')) return { features: [], canVoid: false, isManager: false, scheduleAdmin: false, dutyManager: false, schedMode: 'store', selfIds: [], selfAuto: [], approveIds: [], approveAll: false };
+  const upper = acc.role === 'service' ? ['duty', 'schedule'] : eff(acc), unit = unitOf(db, code), today = taipeiToday();      // 服務帳號（總部）：上限只有出勤核定＋排班
+  const isAdmin = !!p.admin, isManager = isAdmin || (!!unit && p.units_managed.includes(unit)) || (acc.managers || []).includes(p.sub);
+  const selfList = (p.self || []).filter(x => x.clock === acc.clock), approveList = (p.approvePeople || []).filter(x => x.clock === acc.clock);
+  const hr = !!p.hr_head, dutyEntry = (p.attStores || []).includes(code) || isManager || isAdmin || hr || approveList.length > 0;
+  const schedEntry = acc.role === 'service' ? (selfList.length > 0 || approveList.length > 0 || hr || isAdmin) : (dutyEntry || selfList.length > 0);
   let feats = [];
   if (isManager) feats = upper.slice();
   else if (unit) {
@@ -51,9 +66,15 @@ export function access(db, p, code, eff) {
     feats = feats.filter(f => f !== 'duty' && f !== 'schedule' && upper.includes(f));   // 出勤核定、自動排班由管理系統統一管理（對照 server/person.js）
   }
   if (dutyEntry && upper.includes('duty') && !feats.includes('duty')) feats.push('duty');
-  if (dutyEntry && upper.includes('schedule') && !feats.includes('schedule')) feats.push('schedule');
+  if (schedEntry && upper.includes('schedule') && !feats.includes('schedule')) feats.push('schedule');
   feats = Array.from(new Set(feats)).sort();
-  return { features: feats, canVoid: isManager || (!!unit && p.void_units.includes(unit)), isManager, scheduleAdmin: isManager || hr || isAdmin, dutyManager: isManager || hr || isAdmin };
+  return { features: feats, canVoid: isManager || (!!unit && p.void_units.includes(unit)), isManager, scheduleAdmin: isManager || hr || isAdmin, dutyManager: isManager || hr || isAdmin,
+    schedMode: acc.mode || 'store', selfIds: selfList.map(x => x.emp_id), selfAuto: selfList.filter(x => x.approval === false).map(x => x.emp_id), approveIds: approveList.map(x => x.emp_id), approveAll: hr || isAdmin };
+}
+// 這個人在哪些店有排班權（有 self／fixed 的店才回清單，對照 server/person.js schedStoresOf）
+export function schedStoresOf(db, p, eff) {
+  const out = storesOf(db, p, eff).map(s => { const a = access(db, p, s.code, eff); return a.features.includes('schedule') ? Object.assign({ code: s.code, name: s.name, mode: a.schedMode, admin: !!a.scheduleAdmin }) : null; }).filter(Boolean);
+  return out.some(x => x.mode !== 'store') ? out : [];
 }
 // 這個人可以進哪些店
 export function storesOf(db, p, eff) {
@@ -62,6 +83,7 @@ export function storesOf(db, p, eff) {
   add(p.unit); p.units_managed.forEach(add); p.void_units.forEach(add);
   Object.keys(db.storePerm).forEach(k => { const [c, s] = k.split('|'); if (s === p.sub && db.storePerm[k].kind === 'support') cand.add(c); });
   (p.attStores || []).forEach(c => cand.add(c));
+  (p.hqStores || []).forEach(c => cand.add(c));      // 總部自填／央廚固定排班的店
   const order = { mala: 1, mzt: 2, yiwu: 3, cf: 4 };
   return [...cand].filter(c => db.accounts[c] && access(db, p, c, eff).features.length)
     .sort((a, b) => (order[db.accounts[a].brand] || 5) - (order[db.accounts[b].brand] || 5) || (a < b ? -1 : 1)).map(c => ({ code: c, name: db.accounts[c].name }));
@@ -76,7 +98,9 @@ export function attStoresOf(db, p) {
 export function sessionBody(db, p, code, eff, token) {
   const a = db.accounts[code], x = access(db, p, code, eff);
   return Object.assign(token ? { token: token.token, expiresAt: token.expiresAt } : {}, { code, name: a.name, role: 'store', brand: a.brand, mustChangePassword: false, features: x.features,
-    person: { sub: p.sub, name: p.name }, canVoid: x.canVoid, isManager: x.isManager, scheduleAdmin: x.scheduleAdmin, dutyUnlocked: x.features.includes('duty'), dutyManager: x.dutyManager, dutyHours: !p.reqOnly, stores: storesOf(db, p, eff), attStores: attStoresOf(db, p) });
+    person: { sub: p.sub, name: p.name }, canVoid: x.canVoid, isManager: x.isManager, scheduleAdmin: x.scheduleAdmin, dutyUnlocked: x.features.includes('duty'), dutyManager: x.dutyManager, dutyHours: !p.reqOnly, stores: storesOf(db, p, eff), attStores: attStoresOf(db, p),
+    ...(x.schedMode !== 'store' ? { schedMode: x.schedMode, ...(x.schedMode === 'self' ? { schedSelfOn: x.selfIds.length > 0, schedApproveOn: x.approveAll || x.approveIds.length > 0 } : {}) } : {}),
+    ...(() => { const l = schedStoresOf(db, p, eff); return l.length ? { schedStores: l } : {}; })() });
 }
 const newSession = (db, p, code) => {
   const t = { token: hex(32), expiresAt: new Date(Date.now() + 12 * 3600e3).toISOString(), code, duty: false, sub: p.sub };
@@ -215,7 +239,7 @@ const UNIT_CHOICES = [
 // 後台：管理系統單位對照、逐店關閉門市帳號登入
 export function adminRoute(db, method, p, b, me, log) {
   if (p === '/admin/unit-map') {
-    const stores = Object.values(db.accounts).filter(a => a.role === 'store' && a.active).sort((x, y) => (x.code < y.code ? -1 : 1)).map(a => ({ code: a.code, name: a.name }));
+    const stores = Object.values(db.accounts).filter(a => !a.hidden).filter(a => a.role === 'store' && a.active).sort((x, y) => (x.code < y.code ? -1 : 1)).map(a => ({ code: a.code, name: a.name }));
     if (method === 'GET') return ok({ items: Object.keys(db.unitMap).sort().map(u => ({ unit: u, code: db.unitMap[u], name: (db.accounts[db.unitMap[u]] || {}).name })), stores, units: UNIT_CHOICES });
     const unit = typeof b.unit === 'string' ? b.unit.trim() : '';
     if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(unit)) return fail('BAD_INPUT', '管理系統單位代碼格式不正確（小寫英數字與連字號，例如 mala-gf）');

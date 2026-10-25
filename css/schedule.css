@@ -81,6 +81,29 @@
 .sc-month{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:14px}
 .sc-month input{width:120px}
 .sc-sumlabel{font-weight:700;margin-right:4px}
+/* 總部自填排班（self.js）：月曆；央廚固定排班（fixed.js）：手改的格子加點 */
+.hq-calcard{padding:8px}
+.hq-cal{width:100%;border-collapse:separate;border-spacing:4px;table-layout:fixed}
+.hq-cal th{font-size:12px;color:var(--muted);font-weight:700;padding:2px 0} .hq-cal th.we{color:#c0392b}
+.hq-cal td{padding:0;vertical-align:top}
+.hq-day{display:flex;flex-direction:column;align-items:stretch;width:100%;min-height:58px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:3px 2px;font:inherit;font-size:11px;text-align:center;color:var(--black);box-sizing:border-box;overflow:hidden}
+button.hq-day{cursor:pointer}
+.hq-day b{font-size:12px;font-variant-numeric:tabular-nums;text-align:left;padding-left:3px;color:var(--muted)}
+.hq-day .hq-v{font-weight:700;font-size:12px;word-break:break-all}
+.hq-day small{display:block;font-size:9px;color:#c0392b;line-height:1.2}
+.hq-day.empty{background:#fdf6e8;border-style:dashed}
+.hq-day.rest .hq-v,.hq-day.off .hq-v{color:var(--sc-off-ink,#c0392b)} .hq-day.leave .hq-v{color:#3f6aa8}
+.hq-day.hol{background:#fbeeec}
+.hq-day.pend{border-color:#e8a33d;box-shadow:inset 0 0 0 1px #e8a33d}
+.hq-day .hq-pend{display:block;font-style:normal;font-size:9px;color:#b26a00;line-height:1.2}
+.hq-day.i-block{outline:2px solid var(--bad);outline-offset:-2px} .hq-day.i-warn{outline:2px solid #e8a33d;outline-offset:-2px}
+.hq-day.sel{outline:3px solid var(--black);outline-offset:-3px}
+.hq-na{background:transparent}
+.sc-drow.hq-emp.sel{border-color:var(--black);box-shadow:inset 0 0 0 1px var(--black)}
+.sc-drow.fx-row{cursor:default;grid-template-columns:1fr auto;align-items:center}
+.sc-c.man::after{content:"・";position:absolute;top:0;right:2px;color:#c98a2b;font-weight:700}
+@media (max-width:520px){.hq-cal{border-spacing:2px}.hq-day{min-height:50px;font-size:10px}.hq-day .hq-v{font-size:11px}}
+
 /* 匯出 PDF（瀏覽器列印）：只留標題與班表格子，橫式 A4 */
 @media print{
   @page{size:A4 landscape;margin:8mm}

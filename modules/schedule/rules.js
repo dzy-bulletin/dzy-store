@@ -14,7 +14,7 @@
 //   monthOtMin: { 'YYYY-MM': { emp_id: 分鐘 } },     // 本期碰到的曆月、期外日子的加班分鐘（伺服器先算好）
 // }
 // 回傳 [{ code, level:'block'|'warn'|'info', emp_id, date, msg }]
-import { periodDates, addDays, diffDays } from './period.js';
+import { periodDates, addDays, diffDays, weekday } from './period.js';
 import { shiftMinutes, gapMinutes } from './hours.js';
 
 export const H = 60;
@@ -36,6 +36,8 @@ export function termAt(terms, emp, date) {
   return t;
 }
 export const isHoliday = (hol, d) => !!(hol && hol.days && hol.days[d]);
+/** 國定假日或補假（holidays.json 的 days＋gov.off）的名稱；不是回 ''。總部自填／央廚固定排班用（門市排班的補假另有一套 C7 規則） */
+export const holName = (hol, d) => (hol && ((hol.days && hol.days[d]) || (hol.gov && hol.gov.off && hol.gov.off[d]))) || '';
 export const employed = (st, d) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date);
 
 /** 合法組合（spec 第 3 節）。回傳錯誤字串或 null */
@@ -279,3 +281,92 @@ export function checkPeriod(ctx) {
 }
 
 export const blocks = (results) => results.filter(r => r.level === 'block');
+
+// ---------------------------------------------------------------------------
+// 總部自填排班／央廚固定排班：整月檢查（docs/schedule-hq/spec.md §3.3、§4）。純函式，伺服器（存檔、送出、載入）、央廚固定排班與前端共用。
+//
+// ctx = {
+//   month: 'YYYY-MM',
+//   staff: [{ emp_id, name, hire_date?, leave_date? }],
+//   shifts: { id: {id,name,start,end,break_min} },
+//   days: { emp_id: { 'YYYY-MM-DD': { day_type, shift_id, leave } } }   // 該月全部格子＋前後相鄰日子（跨月的週、換班間隔用；伺服器只放「已送出／已核准」的相鄰月份）
+//   holidays: { days: { date: name }, gov?: { off: { date: name } } },      // gov.off＝補假等額外放假日（算國定假日假）
+//   from?: 'YYYY-MM-DD'     // 這套排班從哪天起（mode_from）；之前的日子不用選、不檢查整月都要選
+//   soft?: true      // 央廚固定排班：只提醒不擋，block 一律降成 warn
+// }
+// 規則（Q1 推薦版）：以週日到週六為一週，每週至少 1 天例假（R）＋1 天休息日（H，沒排班的）；換班間隔 < 12 小時、單日 > 12 小時＝block；
+// 每週超過 40 小時＝warn；國定假日上班＝warn（工資加倍）；整月還有沒選的天＝block。
+// 跨月的週：相鄰日子沒有資料時不能判斷，只有「剩下沒資料的天數也補不齊」才擋（不然永遠送不出去）。
+// 回傳 [{ code, level:'block'|'warn', emp_id, date, msg }]
+export function checkSelfMonth(ctx) {
+  const R = [];
+  const lvl = (l) => (ctx.soft && l === 'block' ? 'warn' : l);
+  const add = (code, level, emp_id, date, msg) => R.push({ code, level: lvl(level), emp_id: emp_id || null, date: date || null, msg });
+  const first = ctx.month + '-01';
+  const dates = [];
+  for (let d = first; d.slice(0, 7) === ctx.month; d = addDays(d, 1)) dates.push(d);
+  const last = dates[dates.length - 1];
+  const hol = ctx.holidays || { days: {} };
+  const shifts = ctx.shifts || {};
+  for (const st of ctx.staff) {
+    const e = st.emp_id, who = st.name || e;
+    const mine = (ctx.days || {})[e] || {};
+    const inMonth = dates.filter((d) => employed(st, d));
+    if (!inMonth.length) continue;
+
+    // 沒選的天、合法組合、班別存在（只算在職、而且在這套排班起用日（ctx.from）以後的日子）
+    const blank = inMonth.filter((d) => !mine[d] && (!ctx.from || d >= ctx.from));
+    if (blank.length) add('V1', 'block', e, blank[0], `${who} 有 ${blank.length} 天還沒選（從 ${md(blank[0])} 起）`);
+    for (const d of inMonth) {
+      const c = mine[d];
+      if (!c) continue;
+      const err = comboError(c, hol, d);
+      if (err) { add('V0', 'block', e, d, `${who} ${md(d)}：${err}`); continue; }
+      if (c.day_type === 'W' && !c.shift_id) add('V1', 'block', e, d, `${who} ${md(d)} 是工作日但沒有選班別`);
+      if (c.shift_id && !shifts[c.shift_id]) add('V0', 'block', e, d, `${who} ${md(d)} 的班別已不存在`);
+    }
+
+    // 單日超過 12 小時
+    for (const d of inMonth) {
+      const c = mine[d], sh = c && c.shift_id ? shifts[c.shift_id] : null;
+      if (sh && shiftMinutes(sh) > DAY_MAX) add('F4', 'block', e, d, `${who} ${md(d)} 一天 ${hm(shiftMinutes(sh))}，超過 12 小時`);
+    }
+
+    // 換班間隔 12 小時（含跨月：月初前、月底後各 3 天的相鄰格）
+    let prev = null;
+    for (let d = addDays(first, -3); d <= addDays(last, 3); d = addDays(d, 1)) {
+      const c = mine[d], sh = c && c.shift_id ? shifts[c.shift_id] : null;
+      if (!sh) continue;
+      if (prev) {
+        const g = gapMinutes(prev.date, prev.shift, d, sh);
+        if (g < MIN_GAP && (d <= last && d >= first || prev.date >= first && prev.date <= last)) add('C1', 'block', e, d, `${who} ${md(prev.date)} 下班到 ${md(d)} 上班只隔 ${hm(Math.max(0, g))}，至少要 12 小時`);
+      }
+      prev = { date: d, shift: sh };
+    }
+
+    // 每週（日～六）至少 1 天例假、1 天休息日；每週超過 40 小時提醒
+    const w0 = addDays(first, -weekday(first));
+    for (let ws = w0; ws <= last; ws = addDays(ws, 7)) {
+      const wk = Array.from({ length: 7 }, (_, i) => addDays(ws, i));
+      const known = wk.filter((d) => mine[d]);
+      const missing = 7 - known.length;
+      const rs = known.filter((d) => mine[d].day_type === 'R').length;
+      const hs = known.filter((d) => mine[d].day_type === 'H' && !mine[d].shift_id).length;
+      const lack = (rs < 1 ? 1 : 0) + (hs < 1 ? 1 : 0);
+      const at = wk.find((d) => d >= first && d <= last);
+      if (rs < 1 && missing < lack) add('W1', 'block', e, at, `${who} ${md(wk[0])} 這週沒有例假，每週至少要 1 天例假`);
+      if (hs < 1 && missing < lack) add('W2', 'block', e, at, `${who} ${md(wk[0])} 這週沒有休息日，每週至少要 1 天休息日`);
+      const mins = known.reduce((a, d) => a + (mine[d].shift_id && shifts[mine[d].shift_id] ? shiftMinutes(shifts[mine[d].shift_id]) : 0), 0);
+      if (mins > WEEK_NORMAL) add('W3', 'warn', e, at, `${who} ${md(wk[0])} 這週排了 ${hm(mins)}，超過 40 小時的部分算加班`);
+    }
+
+    // 國定假日（含補假）上班：提醒工資加倍（同門市 C8）；「國定假日假」只能排在國定假日或補假當天（同門市 C7，總部是每週制、沒有同期別可移）
+    for (const d of inMonth) {
+      const c = mine[d];
+      const hn = holName(hol, d);
+      if (c && c.shift_id && hn) add('C8', 'warn', e, d, `${who} ${md(d)}（${hn}）國定假日上班，工資要加倍`);
+      if (c && c.day_type === 'L' && c.leave === '國' && !hn) add('C7', 'block', e, d, `${who} ${md(d)} 不是國定假日或補假，不能排國定假日假`);
+    }
+  }
+  return R;
+}

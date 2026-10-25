@@ -69,14 +69,21 @@ function fresh() {
     ui: { systemName: '鼎兆元｜門市營運系統', logoUrl: '', colors: { red: '#E8380D', black: '#231815' },
       cards: MODS.map((id, i) => ({ id, label: LABELS[id], visible: true, order: i + 1 })), banner: '' },
   };
+  addHqAccounts(db);
   (E2E().extraAccounts || []).forEach(x => { db.accounts[x.code] = { code: x.code, name: x.name, brand: x.brand, role: 'store', active: true, pw: '000000', must: true, fails: 0, lockUntil: 0, features: [...x.features], duty: '' }; });
   return db;
+}
+// 總部自填排班（TESTHQ，服務帳號、打卡店別 hq）與央廚固定排班（TESTCF，打卡店別 cf）的示範店：不列在登入頁與後台清單（hidden），只有對應的假身分進得去
+function addHqAccounts(d) {
+  if (!d.accounts.TESTHQ) d.accounts.TESTHQ = { code: 'TESTHQ', name: '鼎兆元總部（測試）', brand: 'hq', role: 'service', active: true, pw: '', must: false, fails: 0, lockUntil: 0, features: ['duty', 'schedule'], duty: '', hidden: true, mode: 'self', clock: 'hq' };
+  if (!d.accounts.TESTCF) d.accounts.TESTCF = { code: 'TESTCF', name: '央廚（測試）', brand: 'cf', role: 'store', active: true, pw: '', must: false, fails: 0, lockUntil: 0, features: ['duty', 'schedule'], duty: '', hidden: true, mode: 'fixed', clock: 'cf', managers: ['DZY111', 'DZY104'] };
 }
 let db;
 function load() {
   if (db) return db;
   try { db = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) {}
   if (!db || db.v !== DB_VERSION) db = fresh();   // 版本不符（舊瀏覽器留著舊卡片名稱與順序）→ 整包重建
+  addHqAccounts(db);
   return db;
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) {} }
@@ -115,7 +122,7 @@ export async function handle(method, path, body, token) {
 function route(method, p, q, b, token) {
   if (method === 'GET' && p === '/ui') {
     const order = { mala: 1, mzt: 2, yiwu: 3, cf: 4 };
-    const stores = Object.values(db.accounts).filter(a => a.role === 'store' && a.active)   // 示範帳號都是 TEST 開頭，不套伺服器的測試店過濾
+    const stores = Object.values(db.accounts).filter(a => !a.hidden).filter(a => a.role === 'store' && a.active)   // 示範帳號都是 TEST 開頭，不套伺服器的測試店過濾
       .sort((a, b) => (order[a.brand] || 5) - (order[b.brand] || 5) || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0)).map(a => ({ code: a.code, name: a.name }));
     return ok({ ...db.ui, stores, sso: E2E().sso !== false });      // sso：伺服器有設管理系統連線才有；示範模式預設有（e2e 可用 __E2E_DATA.sso=false 關掉，驗證舊畫面不變）
   }
@@ -204,8 +211,8 @@ function route(method, p, q, b, token) {
     if (m[1] === 'loss') return lossMock(m[2], mx, b, db);
     if (m[1] === 'board') return boardMock(m[2], mx, b, db);
     if (m[1] === 'schedule' && !per && me.role === 'store' && !['load', 'dayPlan', 'annual'].includes(m[2])) return fail('FORBIDDEN', '排班請用管理系統個人帳號：人資部門 → 排班管理');   // 門市帳號（共用店號）不能排班，同 server/schedule.js mod()
-    if (m[1] === 'schedule' && per && !pa.scheduleAdmin && !['load', 'dayPlan', 'annual'].includes(m[2])) return fail('FORBIDDEN', '只有本店店長、人資主管或管理員可以排班，你只能查看');   // 同 server/schedule.js mod()
-    if (m[1] === 'schedule') return import('./mock-schedule.js').then(x => x.schedule(m[2], mx, b, db, s, { addEmployee: name => dutyDo(dutyDb(), 'mgr_add_employee', { name }) }));   // 用到才載入（排班計算檔案多，放在開頁就載會拉長每一頁的載入時間，WebKit 換頁時更容易打斷其他假資料的讀取）
+    if (m[1] === 'schedule' && per && !pa.scheduleAdmin && !['load', 'dayPlan', 'annual'].includes(m[2]) && !/^(self|fixed)[A-Z]/.test(m[2])) return fail('FORBIDDEN', '只有本店店長、人資主管或管理員可以排班，你只能查看');   // 同 server/schedule.js mod()
+    if (m[1] === 'schedule') return import('./mock-schedule.js').then(x => x.schedule(m[2], mx, b, db, s, { pa, addEmployee: name => dutyDo(dutyDb(), 'mgr_add_employee', { name }) }));   // 用到才載入（排班計算檔案多，放在開頁就載會拉長每一頁的載入時間，WebKit 換頁時更容易打斷其他假資料的讀取）
     return fail('NOT_FOUND', '還在搬移中，暫時請用原本的系統');
   }
   if (p.startsWith('/admin/')) {
@@ -257,7 +264,7 @@ function homeFor(me) {
 function admin(method, p, q, b, me) {
   const acc = () => db.accounts[String(b.code || '').toUpperCase()];
   if (method === 'GET' && p === '/admin/accounts')
-    return ok(Object.values(db.accounts).map(a => ({ code: a.code, name: a.name, brand: a.brand, role: a.role, active: a.active, locked: a.lockUntil > Date.now(), mustChangePassword: a.must, features: a.features, storeOff: (a.storeOff || []).filter(f => a.features.includes(f)) })));
+    return ok(Object.values(db.accounts).filter(a => !a.hidden).map(a => ({ code: a.code, name: a.name, brand: a.brand, role: a.role, active: a.active, locked: a.lockUntil > Date.now(), mustChangePassword: a.must, features: a.features, storeOff: (a.storeOff || []).filter(f => a.features.includes(f)) })));
   if (method === 'POST' && p === '/admin/accounts') {
     const code = String(b.code || '').toUpperCase();
     if (!/^[A-Z0-9]{2,10}$/.test(code)) return fail('BAD_INPUT', '門市代號要是 2-10 碼的大寫英數字');
@@ -302,7 +309,7 @@ function admin(method, p, q, b, me) {
   }
   if (method === 'GET' && p === '/admin/alias') {
     const stores = [['', '光復小辛辣', 'duty:_'], ['cf', '央廚', 'duty:cf'], ['hq', '總部', 'duty:hq'], ['mztjs', '墨竹亭金山', 'duty:mztjs'], ['mztgf', '墨竹亭光復', 'duty:mztgf']];
-    return ok({ aliases: Object.values(db.accounts).filter(a => a.role === 'store').sort((x, y) => x.code.localeCompare(y.code))
+    return ok({ aliases: Object.values(db.accounts).filter(a => !a.hidden).filter(a => a.role === 'store').sort((x, y) => x.code.localeCompare(y.code))
         .map(a => ({ code: a.code, name: a.name, system: 'clock', value: Object.prototype.hasOwnProperty.call(db.alias, a.code) ? db.alias[a.code] : null, transfer: (db.aliasTr || DEFAULT_TRANSFER_ALIAS)[a.code] || null }))
         .concat([{ code: 'HQ', name: '總部（服務帳號）', system: 'clock', value: null, transfer: null }]),      // 真伺服器的 service 帳號也在這張表（不能登入、但要能設打卡對照），不是門市所以沒有管理系統單位
       stores: stores.map(([value, label]) => ({ value, label })),
@@ -310,7 +317,7 @@ function admin(method, p, q, b, me) {
       vault: stores.map(([, label, name]) => ({ name, label, set: !!db.vault[name], updatedAt: db.vault[name] || null })),
       transferNodes: TRANSFER_NODES.map(n => ({ code: n.code, name: n.name, short: n.short })),
       transferVault: TRANSFER_NODES.map(n => ({ name: 'transfer:' + n.code, label: n.name, set: !!db.vault['transfer:' + n.code], updatedAt: db.vault['transfer:' + n.code] || null })),
-      boardVault: [{ name: 'board:_', label: '全部門市共用', set: true, updatedAt: '2026-10-11T02:00:00.000Z' }].concat(Object.values(db.accounts).filter(a => a.role === 'store').sort((x, y) => x.code.localeCompare(y.code))   // 假後端：共用已設；__E2E_DATA.board.unset 列的店當作連共用都用不到
+      boardVault: [{ name: 'board:_', label: '全部門市共用', set: true, updatedAt: '2026-10-11T02:00:00.000Z' }].concat(Object.values(db.accounts).filter(a => !a.hidden).filter(a => a.role === 'store').sort((x, y) => x.code.localeCompare(y.code))   // 假後端：共用已設；__E2E_DATA.board.unset 列的店當作連共用都用不到
         .map(a => { const no = (((E2E().board || {}).unset) || []).includes(a.code); return { name: 'board:' + a.code, label: a.name, set: false, shared: !no, store: { MZTGF: '光復', MZTJS: '金山', MZTLZL: '六張犁', TEST2: '光復' }[a.code] || null, updatedAt: null }; })) });
   }
   if (method === 'POST' && p === '/admin/alias') {
@@ -597,7 +604,7 @@ function dutyHas(emp, date) { const f = fakeOf(emp); return !!f && (f.segs.lengt
 function duty(action, me, s, b) {
   // 管理者（2026-10-11）：admin_stores 列門市；其他動作要帶 asStore。示範模式各店共用同一份假出勤資料。
   if (me.role === 'admin') {
-    if (action === 'admin_stores') return ok({ stores: Object.values(db.accounts).filter(a => a.role === 'store' && a.active).map(a => ({ code: a.code, name: a.name, label: a.name })) });
+    if (action === 'admin_stores') return ok({ stores: Object.values(db.accounts).filter(a => !a.hidden).filter(a => a.role === 'store' && a.active).map(a => ({ code: a.code, name: a.name, label: a.name })) });
     const want = typeof b.asStore === 'string' ? b.asStore.trim().toUpperCase() : '';
     if (!want) return fail('BAD_INPUT', '請先選一家門市');
     const acc = db.accounts[want];
