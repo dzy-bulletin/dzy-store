@@ -1,6 +1,12 @@
-import { MOCK, EMBED, EMBED_ORIGIN, DZY_ORIGIN, DZY_LOGIN_URL, ONLY_DUTY } from './config.js';
+import { MOCK, EMBED, EMBED_ORIGIN, DZY_ORIGIN, DZY_LOGIN_URL, ONLY } from './config.js';
 // 管理系統考勤管理（出勤核定統一後的去處，2026-10-24 總審：網址改用 config 常數，不寫死）
 const ATT_URL = DZY_ORIGIN + '/#/attendance';
+// 已搬到管理系統的功能（舊網址與一般模式的側邊欄用；2026-10-24，duty＝spec §17.3、schedule＝hr-move-spec §3）
+const MOVED = {
+  duty: { title: '出勤核定', where: '人資部門 → 考勤管理', btn: '前往考勤管理', url: ATT_URL, mid: 'dutyMoved' },
+  schedule: { title: '自動排班', where: '人資部門 → 排班管理', btn: '前往排班管理', url: DZY_ORIGIN + '/#/schedule', mid: 'scheduleMoved' }
+};
+const ONLY_LABEL = { duty: '出勤核定', schedule: '排班' };
 const attLinkAttr = () => (EMBED ? 'target="_top"' : 'target="_blank" rel="noopener"');
 import { api } from './api.js';
 import { initAuth, getSession, setSession, clearSession, rememberedCode, login, logout, changePassword, toSession, ssoRedeem, ssoSelect, ssoSwitch, adoptResult } from './auth.js';
@@ -32,21 +38,21 @@ const NAV_ICONS = { staffperm: '👥', home: '🏠', purchase: '🧾', cashbook:
 function sidebarHtml(s, cur) {
   const feats = new Set(s.features || []);
   const mods = [...(UI.cards || [])].sort((a, b) => a.order - b.order)
-    .filter(c => c.visible && feats.has(c.id) && MODULES.some(m => m.id === c.id) && (ONLY_DUTY ? c.id === 'duty' : c.id !== 'duty'));   // ?only=duty：只剩出勤核定；一般模式不列出勤核定（已移到管理系統考勤管理，2026-10-24，spec §17.3）
+    .filter(c => c.visible && feats.has(c.id) && MODULES.some(m => m.id === c.id) && (ONLY ? c.id === ONLY : !MOVED[c.id]));   // ?only=…：只剩該功能；一般模式不列已移到管理系統的出勤核定、自動排班（2026-10-24）
   const p = s.person, many = p && (s.stores || []).length > 1;
   const item = (key, href, label) => `<a href="${href}" data-nav="${key}" class="${cur === key ? 'on' : ''}"${cur === key ? ' aria-current="page"' : ''}><span class="ic">${NAV_ICONS[key] || '•'}</span>${esc(label)}</a>`;
   return `<aside class="sidebar" id="sidebar">
     <a class="brand" href="#/" id="brand"><div class="logos"></div><div><div class="bt js-bt" id="brandName"></div><div class="bs js-bs"></div></div></a>
     <nav id="nav" aria-label="系統選單">
-      ${ONLY_DUTY ? '' : item('home', '#/', '首頁')}
+      ${ONLY ? '' : item('home', '#/', '首頁')}
       ${mods.length ? '<div class="nav-label">系統</div>' : ''}
       ${mods.map(c => item(c.id, `#/${c.id}/`, c.label)).join('')}
-      ${!ONLY_DUTY && canStaffPerm(s) ? item('staffperm', '#/staffperm', '本店同仁權限') : ''}
-      ${ONLY_DUTY ? '' : s.role === 'admin' ? `<div class="nav-label">管理</div>${item('admin', '#/admin/accounts', '後台管理').replace('<a ', '<a id="adminLink" ')}` : ''}
+      ${!ONLY && canStaffPerm(s) ? item('staffperm', '#/staffperm', '本店同仁權限') : ''}
+      ${ONLY ? '' : s.role === 'admin' ? `<div class="nav-label">管理</div>${item('admin', '#/admin/accounts', '後台管理').replace('<a ', '<a id="adminLink" ')}` : ''}
     </nav>
     <div class="side-user"><div class="av">🙂</div>
       <div class="su-main"><div class="nm" id="whoName">${p ? esc(p.name + '・' + s.name) : esc(s.name)}</div><div class="rl">${p ? '管理系統帳號' : esc(s.code || '') + (s.role === 'admin' ? '・管理者' : '')}</div></div>
-      <div class="su-act">${!s.mustChangePassword && !p ? '<a href="#/password" id="pwLink">改密碼</a>' : ''}${!s.mustChangePassword && s.role === 'store' && (!p || s.isManager) && !ONLY_DUTY ? '<a href="#/features" id="featLink">功能開關</a>' : ''}${many ? '<a href="#/switch" id="switchLink">換店</a>' : ''}<button id="logoutBtn" type="button">登出</button></div></div>
+      <div class="su-act">${!s.mustChangePassword && !p ? '<a href="#/password" id="pwLink">改密碼</a>' : ''}${!s.mustChangePassword && s.role === 'store' && (!p || s.isManager) && !ONLY ? '<a href="#/features" id="featLink">功能開關</a>' : ''}${many ? '<a href="#/switch" id="switchLink">換店</a>' : ''}<button id="logoutBtn" type="button">登出</button></div></div>
   </aside>`;
 }
 // 「本店同仁權限」：只有個人登入的店長（管理系統管理員也算店長）；門市登入、後台管理者帳號都沒有
@@ -171,21 +177,21 @@ function applyBadges(items) {
 // 管理系統回 dzy-store-tabs 才加 embed-tabs 藏自己的選單；點管理系統的分頁會送 dzy-store-go 過來。
 // 考勤管理（?only=duty）：送出勤核定的子分頁（nav.tabs，#/duty/<tab>）；申請審核的待審數字由 duty/state.js setReqBadge 改完發 dzystore-nav 事件再送一次（2026-10-20）
 function navItems() {
-  const sel = ONLY_DUTY ? 'nav.tabs a[data-tab]' : '#nav a[data-nav]';
+  const sel = ONLY ? 'nav.tabs a[data-tab]' : '#nav a[data-nav]';
   return [...document.querySelectorAll(sel)].map(a => {
     const b = a.querySelector('.badge');
     const label = [...a.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim();
-    return { id: ONLY_DUTY ? a.dataset.tab : a.dataset.nav, label, badge: b ? Number(b.textContent) || 0 : 0, err: !!(b && b.classList.contains('err')) };
+    return { id: ONLY ? a.dataset.tab : a.dataset.nav, label, badge: b ? Number(b.textContent) || 0 : 0, err: !!(b && b.classList.contains('err')) };
   });
 }
 function postNav() {
   if (!EMBED) return;
-  const on = ONLY_DUTY ? document.querySelector('nav.tabs a[data-tab].on') : document.querySelector('#nav a[data-nav].on');
-  try { window.parent.postMessage({ type: 'dzy-store-nav', v: 1, items: navItems(), cur: on ? (ONLY_DUTY ? on.dataset.tab : on.dataset.nav) : '' }, EMBED_ORIGIN); } catch (e) { /* parent 不接受就算了 */ }
+  const on = ONLY ? document.querySelector('nav.tabs a[data-tab].on') : document.querySelector('#nav a[data-nav].on');
+  try { window.parent.postMessage({ type: 'dzy-store-nav', v: 1, items: navItems(), cur: on ? (ONLY ? on.dataset.tab : on.dataset.nav) : '' }, EMBED_ORIGIN); } catch (e) { /* parent 不接受就算了 */ }
 }
 function goNav(id) {
   const ok = typeof id === 'string' && /^[a-z][a-z0-9-]{0,30}$/.test(id);
-  const a = !ok ? null : ONLY_DUTY ? document.querySelector(`nav.tabs a[data-tab="${id}"]`) : document.querySelector(`#nav a[data-nav="${id}"]`);
+  const a = !ok ? null : ONLY ? document.querySelector(`nav.tabs a[data-tab="${id}"]`) : document.querySelector(`#nav a[data-nav="${id}"]`);
   if (a) go(a.getAttribute('href'));
 }
 
@@ -196,15 +202,18 @@ async function loadTodos(tok) {
   fillGroups(d);
   applyBadges(d ? d.items : []);
 }
+const HOME_MOVED_TEXT = { duty: ['homeOnlyDuty', '出勤相關的工作在管理系統：人資部門 → 考勤管理'], schedule: ['homeOnlySchedule', '排班的工作在管理系統：人資部門 → 排班管理'] };
+const homeMovedHtml = k => { const [id, t] = HOME_MOVED_TEXT[k]; return `<p id="${id}">${t}</p><a class="btn" id="${id}Go" href="${MOVED[k].url}" ${attLinkAttr()}>${MOVED[k].btn}</a>`; };
 function viewHome(s, tok) {
   const feats = new Set(s.features || []);
   const cards = [...(UI.cards || [])].sort((a, b) => a.order - b.order)
-    .filter(c => c.visible && feats.has(c.id) && MODULES.some(m => m.id === c.id) && c.id !== 'duty');   // 首頁不列出勤核定（2026-10-24，spec §17.3）
-  // 個人登入且唯一的功能是出勤核定（一般模式）：指去管理系統考勤管理，不說「沒有開通任何功能」（2026-10-24 總審）
-  const onlyDuty = !!s.person && feats.size === 1 && feats.has('duty');
+    .filter(c => c.visible && feats.has(c.id) && MODULES.some(m => m.id === c.id) && !MOVED[c.id]);   // 首頁不列出勤核定、自動排班（已移到管理系統）
+  // 個人登入且功能只剩已搬走的（出勤核定、自動排班）：指去管理系統，不說「沒有開通任何功能」（2026-10-24 總審；排班同理）
+  const movedIds = Object.keys(MOVED).filter(k => feats.has(k));
+  const onlyMoved = !!s.person && feats.size > 0 && movedIds.length === feats.size;
   const html = cards.length
     ? `<div id="todoBody" aria-live="polite">${cards.map(c => `<section class="card todo-group" data-module="${c.id}"><h2>${esc(c.label)}</h2><div class="todo-body"><div class="hint">讀取中…</div></div></section>`).join('')}</div>`
-    : onlyDuty ? `<div class="card"><p id="homeOnlyDuty">出勤相關的工作在管理系統：人資部門 → 考勤管理</p><a class="btn" id="homeOnlyDutyGo" href="${ATT_URL}" ${attLinkAttr()}>前往考勤管理</a></div>`
+    : onlyMoved ? `<div class="card">${movedIds.map(k => homeMovedHtml(k)).join('')}</div>`
     : `<div class="card"><p>目前還沒有開通任何功能，請洽管理者。</p>${s.role === 'store' && (!s.person || s.isManager) ? '<p class="hint" id="noFeatHint">如果是自己關掉的，可到選單裡你的店名旁「功能開關」打開。</p>' : ''}</div>`;
   frame(s, bannerHtml() + html, '', { cur: 'home', title: '待辦與異常', sub: s.person ? s.person.name + '・' + s.name : s.name });
   if (cards.length) loadTodos(tok);
@@ -302,8 +311,8 @@ async function runTicket(ticket, fromParent) {
     }
     const { kept } = await adoptResult(r, fromParent);
     PENDING = null;
-    if (!kept && old) { location.hash = ONLY_DUTY ? '#/duty/' : '#/'; location.reload(); return; }   // 換了人／換了登入方式：整頁重載，不留上一個人的畫面與暫存
-    if (!kept) location.hash = ONLY_DUTY ? '#/duty/' : '#/';
+    if (!kept && old) { location.hash = ONLY ? `#/${ONLY}/` : '#/'; location.reload(); return; }   // 換了人／換了登入方式：整頁重載，不留上一個人的畫面與暫存
+    if (!kept) location.hash = ONLY ? `#/${ONLY}/` : '#/';
   } catch (e) {
     if (getSession() && fromParent) console.error('嵌入重新握手失敗：' + e.message);   // 已有登入就不打擾，使用者繼續用目前的
     else SSO_ERR = e.message;
@@ -321,7 +330,7 @@ async function onHash() {
 const sendReady = () => { try { window.parent.postMessage({ type: 'dzy-store-ready', v: 1 }, EMBED_ORIGIN); } catch (e) { /* parent 不接受就算了 */ } };
 function installEmbed() {
   document.body.classList.add('embed');
-  if (ONLY_DUTY) document.body.classList.add('embed-duty');   // 考勤管理：不顯示功能列
+  if (ONLY) document.body.classList.add('embed-only', `embed-${ONLY}`);   // 考勤管理／排班管理：不顯示功能列
   window.addEventListener('message', e => {
     if (e.origin !== EMBED_ORIGIN || e.source !== window.parent) return;
     const m = e.data;
@@ -361,8 +370,8 @@ function viewSelect() {
         const d = await ssoSelect(PENDING.select_token, b.dataset.store);
         await adoptResult(d, false);
         PENDING = null;
-        if (old) { location.hash = ONLY_DUTY ? '#/duty/' : '#/'; location.reload(); return; }
-        location.hash = ONLY_DUTY ? '#/duty/' : '#/'; render();
+        if (old) { location.hash = ONLY ? `#/${ONLY}/` : '#/'; location.reload(); return; }
+        location.hash = ONLY ? `#/${ONLY}/` : '#/'; render();
       } catch (er) { setMsg(main.querySelector('#selErr'), er.message); if (er.code === 'AUTH') PENDING = null; }
     });
   });
@@ -379,20 +388,25 @@ function viewSwitch(s) {
       try {
         const d = await ssoSwitch(b.dataset.store);
         setSession(toSession(d));
-        location.hash = ONLY_DUTY ? '#/duty/' : '#/'; location.reload();
+        location.hash = ONLY ? `#/${ONLY}/` : '#/'; location.reload();
       } catch (er) { setMsg(main.querySelector('#swErr'), er.message); }
     });
   });
 }
-function viewNoDuty(s) {
+// ?only=… 但這家店沒有該功能的權限（出勤核定／排班）：說明＋多店可換店
+function viewNoOnly(s, adminOnly) {
   const many = s.person && (s.stores || []).length > 1;
-  frame(s, `<div class="card"><h2>出勤核定</h2><p class="hint" id="onlyNoDuty">你的帳號在這家店（${esc(s.name)}）沒有出勤核定的權限。${many ? '可以換到別家店試試。' : '如需使用請洽總部。'}</p>
-    ${many ? '<a class="btn ghost" href="#/switch" id="noDutySwitch">換店</a>' : ''}</div>`, '', { cur: '', title: '出勤核定' });
+  const name = ONLY === 'duty' ? '出勤核定' : '自動排班', id = ONLY === 'duty' ? 'Duty' : 'Schedule';
+  // adminOnly：有排班的查看權（出勤核定要對班表），但門市排班只給能排班的人（本店店長同等職、人資主管、管理員；2026-10-24 Eason）
+  const msg = adminOnly ? '排班只有本店店長、人資主管或管理員可以使用。' : `你的帳號在這家店（${esc(s.name)}）沒有${ONLY_LABEL[ONLY]}的權限。`;
+  frame(s, `<div class="card"><h2>${name}</h2><p class="hint" id="onlyNo${adminOnly ? 'ScheduleAdmin' : id}">${msg}${many ? '可以換到別家店試試。' : adminOnly ? '' : '如需使用請洽總部。'}</p>
+    ${many ? `<a class="btn ghost" href="#/switch" id="no${id}Switch">換店</a>` : ''}</div>`, '', { cur: '', title: name });
 }
-// 舊網址 #/duty/...（非 ?only=duty）：不渲染出勤核定，改提示已移到管理系統考勤管理（2026-10-24，spec §17.3）
-function viewDutyMoved(s) {
-  frame(s, `<div class="card"><h2>出勤核定</h2><p id="dutyMoved">出勤核定已移到管理系統：人資部門 → 考勤管理</p>
-    <a class="btn" id="dutyMovedGo" href="${ATT_URL}" ${attLinkAttr()}>前往考勤管理</a></div>`, '', { cur: '', title: '出勤核定' });
+// 舊網址 #/duty/…、#/schedule/…（非 ?only=）：不渲染，改提示已移到管理系統（duty：spec §17.3；schedule：hr-move-spec §3，共用同一個畫面）
+function viewMoved(s, id) {
+  const m = MOVED[id];
+  frame(s, `<div class="card"><h2>${m.title}</h2><p id="${m.mid}">${m.title}已移到管理系統：${m.where}</p>
+    <a class="btn" id="${m.mid}Go" href="${m.url}" ${attLinkAttr()}>${m.btn}</a></div>`, '', { cur: '', title: m.title });
 }
 async function viewStaffPerm(s, tok) {
   if (!canStaffPerm(s)) return go('#/');
@@ -409,7 +423,7 @@ async function refreshMe() {
   try {
     const d = await api('GET', '/me');
     const cur = getSession();
-    if (cur && cur.token === s.token) setSession({ ...cur, name: d.name || cur.name, brand: d.brand || cur.brand, features: d.features || [], canVoid: !!d.canVoid, isManager: !!d.isManager, scheduleAdmin: !!d.scheduleAdmin, dutyUnlocked: !!d.dutyUnlocked, dutyManager: d.dutyManager !== false, dutyHours: d.dutyHours !== false, stores: d.stores || cur.stores, attStores: d.attStores || [] });
+    if (cur && cur.token === s.token) setSession({ ...cur, name: d.name || cur.name, brand: d.brand || cur.brand, features: d.features || [], canVoid: !!d.canVoid, isManager: !!d.isManager, scheduleAdmin: !!d.scheduleAdmin, dutyUnlocked: !!d.dutyUnlocked, dutyManager: d.dutyManager !== false, dutyHours: d.dutyHours !== false, stores: d.stores || cur.stores, attStores: d.attStores || [], dutyView: d.dutyView || null });
   } catch (e) { /* 登入失效 api 已處理；連不上就先沿用舊的 */ }
 }
 
@@ -422,11 +436,12 @@ export async function render() {
   const r = route();
   window.scrollTo(0, 0);
   if (r.page === 'switch') return s.person ? viewSwitch(s) : go('#/');
-  if (ONLY_DUTY) {                          // ?only=duty：只有出勤核定（含換考勤店）；首頁與其他功能都不顯示
-    if (!(s.features || []).includes('duty')) return viewNoDuty(s);
-    if (r.page !== 'duty') { history.replaceState(null, '', '#/duty/'); return render(); }
+  if (ONLY) {                               // ?only=duty／schedule：只有該功能（含換店）；首頁與其他功能都不顯示
+    if (!(s.features || []).includes(ONLY)) return viewNoOnly(s);
+    if (ONLY === 'schedule' && s.person && !s.scheduleAdmin) return viewNoOnly(s, true);      // 個人登入：門市排班只給能排班的人；只能看的主管（區督導、總監…）不看門市排班
+    if (r.page !== ONLY) { history.replaceState(null, '', `#/${ONLY}/`); return render(); }
   }
-  if (r.page === 'duty' && !ONLY_DUTY) return viewDutyMoved(s);   // 一般模式進 #/duty/...（ONLY_DUTY 已在上面處理，2026-10-24，spec §17.3）
+  if (!ONLY && MOVED[r.page]) return viewMoved(s, r.page);   // 一般模式進 #/duty/…、#/schedule/…（ONLY 已在上面處理）
   if (r.page === 'password') return s.person ? go('#/') : viewPassword(s);
   if (r.page === 'staffperm') return viewStaffPerm(s, tok);
   if (r.page === 'features') return viewFeatures(s);

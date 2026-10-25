@@ -2,11 +2,12 @@
 // 2026-10-18 起新人統一在管理系統新增，這裡只剩備案（收合）；建立帳號只建打卡帳號，要通知總部在管理系統建檔。建立後專屬打卡連結收合成次要資訊（LINE 打卡上線後少用）；連結裡的 k 是該員工自己的打卡金鑰（不是主管金鑰）。
 import { esc, confirmBox } from '../../js/ui.js';
 import { DZY_ORIGIN } from '../../js/config.js';
-import { S, dutyManager, call, h, failBar } from './state.js';
+import { S, dutyManager, call, h, failBar, viewNoHoursStore } from './state.js';
 import { clockLink } from './calc.js';
 
 export function renderRoster(ctx) {
-  const el = ctx.el, dm = dutyManager(ctx.session);      // 非店長／人資／管理員：名冊與 LINE 綁定紀錄照常看，不顯示新增同仁與設離職／恢復
+  const el = ctx.el, dm = dutyManager(ctx.session), vo = viewNoHoursStore(ctx.session);      // vo＝這家店沒有可核工時的人、不是店長（只看或混合店）：名冊唯讀，也不顯示 LINE 綁定紀錄（那支讀取不開放只看）
+  // 非店長／人資／管理員：名冊與 LINE 綁定紀錄照常看，不顯示新增同仁與設離職／恢復
   el.innerHTML = `${dm ? `<div class="card" id="duAdd"><h2>新進同仁報到</h2>
     <div class="row"><a class="btn" id="aeDzy" href="${DZY_ORIGIN}/#/staff" target="_blank" rel="noopener">到管理系統新增（建議）</a></div>
     <p class="hint">新同仁請在管理系統新增，會同時建好打卡帳號與管理系統帳號，本人當天就能認領。</p>
@@ -19,10 +20,10 @@ export function renderRoster(ctx) {
     ${dm ? `<p class="hint">同仁離職就在這裡設為離職，他<b>立刻無法打卡</b>、也不再出現在核定清單；<b>過去的打卡紀錄與已核定的工時都會保留</b>。設錯可以按恢復。</p>
     <div class="row"><select id="reSelect" class="grow" aria-label="選擇同仁"><option value="">選擇同仁…</option></select><button type="button" class="btn du-danger" id="reBtn" disabled>設為離職</button></div>` : '<p class="hint">新增同仁與設離職／恢復在職，要由店長、人資主管或管理員操作。</p>'}
     <div class="du-msg" id="reResult" hidden></div><div id="reInactive"></div></div>
-    <div id="duLineFail"></div>
+    ${vo ? '' : `<div id="duLineFail"></div>
     <div class="card" id="lineBindCard"><h2>LINE 綁定紀錄</h2>
     <p class="hint">同仁第一次用 LINE「鼎兆元打卡」打卡時，要<b>人在店裡</b>並輸入全名才能綁定。下面是最近 30 天的紀錄；<b>不是本人綁的請立刻按「解除」</b>，那位同仁下次打卡要重新輸入全名。</p>
-    <div class="du-msg" id="lbResult" hidden></div><div id="lbList"></div></div>`;
+    <div class="du-msg" id="lbResult" hidden></div><div id="lbList"></div></div>`}`;
   const live = () => el.isConnected;
   const q = s => el.querySelector(s);
   const aeBox = q('#aeResult'), reBox = q('#reResult'), sel = q('#reSelect'), reBtn = q('#reBtn'), gone = q('#reInactive');   // 非主管時前四個是 null，下面都只在 dm 時用
@@ -126,5 +127,5 @@ export function renderRoster(ctx) {
   }
   if (dm) { aeBtn.onclick = create; nameIn.onkeydown = e => { if (e.key === 'Enter') create(); }; }
   load();
-  loadBinds();
+  if (!vo) loadBinds();
 }

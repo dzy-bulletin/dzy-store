@@ -4,6 +4,9 @@ import { periodOf, todayTaipei, shiftPeriod, parseLabel } from './period.js';
 
 export const S = { key: null, period: null, data: null, loading: null, sel: null, view: null, day: null, msg: '', err: '', annual: undefined, annualP: null };
 
+/** 能不能排班（hr-move-spec §3、§10.1-2）：只有個人登入且是本店店長同等職、人資主管、管理員（scheduleAdmin）；門市帳號與其他看得到的主管都只能看。伺服器另外擋（schedule.js mod()），這裡只決定畫面 */
+export const canEdit = (ses) => !!(ses && ses.person && ses.scheduleAdmin);
+
 export function reset(key) {
   S.key = key; S.period = null; S.data = null; S.loading = null; S.sel = null; S.view = null; S.day = null; S.msg = ''; S.err = '';
   S.annual = undefined; S.annualP = null;

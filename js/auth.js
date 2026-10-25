@@ -21,7 +21,7 @@ export function initAuth(onLost, onMust) {
 export function toSession(d) {
   const s = { token: d.token, expiresAt: d.expiresAt, code: d.code, name: d.name, role: d.role, brand: d.brand || 'hq',
     mustChangePassword: !!d.mustChangePassword, features: d.features || [] };
-  if (d.person) Object.assign(s, { person: d.person, canVoid: !!d.canVoid, isManager: !!d.isManager, scheduleAdmin: !!d.scheduleAdmin, dutyUnlocked: !!d.dutyUnlocked, dutyManager: d.dutyManager !== false, dutyHours: d.dutyHours !== false, stores: d.stores || [], attStores: d.attStores || [] });
+  if (d.person) Object.assign(s, { person: d.person, canVoid: !!d.canVoid, isManager: !!d.isManager, scheduleAdmin: !!d.scheduleAdmin, dutyUnlocked: !!d.dutyUnlocked, dutyManager: d.dutyManager !== false, dutyHours: d.dutyHours !== false, stores: d.stores || [], attStores: d.attStores || [], dutyView: d.dutyView || null });
   return s;
 }
 export async function login(code, password) {

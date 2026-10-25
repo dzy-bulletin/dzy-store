@@ -1,13 +1,27 @@
 // 自動排班（docs/autoschedule/spec.md 第 9 節）。四個分頁：班表／指定與需求／同仁／班別與設定。
 // 計算與檢查規則跟伺服器共用同一份（rules.js、auto.js、calc.js）；畫面只負責顯示與送出。
 import { esc } from '../../js/ui.js';
-import { S, reset, load } from './state.js';
+import { S, reset, load, canEdit } from './state.js';
+import { getSession } from '../../js/auth.js';
 import { renderBoard } from './board.js';
 import { renderNeeds } from './needs.js';
 import { renderStaff } from './staff.js';
 import { renderShifts } from './shifts.js';
 
 const VIEWS = { board: renderBoard, needs: renderNeeds, staff: renderStaff, shifts: renderShifts };
+
+// 唯讀（看得到排班管理、但不是本店店長同等職／人資主管／管理員，hr-move-spec §3）：畫完之後把會改資料的欄位與按鈕關掉、按鈕藏起來；
+// 只留切換期別、檢視方式、日期與同仁選單、匯出 PDF 這些「換著看」的控制
+const VIEW_ONLY = new Set(['scPrev', 'scNext', 'scViewGrid', 'scViewDay', 'scPdf', 'ndDay', 'pnEmp']);
+function lockDown(el, ses) {
+  el.querySelectorAll('input, select, textarea, button').forEach((x) => {
+    if (VIEW_ONLY.has(x.id) || x.classList.contains('sc-daychip') || x.closest('.sc-seg')) return;
+    x.disabled = true;
+    if (x.tagName === 'BUTTON' && x.classList.contains('btn')) x.hidden = true;
+  });
+  const hire = el.querySelector('#hiCard'); if (hire) hire.hidden = true;     // 「新增同仁」整張卡（含到管理系統新增的連結與備案表單）只給能排班的人
+  if (!el.querySelector('#scRo')) el.insertAdjacentHTML('afterbegin', `<div class="note" id="scRo" role="note">${ses && ses.person ? '只能查看：排班、鎖定只有本店店長、人資主管或管理員可以做。' : '排班請用管理系統個人帳號：人資部門 → 排班管理'}</div>`);
+}
 
 function ensureCss() {
   if (document.getElementById('scCss')) return;
@@ -22,7 +36,12 @@ export default {
     ensureCss();
     const key = ctx.session.token || ctx.session.code;
     if (S.key !== key) reset(key);                                   // 換了登入就重來，不留上一家店的資料
-    const draw = () => { if (ctx.el.isConnected) (VIEWS[ctx.tab] || renderBoard)({ el: ctx.el, rerender: ctx.rerender, session: ctx.session }); };
+    const draw = () => {
+      if (!ctx.el.isConnected) return;
+      (VIEWS[ctx.tab] || renderBoard)({ el: ctx.el, rerender: ctx.rerender, session: ctx.session });
+      const ses = ctx.session || getSession();
+      if (!canEdit(ses)) lockDown(ctx.el, ses);
+    };
     if (S.data && S.data.period === S.period) return draw();
     ctx.el.innerHTML = '<div class="card"><p class="hint" style="margin:0">讀取中…</p></div>';
     if (!S.loading) S.loading = load().finally(() => { S.loading = null; });

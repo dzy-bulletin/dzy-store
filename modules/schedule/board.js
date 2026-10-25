@@ -1,7 +1,7 @@
 // 自動排班「班表」分頁：整期格子（桌機）／單日清單（手機）、營業額與工時比、每班人數、檢查結果、自動排班、鎖定與發布。
 import { esc, busy, confirmBox } from '../../js/ui.js';
 import { api } from '../../js/api.js';
-import { S, loadAnnual, load, mutate, movePeriod, setDutyFlag, WD, md, hm, DAY_LABEL, LEAVE_LABEL, call } from './state.js';
+import { S, canEdit, loadAnnual, load, mutate, movePeriod, WD, md, hm, DAY_LABEL, LEAVE_LABEL, call } from './state.js';
 import { weekday, periodEnd } from './period.js';
 import { termAt } from './rules.js';
 import { getSession } from '../../js/auth.js';
@@ -24,7 +24,7 @@ export function renderBoard(ctx) {
   const staff = D.staff.filter((st) => D.dates.some((d) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date)));
   const locked = D.meta.locked;
   const ses = ctx.session || getSession();
-  const canLock = !(ses && ses.person) || !!ses.scheduleAdmin;       // 個人登入：鎖定／解鎖／重送只有店長、人資主管、管理員（伺服器另外擋，這裡只是不顯示）
+  const canLock = canEdit(ses);       // 個人登入：排班、鎖定、解鎖、重送都只有店長同等職、人資主管、管理員（伺服器另外擋，這裡只是不顯示）
   const byCell = {}, byDay = {};
   for (const r of D.results) {
     if (r.emp_id && r.date) (byCell[r.emp_id + '|' + r.date] = byCell[r.emp_id + '|' + r.date] || []).push(r);
@@ -80,18 +80,13 @@ export function renderBoard(ctx) {
       ${D.meta.clockAlias === null && D.period !== 'T00' ? '<span class="tag">這家店沒有 LINE 打卡，鎖定不送 LINE</span>' : ''}
     </div>
     <div class="row sc-acts">
-      ${locked ? '' : `<button type="button" class="btn" id="scAuto">自動排班</button><label class="sc-chk"><input type="checkbox" id="scAll"> 連手動改過的也重排</label>`}
+      ${locked || !canLock ? '' : `<button type="button" class="btn" id="scAuto">自動排班</button><label class="sc-chk"><input type="checkbox" id="scAll"> 連手動改過的也重排</label>`}
       ${canLock ? `<button type="button" class="btn ${locked ? 'ghost' : ''}" id="scLock">${locked ? '解除鎖定' : '鎖定並發布'}</button>` : ''}
       ${canLock && pub && (pub.status === 'failed' || pub.status === 'pending') ? '<button type="button" class="btn ghost" id="scResend">立即重送</button>' : ''}
       <button type="button" class="btn ghost" id="scPdf">匯出 PDF</button>
       <span class="grow"></span>
       <div class="sc-seg" role="group" aria-label="檢視方式"><button type="button" id="scViewGrid" class="${view === 'grid' ? 'on' : ''}">整期</button><button type="button" id="scViewDay" class="${view === 'day' ? 'on' : ''}">單日</button></div>
     </div>
-    <div id="scPw" hidden class="row mt"><input type="password" id="scPwIn" autocomplete="off" placeholder="出勤核定密碼" aria-label="出勤核定密碼"><button type="button" class="btn" id="scPwBtn">確認</button></div>
-    <div id="scNew" hidden class="mt"><p class="hint">出勤核定密碼還是預設的 0000，請在這裡改成只有主管知道的新密碼（至少 4 碼，不可以是 0000），改好會接著完成剛才的動作。</p>
-      <div class="fld"><label for="scNewIn">設定新的出勤核定密碼（4 碼以上）</label><input type="password" id="scNewIn" autocomplete="new-password"></div>
-      <div class="fld mt"><label for="scNewIn2">再輸入一次</label><input type="password" id="scNewIn2" autocomplete="new-password"></div>
-      <div class="row mt"><button type="button" class="btn" id="scNewBtn">儲存並繼續</button></div></div>
     ${D.meta.needs_recheck ? '<div class="note warn mt" role="alert">這一期已發布，但上一期改過之後，跨期的換班間隔或連續上班天數不合規定了。請解除鎖定、修正後再鎖定。</div>' : ''}
     <div class="sc-months mt">${monthsHtml}</div>
     <div id="scMsg" class="${S.err ? 'err' : 'okmsg'}" role="status">${esc(S.err || S.msg || '')}</div>
@@ -181,7 +176,7 @@ export function renderBoard(ctx) {
   q('#scViewDay').onclick = () => { S.view = 'day'; rerender(); };
   el.querySelectorAll('.sc-daychip').forEach((b) => { b.onclick = () => { S.day = b.dataset.day; rerender(); }; });
   el.querySelectorAll('.sc-c[data-emp], .sc-drow').forEach((td) => {
-    td.onclick = () => { if (locked) { say('這一期已鎖定，要先解除鎖定才能修改', true); return rerender(); } S.sel = { emp: td.dataset.emp, date: td.dataset.date }; rerender(); };
+    td.onclick = () => { if (!canLock) { say('你只能查看班表，排班請找本店店長', true); return rerender(); } if (locked) { say('這一期已鎖定，要先解除鎖定才能修改', true); return rerender(); } S.sel = { emp: td.dataset.emp, date: td.dataset.date }; rerender(); };
   });
   el.querySelectorAll('.sc-mrev').forEach((inp) => {
     inp.onchange = async () => {
@@ -216,58 +211,22 @@ export function renderBoard(ctx) {
     rerender();
   });
 
-  // 鎖定／解鎖：要出勤核定密碼（同一次登入只問一次）
-  // 2026-10-24 總審：出勤核定畫面已移到管理系統，密碼還是預設 0000 時就地改（同出勤核定 changeForm 的規則，POST /duty/password），改好接著做剛才的動作
-  const pwBox = q('#scPw'), newBox = q('#scNew');
-  let pending = null;
-  const askNew = (retry) => { pending = retry; pwBox.hidden = true; newBox.hidden = false; q('#scNewIn').focus(); say('出勤核定密碼還是預設的 0000，請先設定新的出勤核定密碼', true); paintMsg(); };
+  // 鎖定／解鎖：只有管理系統個人帳號（scheduleAdmin）能做，不需要出勤核定密碼；門市帳號（共用店號）不能排班（hr-move-spec §10.1-2），畫面走不到這裡
   const doLock = async () => {
     try {
       if (locked) { await mutate('unlock'); say(pub && pub.kind === 'publish' ? '已解除鎖定，LINE 上的這一期班表會撤下' : '已解除鎖定'); }
       else { const r = await mutate('lock'); say(r.publish ? '已鎖定，正在送到 LINE' : '已鎖定'); }
-    } catch (e) {
-      if (e.code === 'FORBIDDEN' && /核定/.test(e.message)) { setDutyFlag(''); pending = doLock; pwBox.hidden = false; q('#scPwIn').focus(); say('請輸入出勤核定密碼', true); paintMsg(); return; }
-      if (e.code === 'DUTY_MUST_CHANGE') { setDutyFlag('m'); askNew(doLock); return; }
-      say(e.message, true);
-    }
+    } catch (e) { say(e.message, true); }
     rerender();
   };
-  const paintMsg = () => { const m = q('#scMsg'); m.className = S.err ? 'err' : 'okmsg'; m.textContent = S.err || S.msg || ''; };
   if (q('#scLock')) q('#scLock').onclick = () => busy(q('#scLock'), async () => {
     if (!locked && counts.block) { say(`還有 ${counts.block} 個地方不合規定，修正後才能鎖定`, true); return rerender(); }
     if (locked && !(await confirmBox('解除鎖定後，同仁在 LINE 上會暫時看不到這一期的班表，改好要再鎖定。確定嗎？', '解除鎖定'))) return;
     await doLock();
   });
-  q('#scPwBtn').onclick = () => busy(q('#scPwBtn'), async () => {
-    try {
-      const r = await api('POST', '/duty/unlock', { password: q('#scPwIn').value });
-      if (r && r.mustChange) { setDutyFlag('m'); askNew(pending); return; }
-      setDutyFlag('1'); pwBox.hidden = true;
-      if (pending) await pending();
-    } catch (e) { say(e.message, true); paintMsg(); }
-  });
-  q('#scNewBtn').onclick = () => busy(q('#scNewBtn'), async () => {
-    const a = q('#scNewIn').value, b = q('#scNewIn2').value;
-    if (a === '0000') { say('新的核定密碼不可以是預設的 0000', true); return paintMsg(); }
-    if (a.length < 4) { say('新的核定密碼至少要 4 碼', true); return paintMsg(); }
-    if (a !== b) { say('兩次輸入的不一樣', true); return paintMsg(); }
-    try {
-      await api('POST', '/duty/password', { newPassword: a });
-      setDutyFlag('1'); newBox.hidden = true; say('已改好出勤核定密碼');
-      if (pending) await pending(); else rerender();
-    } catch (e) {
-      if (e.code === 'FORBIDDEN' && /核定/.test(e.message)) { setDutyFlag(''); newBox.hidden = true; pwBox.hidden = false; q('#scPwIn').focus(); }      // 解鎖狀態不在了：先重新輸入目前密碼
-      say(e.message, true); paintMsg();
-    }
-  });
   if (q('#scResend')) q('#scResend').onclick = () => busy(q('#scResend'), async () => {
     try { const r = await call('resend', { period: S.period }); await load(); say(r.publication && r.publication.status === 'sent' ? '已送到 LINE' : '還是送不出去，系統會每 5 分鐘自動再試'); }
-    catch (e) {
-      const retry = async () => { try { await call('resend', { period: S.period }); await load(); say('已重送'); } catch (e2) { say(e2.message, true); } rerender(); };
-      if (e.code === 'FORBIDDEN' && /核定/.test(e.message)) { pending = retry; pwBox.hidden = false; say('請輸入出勤核定密碼', true); paintMsg(); return; }
-      if (e.code === 'DUTY_MUST_CHANGE') { setDutyFlag('m'); askNew(retry); return; }
-      say(e.message, true);
-    }
+    catch (e) { say(e.message, true); }
     rerender();
   });
 }

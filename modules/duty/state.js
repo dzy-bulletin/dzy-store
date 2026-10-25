@@ -1,5 +1,6 @@
 // 出勤核定：四個分頁共用的狀態與呼叫。換了登入就整包重來（不留上一個人的資料）。
 import { api } from '../../js/api.js';
+import { getSession } from '../../js/auth.js';
 
 const FLAG = 'dzystore_dutyok';
 // 管理者（2026-10-11 Eason：看得到所有門市、也能代核）：asStore＝正在看的門市代號，每次呼叫自動帶上；stores＝各店總覽讀到的門市清單。
@@ -128,4 +129,23 @@ export function staleLeave() { S.leave = null; S.leaveP = null; S.leaveBy = {}; 
 // 個人登入且不是店長／人資主管／管理員：伺服器會擋打卡 QR、公告、新增同仁、設離職（proxy/duty.js manager_only），畫面就不顯示；門市帳號維持原樣
 export const dutyManager = s => !(s && s.person && s.dutyManager === false);
 // 有沒有核定工時的對象（2026-10-21 工時與申請分開核）：個人登入且伺服器明說 false＝只有申請審核權（區督導、區經理、研發總監）；門市登入、管理者、舊伺服器沒這欄＝有
+// ---- 只看（2026-10-25，督導只看考勤）----
+// 伺服器只在「這家店有 viewKeys」時才給 session.dutyView（目前這家店）與 attStores[].view（全部門市各店）：{ only, all, hours:[emp_id], req:[emp_id] }。
+//   沒有這份資料＝維持原行為（所有人都可寫，伺服器照舊擋）。有的話：all（店長／人資主管／管理員）不逐列限制；否則只有 hours／req 名單裡的人可寫，其餘列唯讀。
+//   這裡只決定要不要畫按鈕；真正的放行在伺服器（proxy/duty.js：寫入永遠不看 viewKeys）。
+export function viewOf(s, store) {
+  if (!s || !s.person) return null;
+  if (store && store !== s.code) { const e = Array.isArray(s.attStores) ? s.attStores.find(x => x.code === store) : null; return (e && e.view) || null; }
+  if (store && Array.isArray(s.attStores)) { const e = s.attStores.find(x => x.code === store); if (e) return e.view || null; }
+  return s.dutyView || null;
+}
+// kind：'hours'＝核定工時、'req'＝申請審核
+export function canWriteRow(kind, empId, store) {
+  const v = viewOf(getSession(), store);
+  if (!v || v.all) return true;
+  return (kind === 'req' ? v.req : v.hours).indexOf(String(empId)) >= 0;
+}
+// 這家店有 dutyView、不是店長等（all）、且沒有任何可核定工時的人（hours 空；可能純只看，也可能混合店：對店長有申請權、其他人只看）：
+// 沒有裝置核准、公告分頁，名冊不放 LINE 綁定紀錄（伺服器依 attKeys 過濾，本來就是空的）。這家店沒有 dutyView 的人完全不受影響
+export const viewNoHoursStore = s => { const v = s && s.person && s.dutyView; return !!(v && !v.all && Array.isArray(v.hours) && v.hours.length === 0); };
 export const dutyHours = s => !(s && s.person && s.dutyHours === false);

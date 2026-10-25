@@ -48,9 +48,10 @@ export function access(db, p, code, eff) {
       if (row && row.kind === 'home') feats = row.mode === 'deny' ? [] : row.features.slice();
       else feats = (db.storeDefault[code] || []).slice();
     } else if (row && row.kind === 'support' && parseUntil(row.until, today)) feats = row.mode === 'deny' ? [] : row.features.slice();
-    feats = feats.filter(f => f !== 'duty' && upper.includes(f));
+    feats = feats.filter(f => f !== 'duty' && f !== 'schedule' && upper.includes(f));   // 出勤核定、自動排班由管理系統統一管理（對照 server/person.js）
   }
   if (dutyEntry && upper.includes('duty') && !feats.includes('duty')) feats.push('duty');
+  if (dutyEntry && upper.includes('schedule') && !feats.includes('schedule')) feats.push('schedule');
   feats = Array.from(new Set(feats)).sort();
   return { features: feats, canVoid: isManager || (!!unit && p.void_units.includes(unit)), isManager, scheduleAdmin: isManager || hr || isAdmin, dutyManager: isManager || hr || isAdmin };
 }
@@ -138,14 +139,15 @@ export function storePermRoute(db, method, p, q, b, s, per, me, eff, log) {
     setBy = 'admin:' + me.code;
   } else return fail('FORBIDDEN', '只有這家店的店長可以設定同仁權限');
   const unit = unitOf(db, code);
-  const assignable = eff(db.accounts[code]).filter(f => f !== 'duty');
+  const assignable = eff(db.accounts[code]).filter(f => f !== 'duty' && f !== 'schedule');
   const roster = () => Object.keys(db.personas).map(sub => personaOf(db, sub)).filter(x => x.unit === unit && x.active !== false && x.title)
     .map(x => ({ sub: x.sub, emp_no: x.sub, name: x.name, title: x.title })).sort((a, c) => (a.sub < c.sub ? -1 : 1));
   const checkFeatures = list => {
     if (!Array.isArray(list) || list.some(f => typeof f !== 'string')) return fail('BAD_INPUT', '功能清單格式不正確');
+    if (list.includes('schedule')) return fail('FORBIDDEN', '自動排班由管理系統排班管理統一管理');
     if (list.some(f => f === 'duty' || f === 'cashbook.void')) return fail('FORBIDDEN', '出勤核定與收支作廢由總部設定，店長不能分配');
     const bad = list.find(f => !assignable.includes(f));
-    if (bad) return fail(['purchase', 'cashbook', 'transfer', 'loss', 'inventory', 'board', 'schedule'].includes(bad) ? 'FORBIDDEN' : 'BAD_INPUT', '這家店沒有開通這個功能，不能分配（' + bad + '）');
+    if (bad) return fail(['purchase', 'cashbook', 'transfer', 'loss', 'inventory', 'board'].includes(bad) ? 'FORBIDDEN' : 'BAD_INPUT', '這家店沒有開通這個功能，不能分配（' + bad + '）');
     return null;
   };
   const sortedSet = list => Array.from(new Set(list)).sort();

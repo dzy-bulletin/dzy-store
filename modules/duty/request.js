@@ -3,7 +3,7 @@
 // 照 ~/mala-clock-in manager.html（feature/requests-qr）的 loadPendingRequests／buildReqItem 搬，文案不改；外觀換成營運系統風格。
 // 核准申請「不會」直接寫入核定：只是讓那天的核定頁先幫主管填好，主管核定那天時確認送出才算數（見 approve.js 的 __applyReq）。
 import { confirmBox } from '../../js/ui.js';
-import { S, call, callAll, h, failBar, failedStores, setReqBadge, loadLeave, leaveFor } from './state.js';
+import { S, call, callAll, h, failBar, failedStores, setReqBadge, loadLeave, leaveFor, canWriteRow } from './state.js';
 import { tsLabel, shortDate, punchEvidence, compBalanceNote, REQ_KIND_LABEL, REQ_BATCH_MAX } from './calc.js';
 
 export function renderRequest(ctx) {
@@ -23,6 +23,7 @@ export function renderRequest(ctx) {
       const title = h('div', 'du-rq-title', '待審申請 ' + items.length + ' 筆（最舊的在上面）');
       card.append(title, buildBatchBar(card, title));
       items.forEach(it => card.append(buildItem(it, card, title)));
+      if (!card.querySelector('.du-rq-pick')) { const bw = card.querySelector('.du-rq-batchwrap'); if (bw) bw.hidden = true; }      // 全是唯讀（只看）：沒有批次核准列
       box.append(card);
       syncBatch(card);
     }, e => { if (!el.isConnected) return; box.innerHTML = ''; const c = h('div', 'card'); box.append(c); failBar(c, '待審申請', e, load); });
@@ -93,9 +94,11 @@ function buildBatchBar(card, title) {
 function buildItem(it, card, title) {
   const el = h('div', 'du-rq'); el.dataset.reqId = String(it.id); el.__req = it; if (it.store) el.dataset.store = it.store;
   const l1 = h('div', 'du-rq-l1'), who = h('span', 'du-rq-who');
+  const canDecide = canWriteRow('req', it.emp_id, it.store);      // 不在申請審核名單（只看）：沒有勾選、核准、退回、看附件，改顯示「唯讀」
   const pick = h('input', 'du-rq-pick', null, { type: 'checkbox', 'aria-label': '勾選 ' + it.name + ' ' + it.summary });
   pick.onchange = () => syncBatch(card);
-  who.append(pick,h('span', 'du-rq-kind ' + (REQ_KIND_LABEL[it.kind] ? it.kind : ''), REQ_KIND_LABEL[it.kind] || it.kind), h('span', 'du-rq-name', it.name), ...(it.storeName ? [h('span', 'du-where', '打卡地點：' + it.storeName, { 'data-where': it.store })] : []));
+  if (canDecide) who.append(pick);
+  who.append(h('span', 'du-rq-kind ' + (REQ_KIND_LABEL[it.kind] ? it.kind : ''), REQ_KIND_LABEL[it.kind] || it.kind), h('span', 'du-rq-name', it.name), ...(it.storeName ? [h('span', 'du-where', '打卡地點：' + it.storeName, { 'data-where': it.store })] : []));
   l1.append(who, h('span', 'du-rq-date', shortDate(it.date)));
   el.append(l1, h('div', 'du-rq-l2', it.summary + (it.reason ? '\n原因：' + it.reason : '') + compBalanceNote(leaveFor(it.store), it) + '\n送出：' + tsLabel(it.created_at)));
   const ev = punchEvidence(it);
@@ -103,8 +106,8 @@ function buildItem(it, card, title) {
 
   const acts = h('div', 'du-rq-acts');
   const ok = h('button', 'du-rq-ok btn', '核准', { type: 'button' }), no = h('button', 'du-rq-no btn ghost', '退回', { type: 'button' });
-  acts.append(ok, no);
-  if (it.attach_id) {
+  if (canDecide) acts.append(ok, no); else acts.append(h('span', 'du-ro', '唯讀'));
+  if (it.attach_id && canDecide) {
     const at = h('button', 'du-rq-att btn ghost', '看附件', { type: 'button' });
     at.onclick = async () => {
       at.disabled = true; at.textContent = '載入中…';

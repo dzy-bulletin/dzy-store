@@ -43,7 +43,7 @@ export function renderStaff(ctx) {
   const hired = S.hireResult; S.hireResult = null;
   const hiredHtml = !hired ? '' : `<div class="okmsg" id="hiDone" role="status">✓ 已新增 <b>${esc(hired.name)}</b>（編號 ${esc(hired.emp_id)}）${hired.clock ? '，打卡帳號也建好了。請他打開 LINE「鼎兆元打卡」，第一次打卡時<b>人在店裡</b>、輸入全名綁定。' : '。'}
       <br>這是備案新增：請通知總部到管理系統把他建檔，他才能認領管理系統帳號。
-      <br>接著：這一期還沒鎖定就到「班表」按自動排班；已經鎖定要先解除鎖定（要出勤核定密碼，LINE 上那一期會暫時撤下）→ 自動排班 → 沒有紅字再鎖定。</div>
+      <br>接著：這一期還沒鎖定就到「班表」按自動排班；已經鎖定要先解除鎖定（LINE 上那一期會暫時撤下）→ 自動排班 → 沒有紅字再鎖定。</div>
     ${hired.link ? `<details class="mt" id="hiLinkBox"><summary>舊版專屬打卡連結（沒用 LINE 打卡的人才需要）</summary><p class="hint">用 Safari 開 → 加入主畫面，以後都從主畫面進。</p><span class="du-link" id="hiLink">${esc(hired.link)}</span> <button type="button" class="btn sm ghost" id="hiCopy">複製連結</button></details>` : ''}`;
   el.innerHTML = `
   <div class="card"><h2>同仁</h2>

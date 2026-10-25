@@ -178,10 +178,11 @@ function route(method, p, q, b, token) {
     if (me.role !== 'store') return fail('FORBIDDEN', '管理者帳號請到後台管理的功能開關設定');
     if (per && !pa.isManager) return fail('FORBIDDEN', '只有這家店的店長可以開關功能');
     me.storeOff = me.storeOff || [];
-    if (method === 'GET') return ok({ items: MODS.filter(f => f !== 'duty' && me.features.includes(f)).map(id => ({ id, on: !me.storeOff.includes(id) })) });
+    if (method === 'GET') return ok({ items: MODS.filter(f => f !== 'duty' && f !== 'schedule' && me.features.includes(f)).map(id => ({ id, on: !me.storeOff.includes(id) })) });
     if (method === 'POST') {
       if (typeof b.on !== 'boolean') return fail('BAD_INPUT', '開關狀態必須是 true 或 false');
       if (b.feature === 'duty') return fail('BAD_INPUT', '出勤核定由管理系統考勤管理統一管理');   // 與伺服器一致（2026-10-24，spec §17.4）
+      if (b.feature === 'schedule') return fail('BAD_INPUT', '自動排班由管理系統排班管理統一管理');
       if (!MODS.includes(b.feature) || !me.features.includes(b.feature)) return fail('BAD_INPUT', '這個功能沒有開通，要使用請洽管理者');
       me.storeOff = me.storeOff.filter(f => f !== b.feature);
       if (!b.on) me.storeOff.push(b.feature);
@@ -202,7 +203,8 @@ function route(method, p, q, b, token) {
     if (m[1] === 'inventory') return invMock(m[2], mx, b, db);
     if (m[1] === 'loss') return lossMock(m[2], mx, b, db);
     if (m[1] === 'board') return boardMock(m[2], mx, b, db);
-    if (m[1] === 'schedule' && per && !pa.scheduleAdmin && ['lock', 'unlock', 'resend'].includes(m[2])) return fail('FORBIDDEN', '只有店長、人資主管或管理員可以鎖定、解鎖或重送班表');
+    if (m[1] === 'schedule' && !per && me.role === 'store' && !['load', 'dayPlan', 'annual'].includes(m[2])) return fail('FORBIDDEN', '排班請用管理系統個人帳號：人資部門 → 排班管理');   // 門市帳號（共用店號）不能排班，同 server/schedule.js mod()
+    if (m[1] === 'schedule' && per && !pa.scheduleAdmin && !['load', 'dayPlan', 'annual'].includes(m[2])) return fail('FORBIDDEN', '只有本店店長、人資主管或管理員可以排班，你只能查看');   // 同 server/schedule.js mod()
     if (m[1] === 'schedule') return import('./mock-schedule.js').then(x => x.schedule(m[2], mx, b, db, s, { addEmployee: name => dutyDo(dutyDb(), 'mgr_add_employee', { name }) }));   // 用到才載入（排班計算檔案多，放在開頁就載會拉長每一頁的載入時間，WebKit 換頁時更容易打斷其他假資料的讀取）
     return fail('NOT_FOUND', '還在搬移中，暫時請用原本的系統');
   }
@@ -246,11 +248,7 @@ function homeFor(me) {
   }
   if (has('transfer')) items.push(...transferHome(db, me));
   if (has('inventory')) items.push(...invHome(me, db));
-  if (has('schedule')) {     // 自動排班：每期最新一筆發布 failed、或 pending 超過 15 分鐘（同 server/home.js）；直接讀假資料，不載入 mock-schedule.js
-    const pubs = ((db.sched || {})[me.code] || {}).pubs || {};
-    const late = Object.keys(pubs).sort().filter(p => { const l = pubs[p][pubs[p].length - 1]; return l && (l.status === 'failed' || (l.status === 'pending' && Date.now() - Date.parse(l.created_at) > 15 * 60e3)); });
-    if (late.length) add('schedule', 'warn', `${late.join('、')} 班表還沒送到 LINE`, late.length, '#/schedule/board');
-  }
+  // 自動排班「班表還沒送到 LINE」已移到管理系統首頁排班管理那一組（2026-10-24，hr-move-spec §4，與伺服器 /home 一致）
   const rank = { error: 0, warn: 1, todo: 2 };
   items.sort((a, c) => rank[a.level] - rank[c.level]);
   return { items, errors, at: new Date().toISOString() };

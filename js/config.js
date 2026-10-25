@@ -16,5 +16,6 @@ const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 export const EMBED_ORIGIN = LOCAL && LOCAL_ORIGIN.test(QS.get('embedOrigin') || '') ? QS.get('embedOrigin') : DZY_ORIGIN;
 // ?embed=dzy 只在真的被嵌在別的頁面裡（window.parent 不是自己）才算嵌入模式
 export const EMBED = QS.get('embed') === 'dzy' && window.parent !== window;
-// ?only=duty：只顯示出勤核定（含換考勤店），其他功能與首頁都不顯示
-export const ONLY_DUTY = QS.get('only') === 'duty';
+// ?only=duty／?only=schedule：只顯示該功能（出勤核定含換考勤店、自動排班），其他功能與首頁都不顯示（排班：2026-10-24 hr-move-spec §3）
+export const ONLY = ['duty', 'schedule'].includes(QS.get('only')) ? QS.get('only') : '';
+export const ONLY_DUTY = ONLY === 'duty';

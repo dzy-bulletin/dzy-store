@@ -1,7 +1,7 @@
 // 核定工時：照原系統 ~/mala-clock-in/manager.html 搬。日期列（前一天／後一天／今天）、本月待核定提醒、員工卡（收合展開、時段、
 // 核定時數即時算、休息、假別、出差、遲到分鐘）、送出核定。外觀換成營運系統風格，規則與文案不改。
 import { confirmBox } from '../../js/ui.js';
-import { S, dutyManager, call, callAll, brk, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey } from './state.js';
+import { S, dutyManager, call, callAll, brk, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow } from './state.js';
 import * as C from './calc.js';
 import { qrButton } from './qr.js';
 import { api } from '../../js/api.js';
@@ -189,6 +189,7 @@ function periodRow(p, onChange) {
 
 function buildCard(emp, date) {
   const br = brk(emp.store);
+  const readOnly = !canWriteRow('hours', emp.emp_id, emp.store);      // 不在核定工時名單（只看）：不出現送出核定，欄位不可改
   const card = h('div', 'du-card'); card.dataset.empId = rowKey(emp); if (emp.store) card.dataset.store = emp.store;
   card.__segments = emp.segments || [];
 
@@ -313,6 +314,7 @@ function buildCard(emp, date) {
   addBtn.onclick = () => { periodRows.append(periodRow(null, refresh)); refresh(); };
   const submit = h('button', 'btn du-submit', emp.approved ? '重新送出核定' : '送出核定', { type: 'button' });
   const actions = h('div', 'du-actions'); actions.append(addBtn, submit);
+  if (readOnly) actions.hidden = true;
   const result = h('div', 'du-result'); result.hidden = true;
   body.append(actions, result);
   const say = (cls, text) => { result.className = 'du-result ' + cls; result.hidden = false; result.textContent = text; };
@@ -412,11 +414,18 @@ function buildCard(emp, date) {
     const fillable = reqs.some(r => r.kind !== 'ot');
     if (fillable && emp.approved) {
       const b = h('button', 'du-reqfill', '這天已核定過，依申請重新填', { type: 'button' });
+      if (readOnly) b.hidden = true;
       b.onclick = () => { fill(); b.remove(); rbox.append(h('div', null, '已依申請填好，確認後按送出核定。')); };
       rbox.append(b);
     } else if (fillable) fill();
     periodRows.parentNode.insertBefore(rbox, tag || periodRows);    // 順序：申請說明 → 來自申請 → 時段
   };
+  if (readOnly) {                                                // 只看：姓名旁「唯讀」小字，內文所有欄位與按鈕鎖住
+    nameEl.append(h('span', 'du-ro', '唯讀'));
+    body.querySelectorAll('input,select,button').forEach(x => { x.disabled = true; });
+    const lock = () => body.querySelectorAll('input,select,button').forEach(x => { x.disabled = true; });
+    card.__applyReqRaw = card.__applyReq; card.__applyReq = reqs => { card.__applyReqRaw(reqs); lock(); };
+  }
   head.onclick = () => setExpanded(body.hidden);
   head.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(body.hidden); } };
   return card;
