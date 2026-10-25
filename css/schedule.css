@@ -69,6 +69,7 @@
 .sc-pins{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
 .sc-pin{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 2px;font:inherit;font-size:12px;cursor:pointer;min-height:58px}
 .sc-pin small{display:block;color:var(--muted)} .sc-pin b{display:block;min-height:16px}
+@media (max-width:360px){.sc-pins{gap:4px}.sc-pin{padding:6px 0;white-space:nowrap}.sc-pin .m{display:block;font-size:10px;line-height:1.1}.sc-pin.no-m .m{display:none}}      /* 2026-10-26 手機巡檢：286 寬（管理系統嵌入框）四位數日期塞不下 */
 .sc-pin.on.k-off{background:#f1eeeb} .sc-pin.on.k-work,.sc-pin.on.k-shift{background:#fff4d1}
 .sc-staff h3{margin:0 8px 0 0;font-size:16px}
 @media (max-width:760px){
@@ -90,7 +91,7 @@
 button.hq-day{cursor:pointer}
 .hq-day b{font-size:12px;font-variant-numeric:tabular-nums;text-align:left;padding-left:3px;color:var(--muted)}
 .hq-day .hq-v{font-weight:700;font-size:12px;word-break:break-all}
-.hq-day small{display:block;font-size:9px;color:#c0392b;line-height:1.2}
+.hq-day small{display:block;font-size:9px;color:#c0392b;line-height:1.2;white-space:normal;overflow-wrap:anywhere;word-break:break-all}      /* 假日名稱換行，不要被切成「開國紀」 */
 .hq-day.empty{background:#fdf6e8;border-style:dashed}
 .hq-day.rest .hq-v,.hq-day.off .hq-v{color:var(--sc-off-ink,#c0392b)} .hq-day.leave .hq-v{color:#3f6aa8}
 .hq-day.hol{background:#fbeeec}

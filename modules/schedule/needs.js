@@ -2,6 +2,8 @@
 import { esc, busy } from '../../js/ui.js';
 import { S, mutate, call, load, WD, md } from './state.js';
 import { weekday } from './period.js';
+// 指定日期格：月份放在 span，窄螢幕（≤360）除了第一格與每月 1 號都只顯示日（12/27 → 27），不然 7 欄塞不下（2026-10-26 手機巡檢）
+const pinDate = (d) => { const t = md(d), k = t.indexOf('/'); return k < 0 ? t : `<span class="m">${t.slice(0, k + 1)}</span>${t.slice(k + 1)}`; };
 
 const KINDS = [['wd', '平日'], ['sat', '週六'], ['sun', '週日']];
 
@@ -36,7 +38,7 @@ export function renderNeeds(ctx) {
   <div class="card"><h2>指定休假、指定上班</h2>
     <p class="hint">同仁要休的日子先在這裡點好，自動排班不會改動。點一下日期會依序切換：沒指定 → 休 → 上 →（各班別）→ 沒指定。</p>
     ${D.staff.length ? `<div class="row"><select id="pnEmp" aria-label="同仁">${D.staff.map((s) => `<option value="${esc(s.emp_id)}" ${s.emp_id === S.pinEmp ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>
-    <div class="sc-pins mt">${D.dates.map((d) => `<button type="button" class="sc-pin${pins[d] ? ' on k-' + pins[d].kind : ''}" data-date="${d}" ${locked ? 'disabled' : ''}>${md(d)}<small>${WD[weekday(d)]}</small><b>${esc(pinLabel(pins[d]))}</b></button>`).join('')}</div>` : '<p class="hint">還沒有同仁。</p>'}
+    <div class="sc-pins mt">${D.dates.map((d, i) => `<button type="button" class="sc-pin${pins[d] ? ' on k-' + pins[d].kind : ''}${i && d.slice(8) !== '01' ? ' no-m' : ''}" data-date="${d}" ${locked ? 'disabled' : ''}>${pinDate(d)}<small>${WD[weekday(d)]}</small><b>${esc(pinLabel(pins[d]))}</b></button>`).join('')}</div>` : '<p class="hint">還沒有同仁。</p>'}
     <div id="pnMsg" class="okmsg" role="status"></div></div>`;
 
   const q = (s) => el.querySelector(s);
