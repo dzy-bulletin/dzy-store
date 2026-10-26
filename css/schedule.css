@@ -53,6 +53,18 @@
 .sc-dst{margin-left:6px}
 .sc-dv .sc-sn{font-weight:600}
 .sc-total{margin:10px 4px 0}
+/* 每天的午餐／晚餐備註（Eason 2026-10-26）：兩列放在日期下方、同仁上方，文字小、最多三行，滑過看全文 */
+.sc-noterow th{font-size:11px;color:var(--muted)} .sc-noterow:nth-child(2)>*{border-bottom:2px solid #d8d2cc}
+.sc-nt{cursor:pointer;font-size:10px;line-height:1.25;color:var(--black);vertical-align:top;padding:2px 2px!important;text-align:left!important;background:#fff}
+.sc-nt.has{background:#fffaf0} .sc-nt.we{background:var(--sc-we)} .sc-nt.sel{outline:3px solid var(--black);outline-offset:-3px}
+
+.sc-ntx{width:44px;margin:0 auto;max-height:3.75em;overflow:hidden;word-break:break-all;white-space:normal}
+.sc-ntadd{display:block;text-align:center;color:#c9c2bb;font-size:13px}
+.sc-nt:hover .sc-ntadd{color:var(--black)}
+.sc-dnotes{display:grid;gap:4px;font-size:14px} .sc-dnote{display:flex;gap:8px} .sc-dnote b{flex:none;color:var(--muted);font-weight:600} .sc-dnote:not(.has) span{color:var(--muted)}
+.sc-dnotes .btn{justify-self:start}
+.sc-nlabel{display:block;font-size:13px;color:var(--muted);margin-top:8px}
+#scNoteEditor input{width:100%;max-width:420px;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px}
 .sc-days{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}
 .sc-daychip{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 8px;font:inherit;font-size:13px;min-width:52px;cursor:pointer}
 .sc-daychip small{display:block;color:var(--muted);font-size:11px}
@@ -125,7 +137,8 @@ button.hq-day{cursor:pointer}
   .sc-c.i-block,.sc-c.i-warn,.sc-c.sel{outline:0}
   .sc-c.pin::after{display:none}
   .sc-grid .sc-off,.sc-grid .sc-offh{position:static!important}
-  .sc-c,.sc-cnt td,.sc-stcnt td,.sc-off,.sc-grid thead th.we{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .sc-ntadd{display:none}
+  .sc-c,.sc-cnt td,.sc-stcnt td,.sc-nt,.sc-off,.sc-grid thead th.we{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   /* 站別小標要印出來；「未選站」黃標列印時不印底色，只留文字 */
   .sc-sn{font-size:8px}
   .sc-sn.none{background:none!important;color:#555}

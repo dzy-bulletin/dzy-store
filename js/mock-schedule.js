@@ -104,6 +104,7 @@ export async function schedule(action, me, b, db, s, hooks) {
         meta: { version: r.version, locked: !!r.locked, locked_at: r.locked_at, locked_by: r.locked_by, needs_recheck: !!r.needs_recheck, publication: pubs.length ? pubs[pubs.length - 1] : null, clockAlias, lineFrom: '2026-11-01' },
         shifts: Object.values(st.shifts).sort((a, x) => a.sort - x.sort), staff: st.staff, terms: st.terms, days, actuals: st.actuals, demand: ctx.demand, demandTpl: tpl, demandOverrides: ov,
         pins: ctx.pins, pairs: st.pairs, months, cfg: st.cfg, holidays: hol, monthOtMin: {}, results: checkPeriod(Object.assign(ctx, { days: st.days })), roster: { synced: clockAlias !== null },
+        notes: Object.fromEntries(dates.filter((d) => (st.notes || {})[d]).map((d) => [d, st.notes[d]])),
         stations: Object.values(st.stations).sort((a, x) => a.sort - x.sort || (a.id < x.id ? -1 : 1)), stationNeedTpl: st.stNeedTpl, stationNeedDay: Object.fromEntries(dates.filter((d) => hasActiveDay(st, d)).map((d) => [d, st.stNeedDay[d]])), stationNeed: ctx.stationNeed });
     }
     case 'saveDays': {
@@ -134,6 +135,21 @@ export async function schedule(action, me, b, db, s, hooks) {
         if (v == null || v === '') delete st.revenue[ym]; else if (!(Number(v) >= 0)) return fail('BAD_INPUT', '營業額要是 0 以上的整數'); else st.revenue[ym] = Math.round(Number(v));
       }
       return ok();
+    }
+    case 'saveNotes': {      // 每天的午餐／晚餐備註（同 server/schedule.js saveNotes：不帶 version、鎖定後也能改，改了重送 LINE）
+      const keys = Object.keys(b.notes || {});
+      if (!keys.length) return fail('BAD_INPUT', '沒有要存的備註');
+      st.notes = st.notes || {};
+      for (const d of keys) {
+        if (!dates.includes(d)) return fail('BAD_INPUT', '備註的日期不在這一期');
+        const n = b.notes[d] || {}, lunch = String(n.lunch || '').trim(), dinner = String(n.dinner || '').trim();
+        if (lunch.length > 60) return fail('BAD_INPUT', '午餐備註太長');
+        if (dinner.length > 60) return fail('BAD_INPUT', '晚餐備註太長');
+        if (!lunch && !dinner) delete st.notes[d]; else st.notes[d] = { lunch, dinner };
+      }
+      const resend = !!prow(st, period).locked && clockAlias !== null && period !== 'T00';
+      if (resend) pubSet('publish');
+      return ok({ resend });
     }
     case 'savePins': {
       const g = guard(false); if (g) return g;

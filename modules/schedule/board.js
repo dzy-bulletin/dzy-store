@@ -75,6 +75,9 @@ export function renderBoard(ctx) {
   const stCount = (d, id) => staff.filter((st) => inJobOn(st, d) && ((D.days[st.emp_id] || {})[d] || {}).station_id === id && ((D.days[st.emp_id] || {})[d] || {}).shift_id).length;
   const stNeed = (d, id) => ((D.stationNeed || {})[d] || {})[id] || 0;
   const dayNeed = (d) => Object.values(D.demand[d] || {}).reduce((a, x) => a + (x.min || 0), 0);
+  // 每天的午餐／晚餐備註（全店共用，Eason 2026-10-26）：放在日期下方、同仁上方；鎖定後也能改，存了自動重送 LINE
+  const NOTE_KINDS = [['lunch', '午餐備註'], ['dinner', '晚餐備註']];
+  const noteOf = (d, k) => ((D.notes || {})[d] || {})[k] || '';
   // 預估營業額以月為單位：本期碰到的每個月一格
   const monthsHtml = (D.months || []).map((m) => `<div class="sc-month"><label for="scRev-${m.ym}">${+m.ym.slice(5)} 月預估營業額</label>
       <input type="number" inputmode="numeric" min="0" id="scRev-${m.ym}" class="sc-mrev" data-ym="${m.ym}" value="${m.revenue == null ? '' : m.revenue}"> 元
@@ -131,6 +134,10 @@ export function renderBoard(ctx) {
       const n = dayTotal(d), need = dayNeed(d);
       return `<td class="${need && n < need ? 'short' : ''}${isWe(d) ? ' we' : ''}" title="${need ? `至少要 ${need} 人` : '沒有設人數'}">${n}${need ? '/' + need : ''}</td>`;
     }).join('')}<td class="sc-off"></td></tr>`;
+    const noteRows = NOTE_KINDS.map(([k, label]) => `<tr class="sc-noterow"><th scope="row">${label}</th>${D.dates.map((d) => {
+      const t = noteOf(d, k);
+      return `<td class="sc-nt${isWe(d) ? ' we' : ''}${t ? ' has' : ''}${S.noteSel === d ? ' sel' : ''}" data-note="${d}" data-kind="${k}" title="${esc(t || (canLock ? '點一下寫' + label : ''))}">${t ? `<div class="sc-ntx">${esc(t)}</div>` : canLock ? '<span class="sc-ntadd" aria-hidden="true">＋</span>' : ''}</td>`;
+    }).join('')}<td class="sc-off"></td></tr>`).join('');
     // 各站人數：每個使用中的站一列，不足最少人數的紅字「1/2」
     const stRows = stActive.map((x) => `<tr class="sc-stcnt" data-station="${esc(x.id)}"><th scope="row">${esc(x.name)}</th>${D.dates.map((d) => {
       const n = stCount(d, x.id), need = stNeed(d, x.id);
@@ -138,7 +145,7 @@ export function renderBoard(ctx) {
     }).join('')}<td class="sc-off"></td></tr>`).join('');
     body = `<div class="card sc-gridcard"><div class="scroll"><table class="sc-grid">
       <thead><tr><th class="sc-name">同仁</th>${th}<th class="sc-offh">休假<small>天數</small></th></tr></thead>
-      <tbody>${rows}${cnt}${stRows}</tbody></table></div></div>`;
+      <tbody>${noteRows}${rows}${cnt}${stRows}</tbody></table></div></div>`;
   } else {
     const d = S.day, hol = D.holidays.days[d];
     const chips = D.dates.map((x) => `<button type="button" class="sc-daychip${x === d ? ' on' : ''}${isWe(x) ? ' we' : ''}${(byDay[x] || []).length ? ' warn' : ''}" data-day="${x}">${md(x)}<small>${WD[weekday(x)]}</small></button>`).join('');
@@ -156,6 +163,8 @@ export function renderBoard(ctx) {
     body = `<div class="card"><div class="sc-days">${chips}</div>
       <h2 class="mt">${md(d)}（${WD[weekday(d)]}）${hol ? `<span class="tag">${esc(hol)}</span>` : ''}</h2>
       <div class="row">${cnt}</div>
+      <div class="sc-dnotes mt" id="scDayNotes">${NOTE_KINDS.map(([k, label]) => `<div class="sc-dnote${noteOf(d, k) ? ' has' : ''}"><b>${label}</b><span id="scDayNote-${k}">${noteOf(d, k) ? esc(noteOf(d, k)) : '（沒有）'}</span></div>`).join('')}
+        ${canLock ? `<button type="button" class="btn ghost sm" id="scDayNoteEdit" data-note="${d}">寫備註</button>` : ''}</div>
       ${(byDay[d] || []).map((x) => `<div class="note warn mt">${esc(x.msg)}</div>`).join('')}
       <div class="sc-dlist mt">${list}</div></div>`;
   }
@@ -193,7 +202,17 @@ export function renderBoard(ctx) {
     }
   }
 
-  el.innerHTML = head + sum + body + editor;
+  // 備註編輯：點了某天的備註格才出現（鎖定中也可以改）
+  let noteEditor = '';
+  if (S.noteSel && D.dates.includes(S.noteSel) && canLock) {
+    const d = S.noteSel;
+    noteEditor = `<div class="card sc-editor" id="scNoteEditor"><b>${md(d)}（${WD[weekday(d)]}）備註</b>
+      ${NOTE_KINDS.map(([k, label]) => `<label class="sc-nlabel" for="scNote-${k}">${label}</label><input type="text" id="scNote-${k}" maxlength="60" placeholder="例：${k === 'lunch' ? '12:00 有 30 人團體訂位' : '提早 30 分鐘盤點'}" value="${esc(noteOf(d, k))}">`).join('')}
+      ${locked && D.meta.clockAlias !== null && D.period !== 'T00' ? '<div class="hint mt">這一期已鎖定，存了會自動重送到 LINE，同仁看得到新的備註。</div>' : ''}
+      <div class="row mt"><button type="button" class="btn" id="scNoteOk">儲存</button><button type="button" class="btn ghost" id="scNoteX">取消</button></div></div>`;
+  }
+
+  el.innerHTML = head + sum + body + editor + noteEditor;
   const q = (s) => el.querySelector(s);
   const rerender = () => ctx.rerender();
   const say = (m, isErr) => { S.msg = isErr ? '' : m; S.err = isErr ? m : ''; };
@@ -210,7 +229,7 @@ export function renderBoard(ctx) {
       const c = (D.days[td.dataset.emp] || {})[td.dataset.date];
       // 已鎖定：只有「上班格而且店裡有站別」能點開（只改站別）；其他照舊提示要先解鎖
       if (locked && !(c && c.shift_id && (stActive.length || c.station_id))) { say('這一期已鎖定，要先解除鎖定才能修改', true); return rerender(); }
-      S.sel = { emp: td.dataset.emp, date: td.dataset.date }; rerender();
+      S.sel = { emp: td.dataset.emp, date: td.dataset.date }; S.noteSel = null; rerender();
     };
   });
   el.querySelectorAll('.sc-mrev').forEach((inp) => {
@@ -225,6 +244,17 @@ export function renderBoard(ctx) {
     const go = () => { try { window.print(); } catch (e) { say('這個瀏覽器不能列印，請改用電腦的 Chrome 或 Safari', true); rerender(); } };
     if (view !== 'grid') { S.view = 'grid'; rerender(); setTimeout(go, 400); } else go();
   };
+  const openNote = (d) => { if (!canLock) { say('你只能查看班表，備註請找本店店長', true); return rerender(); } S.noteSel = d; S.sel = null; rerender(); const f = q('#scNote-lunch'); if (f) f.focus(); };
+  el.querySelectorAll('.sc-nt[data-note], #scDayNoteEdit').forEach((b) => { b.onclick = () => openNote(b.dataset.note); });
+  if (q('#scNoteX')) q('#scNoteX').onclick = () => { S.noteSel = null; rerender(); };
+  if (q('#scNoteOk')) q('#scNoteOk').onclick = () => busy(q('#scNoteOk'), async () => {
+    const d = S.noteSel;
+    try {
+      const r = await call('saveNotes', { period: S.period, notes: { [d]: { lunch: q('#scNote-lunch').value, dinner: q('#scNote-dinner').value } } });
+      await load(); S.noteSel = null; say(r.resend ? '已存備註，正在重送到 LINE' : '已存備註');
+    } catch (e) { say(e.message, true); }
+    rerender();
+  });
   if (q('#scCellX')) q('#scCellX').onclick = () => { S.sel = null; rerender(); };
   if (q('#scStationOk')) q('#scStationOk').onclick = () => busy(q('#scStationOk'), async () => {
     try {
