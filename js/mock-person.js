@@ -86,7 +86,7 @@ export function storesOf(db, p, eff) {
   (p.hqStores || []).forEach(c => cand.add(c));      // 總部自填／央廚固定排班的店
   const order = { mala: 1, mzt: 2, yiwu: 3, cf: 4 };
   return [...cand].filter(c => db.accounts[c] && access(db, p, c, eff).features.length)
-    .sort((a, b) => (order[db.accounts[a].brand] || 5) - (order[db.accounts[b].brand] || 5) || (a < b ? -1 : 1)).map(c => ({ code: c, name: db.accounts[c].name }));
+    .sort((a, b) => (order[db.accounts[a].brand] || 5) - (order[db.accounts[b].brand] || 5) || (a < b ? -1 : 1)).map(c => ({ code: c, name: db.accounts[c].name, duty: access(db, p, c, eff).features.includes('duty') }));
 }
 // 「全部門市」考勤：這個人可核的人分布在兩家以上打卡店（示範人物的 attStores）；少於兩家回空陣列（同 server/person.js attStoresFor）
 export function attStoresOf(db, p) {

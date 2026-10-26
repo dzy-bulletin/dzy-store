@@ -7,6 +7,8 @@ const MOVED = {
   schedule: { title: '自動排班', where: '人資部門 → 排班管理', btn: '前往排班管理', url: DZY_ORIGIN + '/#/schedule', mid: 'scheduleMoved' }
 };
 const ONLY_LABEL = { duty: '出勤核定', schedule: '排班' };
+// 考勤管理（?only=duty）的選店／換店只列有出勤核定的店（伺服器每家店帶 duty；舊版伺服器沒帶＝不過濾）。2026-10-26
+const onlyStores = list => (ONLY === 'duty' ? (list || []).filter(x => x.duty !== false) : (list || []));
 const attLinkAttr = () => (EMBED ? 'target="_top"' : 'target="_blank" rel="noopener"');
 import { api } from './api.js';
 import { initAuth, getSession, setSession, clearSession, rememberedCode, login, logout, changePassword, toSession, ssoRedeem, ssoSelect, ssoSwitch, adoptResult, schedPart, pickSchedStore, rememberSchedStore } from './auth.js';
@@ -39,7 +41,7 @@ function sidebarHtml(s, cur) {
   const feats = new Set(s.features || []);
   const mods = [...(UI.cards || [])].sort((a, b) => a.order - b.order)
     .filter(c => c.visible && feats.has(c.id) && MODULES.some(m => m.id === c.id) && (ONLY ? c.id === ONLY : !MOVED[c.id]));   // ?only=…：只剩該功能；一般模式不列已移到管理系統的出勤核定、自動排班（2026-10-24）
-  const p = s.person, many = p && (s.stores || []).length > 1;
+  const p = s.person, many = p && onlyStores(s.stores).length > 1;
   const item = (key, href, label) => `<a href="${href}" data-nav="${key}" class="${cur === key ? 'on' : ''}"${cur === key ? ' aria-current="page"' : ''}><span class="ic">${NAV_ICONS[key] || '•'}</span>${esc(label)}</a>`;
   return `<aside class="sidebar" id="sidebar">
     <a class="brand" href="#/" id="brand"><div class="logos"></div><div><div class="bt js-bt" id="brandName"></div><div class="bs js-bs"></div></div></a>
@@ -69,7 +71,7 @@ function frame(s, inner, nav, opts) {
     // 登入／強制改密碼：最上方深色頂條（照貨單辨識系統）＋置中白卡
     app.innerHTML = `<header class="hdr"><div class="logos"></div><span class="ttl" id="sysName">${esc(UI.systemName)}</span></header><section class="login-view">${inner}</section>`;
   } else {
-    const embedBar = EMBED && s.person ? `<div class="embed-who"><span id="embedWho">${esc(s.person.name + '・' + s.name)}</span>${(s.stores || []).length > 1 ? '<a href="#/switch" id="embedSwitch">換店</a>' : ''}</div>` : '';
+    const embedBar = EMBED && s.person ? `<div class="embed-who"><span id="embedWho">${esc(s.person.name + '・' + s.name)}</span>${onlyStores(s.stores).length > 1 ? '<a href="#/switch" id="embedSwitch">換店</a>' : ''}</div>` : '';
     app.innerHTML = `<div class="app">${sidebarHtml(s, opts.cur)}<div class="main-wrap"><div class="topbar"><h1 class="page-title" id="pageTitle">${esc(opts.title || '')}</h1>${opts.sub ? `<div class="sub">${esc(opts.sub)}</div>` : ''}${embedBar}</div>${nav || ''}<main>${inner}</main></div></div>`;
   }
   applyTheme(s ? s.brand : null, UI.logoUrl);
@@ -309,8 +311,11 @@ async function runTicket(ticket, fromParent) {
     let r = await ssoRedeem(ticket);
     const old = getSession();
     if (r.select_token) {
-      if (fromParent && old && (r.stores || []).some(x => x.code === old.code)) r = await ssoSelect(r.select_token, old.code);   // 重新握手：先試著進原本那家店
-      else { PENDING = { select_token: r.select_token, stores: r.stores || [] }; return; }
+      const list = onlyStores(r.stores);
+      if (!list.length) throw new Error(`你的帳號目前沒有可以使用${ONLY_LABEL[ONLY]}的門市，請洽店長或總部`);
+      if (fromParent && old && list.some(x => x.code === old.code)) r = await ssoSelect(r.select_token, old.code);   // 重新握手：先試著進原本那家店
+      else if (list.length === 1) r = await ssoSelect(r.select_token, list[0].code);   // 考勤管理只剩一家能用：直接進，不用選
+      else { PENDING = { select_token: r.select_token, stores: list }; return; }
     }
     const { kept } = await adoptResult(r, fromParent);
     PENDING = null;
@@ -382,7 +387,7 @@ function viewSelect() {
 }
 // 換店（已登入的個人帳號）：同分頁換新 token，舊 token 在伺服器立即刪除
 function viewSwitch(s) {
-  const list = s.stores || [];
+  const list = onlyStores(s.stores);
   const main = frame(s, `${bannerHtml()}<div class="card"><h2>換店</h2><p class="hint">選一家要進入的門市；功能與權限會依你在那家店的設定重新計算。</p>
     <div id="swErr" class="err" role="alert"></div>
     <div class="sw-list">${list.map(x => `<button class="btn ghost sw-btn" type="button" data-store="${esc(x.code)}"${x.code === s.code ? ' disabled' : ''}>${esc(x.name)}${x.code === s.code ? '（目前）' : ''}</button>`).join('')}</div></div>`, '', { cur: '', title: '換店' });
@@ -403,9 +408,10 @@ const AUTO_SW = 'dzystore_autosw';
 function autoSwitchOk(code) { try { const x = JSON.parse(sessionStorage.getItem(AUTO_SW) || 'null'); return !(x && x.code === code && Date.now() - x.at < 5000); } catch (e) { return true; } }
 async function autoSwitch(s, code, hash) {
   try { sessionStorage.setItem(AUTO_SW, JSON.stringify({ code, at: Date.now() })); } catch (e) { /* 無痕模式 */ }
-  frame(s, '<div class="card"><p class="hint" id="autoSwitch" style="margin:0">切換中…</p></div>', '', { cur: 'schedule', title: '排班管理' });
+  const title = ONLY === 'duty' ? '出勤核定' : '排班管理', cur = ONLY === 'duty' ? 'duty' : 'schedule';
+  frame(s, '<div class="card"><p class="hint" id="autoSwitch" style="margin:0">切換中…</p></div>', '', { cur, title });
   try { const d = await ssoSwitch(code); setSession(toSession(d)); location.hash = hash || '#/schedule/'; location.reload(); }
-  catch (e) { frame(s, `<div class="card"><div class="err" id="autoSwitchErr" role="alert">${esc(e.message)}</div></div>`, '', { cur: 'schedule', title: '排班管理' }); }
+  catch (e) { frame(s, `<div class="card"><div class="err" id="autoSwitchErr" role="alert">${esc(e.message)}</div></div>`, '', { cur, title }); }
 }
 // 排班管理：網址／頁頂點的分頁屬於別種排班的店，但這個人在那邊沒有排班權限
 const SCHED_TAB_LABEL = { board: '門市班表', needs: '指定與需求', staff: '門市同仁', shifts: '班別與設定', self: '我的班表', approve: '部屬核准', fixed: '央廚班表', fixedstaff: '固定班別' };
@@ -415,7 +421,7 @@ function viewSchedNoAccess(s, tab) {
 }
 // ?only=… 但這家店沒有該功能的權限（出勤核定／排班）：說明＋多店可換店
 function viewNoOnly(s, adminOnly) {
-  const many = s.person && (s.stores || []).length > 1;
+  const many = s.person && onlyStores(s.stores).length > 1;
   const name = ONLY === 'duty' ? '出勤核定' : '自動排班', id = ONLY === 'duty' ? 'Duty' : 'Schedule';
   // adminOnly：有排班的查看權（出勤核定要對班表），但門市排班只給能排班的人（本店店長同等職、人資主管、管理員；2026-10-24 Eason）
   const msg = adminOnly ? '排班只有本店店長、人資主管或管理員可以使用。' : `你的帳號在這家店（${esc(s.name)}）沒有${ONLY_LABEL[ONLY]}的權限。`;
@@ -459,6 +465,8 @@ export async function render() {
   if (ONLY) {                               // ?only=duty／schedule：只有該功能（含換店）；首頁與其他功能都不顯示
     if (!(s.features || []).includes(ONLY)) {
       // 區督導、總監這類：這家店沒有排班權、但在總部（或央廚、別家門市）有 → 直接切過去（優先總部），不要先顯示沒有權限
+      // 考勤管理：這家店沒有出勤核定、但別家有 → 直接切過去（例如嵌入重新握手時沿用了舊的店）
+      if (ONLY === 'duty' && s.person) { const t = onlyStores(s.stores).find(x => x.duty === true); if (t && autoSwitchOk(t.code)) return autoSwitch(s, t.code, '#/duty/'); }
       if (ONLY === 'schedule' && s.person) { const t = pickSchedStore(s, 'self') || pickSchedStore(s, 'fixed') || pickSchedStore(s, 'store'); if (t && autoSwitchOk(t.code)) return autoSwitch(s, t.code, '#/schedule/'); }
       return viewNoOnly(s);
     }
