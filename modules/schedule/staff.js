@@ -11,6 +11,7 @@ import { leaveOf } from './calc.js';
 export function renderStaff(ctx) {
   const el = ctx.el, D = S.data;
   const shifts = D.shifts.filter((s) => s.active);
+  const stations = D.stations || [];                            // 預設站別（工作站別）：店裡沒有任何站別就不顯示這一欄
   const asOf = D.dates[0];
   const noClock = D.meta.clockAlias === null;
   const noDuty = !noClock && D.meta.dutyOn === false;          // 有打卡但沒開出勤核定：不同步名冊、不能帶入實際出勤、不能新增（要先開出勤核定）
@@ -33,6 +34,8 @@ export function renderStaff(ctx) {
       </div>
       <label class="sc-chk"><input type="checkbox" class="f-same" ${t.same_days ? 'checked' : ''}> 計時但每週上班天數跟正職一樣（特休給完整天數）</label>
       <div class="fld mt"><label>只能上的班（都不勾＝每班都能上）</label><div class="row">${shifts.map((s) => `<label class="sc-chk"><input type="checkbox" class="f-al" value="${esc(s.id)}" ${allowed.includes(s.id) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('')}</div></div>
+      ${stations.length ? `<div class="fld mt"><label>預設站別（新排的上班日自動帶入，班表上可以再改）</label><select class="f-dst"><option value="">不設</option>${
+        stations.filter((x) => x.active || x.id === st.default_station).map((x) => `<option value="${esc(x.id)}" ${x.id === st.default_station ? 'selected' : ''}>${esc(x.name)}${x.active ? '' : '（已停用）'}</option>`).join('')}</select></div>` : ''}
       <p class="hint">特休：${lvTxt}</p>${hist}
       <div class="row"><button type="button" class="btn sm f-save">儲存</button><span class="f-msg okmsg" role="status"></span></div></div>`;
   };
@@ -87,7 +90,7 @@ export function renderStaff(ctx) {
     f('.f-save').onclick = () => busy(f('.f-save'), async () => {
       const emp = c.dataset.emp;
       try {
-        await call('saveStaff', { staff: { emp_id: emp, hire_date: f('.f-hire').value || null, leave_date: f('.f-leave').value || null, birthday: f('.f-bday').value || null, phone: f('.f-phone').value || null } });
+        await call('saveStaff', { staff: { emp_id: emp, hire_date: f('.f-hire').value || null, leave_date: f('.f-leave').value || null, birthday: f('.f-bday').value || null, phone: f('.f-phone').value || null, ...(f('.f-dst') ? { default_station: f('.f-dst').value || null } : {}) } });
         if (f('.f-kind').value) await call('saveTerm', { term: { emp_id: emp, from_date: f('.f-from').value || null, kind: f('.f-kind').value, target_min: hrs(f('.f-target').value), week_min: hrs(f('.f-week').value), same_days: f('.f-same').checked, allowed_shifts: [...c.querySelectorAll('.f-al:checked')].map((x) => x.value) } });
         await load(); ctx.rerender();
       } catch (e) { say(f('.f-msg'), e.message, true); }

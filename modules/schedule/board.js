@@ -33,6 +33,15 @@ export function renderBoard(ctx) {
   const counts = { block: 0, warn: 0, info: 0 };
   D.results.forEach((r) => { counts[r.level]++; });
   const target = D.cfg && D.cfg.ratio_target;
+  // 工作站別（station-spec §7）：店裡沒有任何站別就完全不畫站別相關的東西（現有畫面零變化）。stMap 含停用的站（舊格子照樣顯示）。
+  const stList = D.stations || [], stMap = Object.fromEntries(stList.map((x) => [x.id, x]));
+  const stActive = stList.filter((x) => x.active);
+  const stTag = (c) => {
+    if (!c || !c.shift_id) return '';
+    const x = c.station_id && stMap[c.station_id];
+    if (x) return `<small class="sc-sn${x.active ? '' : ' off'}" data-station="${esc(x.id)}"${x.color ? ` style="color:${esc(x.color)}"` : ''}>${esc(x.name)}</small>`;
+    return stActive.length ? '<small class="sc-sn none">未選站</small>' : '';
+  };
   const narrow = window.matchMedia && window.matchMedia('(max-width: 760px)').matches;
   const view = S.view || (narrow ? 'day' : 'grid');
   if (!S.day || !D.dates.includes(S.day)) S.day = D.dates.includes(D.today) ? D.today : D.dates[0];
@@ -62,6 +71,9 @@ export function renderBoard(ctx) {
   const ratioCls = (r) => (r == null || !target ? '' : r < target ? ' low' : ' good');
   // 當天總人數（Eason 2026-10-11：不分班別，只看當天幾個人上班）；需要人數＝各班最少人數加總
   const dayTotal = (d) => staff.filter((st) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date) && ((D.days[st.emp_id] || {})[d] || {}).shift_id).length;
+  const inJobOn = (st, d) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date);
+  const stCount = (d, id) => staff.filter((st) => inJobOn(st, d) && ((D.days[st.emp_id] || {})[d] || {}).station_id === id && ((D.days[st.emp_id] || {})[d] || {}).shift_id).length;
+  const stNeed = (d, id) => ((D.stationNeed || {})[d] || {})[id] || 0;
   const dayNeed = (d) => Object.values(D.demand[d] || {}).reduce((a, x) => a + (x.min || 0), 0);
   // 預估營業額以月為單位：本期碰到的每個月一格
   const monthsHtml = (D.months || []).map((m) => `<div class="sc-month"><label for="scRev-${m.ym}">${+m.ym.slice(5)} 月預估營業額</label>
@@ -95,7 +107,7 @@ export function renderBoard(ctx) {
   const sum = D.results.length ? `<details class="card sc-sum"><summary class="sc-sumtoggle"><span class="sc-sumlabel">提醒</span>
       ${counts.block ? `<span class="lv block">${counts.block} 個要修正</span>` : '<span class="lv ok">沒有違反規定</span>'}
       ${counts.warn ? `<span class="lv warn">${counts.warn} 個警告</span>` : ''}${counts.info ? `<span class="lv info">${counts.info} 個提醒</span>` : ''}</summary>
-      <ul class="sc-list">${D.results.slice().sort((a, b) => LV_RANK[a.level] - LV_RANK[b.level]).slice(0, 80).map((r) => `<li class="lv-${r.level}">${esc(r.msg)}</li>`).join('')}</ul></details>` : '';
+      <ul class="sc-list">${D.results.slice().sort((a, b) => LV_RANK[a.level] - LV_RANK[b.level]).slice(0, 80).map((r) => `<li class="lv-${r.level}">${esc(r.msg)}</li>`).join('')}${D.results.length > 80 ? `<li class="lv-info" id="scSumMore">另有 ${D.results.length - 80} 筆未列</li>` : ''}</ul></details>` : '';
 
   let body;
   if (view === 'grid') {
@@ -110,7 +122,7 @@ export function renderBoard(ctx) {
         const pin = (D.pins[st.emp_id] || {})[d];
         const sel = S.sel && S.sel.emp === st.emp_id && S.sel.date === d;
         const pinCls = !pin ? '' : pin.kind === 'off' ? ' pin-off' : ' pin';   // 指定休假：黃底；指定上班／班別：右上小黑點
-        return `<td class="sc-c ${x.cls}${isWe(d) ? ' we' : ''}${bday(st, d) ? ' bd' : ''}${lv ? ' i-' + lv : ''}${sel ? ' sel' : ''}${pinCls}" data-emp="${esc(st.emp_id)}" data-date="${d}" title="${esc(iss.map((r) => r.msg).concat(pin && pin.kind === 'off' ? ['指定休假'] : []).join('\n'))}">${esc(x.t)}${bday(st, d) ? '<i class="sc-bd" title="生日">生日</i>' : ''}</td>`;
+        return `<td class="sc-c ${x.cls}${isWe(d) ? ' we' : ''}${bday(st, d) ? ' bd' : ''}${lv ? ' i-' + lv : ''}${sel ? ' sel' : ''}${pinCls}" data-emp="${esc(st.emp_id)}" data-date="${d}" title="${esc(iss.map((r) => r.msg).concat(pin && pin.kind === 'off' ? ['指定休假'] : []).join('\n'))}">${esc(x.t)}${stTag(c)}${bday(st, d) ? '<i class="sc-bd" title="生日">生日</i>' : ''}</td>`;
       }).join('');
       const o = offOf(st), lvs = Object.entries(o.lv).map(([k, v]) => k + ' ' + v).join('・');
       return `<tr><th class="sc-name" scope="row">${esc(st.name)}${annualTxt(st)}</th>${tds}<td class="sc-off"><b>${o.n}</b>${lvs ? `<small>${esc(lvs)}</small>` : ''}</td></tr>`;
@@ -119,9 +131,14 @@ export function renderBoard(ctx) {
       const n = dayTotal(d), need = dayNeed(d);
       return `<td class="${need && n < need ? 'short' : ''}${isWe(d) ? ' we' : ''}" title="${need ? `至少要 ${need} 人` : '沒有設人數'}">${n}${need ? '/' + need : ''}</td>`;
     }).join('')}<td class="sc-off"></td></tr>`;
+    // 各站人數：每個使用中的站一列，不足最少人數的紅字「1/2」
+    const stRows = stActive.map((x) => `<tr class="sc-stcnt" data-station="${esc(x.id)}"><th scope="row">${esc(x.name)}</th>${D.dates.map((d) => {
+      const n = stCount(d, x.id), need = stNeed(d, x.id);
+      return `<td class="${need && n < need ? 'short' : ''}${isWe(d) ? ' we' : ''}" title="${esc(x.name)}${need ? `至少要 ${need} 人` : '沒有設人數'}">${n}${need ? '/' + need : ''}</td>`;
+    }).join('')}<td class="sc-off"></td></tr>`).join('');
     body = `<div class="card sc-gridcard"><div class="scroll"><table class="sc-grid">
       <thead><tr><th class="sc-name">同仁</th>${th}<th class="sc-offh">休假<small>天數</small></th></tr></thead>
-      <tbody>${rows}${cnt}</tbody></table></div></div>`;
+      <tbody>${rows}${cnt}${stRows}</tbody></table></div></div>`;
   } else {
     const d = S.day, hol = D.holidays.days[d];
     const chips = D.dates.map((x) => `<button type="button" class="sc-daychip${x === d ? ' on' : ''}${isWe(x) ? ' we' : ''}${(byDay[x] || []).length ? ' warn' : ''}" data-day="${x}">${md(x)}<small>${WD[weekday(x)]}</small></button>`).join('');
@@ -130,11 +147,12 @@ export function renderBoard(ctx) {
       const s = c && c.shift_id ? shifts[c.shift_id] : null;
       const pin = (D.pins[st.emp_id] || {})[d];
       return `<button type="button" class="sc-drow ${x.cls}${bday(st, d) ? ' bd' : ''}${pin && pin.kind === 'off' ? ' pin-off' : ''}${iss.length ? ' i-' + iss.sort((a, b) => LV_RANK[a.level] - LV_RANK[b.level])[0].level : ''}" data-emp="${esc(st.emp_id)}" data-date="${d}">
-        <span class="sc-dn">${esc(st.name)}${bday(st, d) ? ' <i class="sc-bd">生日</i>' : ''}${annualTxt(st)}</span><span class="sc-dv">${esc(x.t)}${s ? `<small>${esc(s.start)}–${esc(s.end)}</small>` : ''}</span>
+        <span class="sc-dn">${esc(st.name)}${bday(st, d) ? ' <i class="sc-bd">生日</i>' : ''}${annualTxt(st)}</span><span class="sc-dv">${esc(x.t)}${s ? `<small>${esc(s.start)}–${esc(s.end)}</small>` : ''}${stTag(c)}</span>
         ${iss.length ? `<span class="sc-dmsg">${esc(iss.map((i) => i.msg).join('；'))}</span>` : ''}</button>`;
     }).join('');
     const n = dayTotal(d), nd = dayNeed(d);
-    const cnt = `<span class="tag ${nd && n < nd ? 'bad' : ''}" id="scDayCount">當天 ${n}${nd ? '/' + nd : ''} 人</span>`;
+    const cnt = `<span class="tag ${nd && n < nd ? 'bad' : ''}" id="scDayCount">當天 ${n}${nd ? '/' + nd : ''} 人</span>`
+      + stActive.map((x) => { const k = stCount(d, x.id), nn = stNeed(d, x.id); return `<span class="tag sc-dst ${nn && k < nn ? 'bad' : ''}" data-station="${esc(x.id)}">${esc(x.name)} ${k}${nn ? '/' + nn : ''}</span>`; }).join('');
     body = `<div class="card"><div class="sc-days">${chips}</div>
       <h2 class="mt">${md(d)}（${WD[weekday(d)]}）${hol ? `<span class="tag">${esc(hol)}</span>` : ''}</h2>
       <div class="row">${cnt}</div>
@@ -142,26 +160,37 @@ export function renderBoard(ctx) {
       <div class="sc-dlist mt">${list}</div></div>`;
   }
 
-  // 編輯列：選了一格才出現
+  // 編輯列：選了一格才出現。
+  // 工作站別（station-spec §7）：站別與班別分開存——「套用」只存班別（saveDays，不收站別）、「儲存站別」只存站別（setStation）；
+  // 站別下拉只在這一格目前（已存）就是上班格時出現，兩邊不會打架。期別鎖定中：其他欄位維持唯讀，只剩站別可改（不問核定密碼、不解鎖）。
   let editor = '';
-  if (S.sel && !locked) {
+  if (S.sel) {
     const st = D.staff.find((x) => x.emp_id === S.sel.emp);
     const c = (D.days[S.sel.emp] || {})[S.sel.date] || {};
-    const cur = c.shift_id ? 'S:' + c.shift_id + (c.day_type === 'H' ? ':H' : '') : c.day_type === 'L' ? 'L:' + c.leave : c.day_type || '';
-    // 國定假日假：國定假日當天都可選；正職在有國定假日的期別可移到別天（Eason 2026-10-12）
-    const isFt = (termAt(D.terms, S.sel.emp, S.sel.date) || {}).kind === 'ft';
-    const guoOk = !!D.holidays.days[S.sel.date] || (isFt && D.dates.some((d) => D.holidays.days[d]));
-    const otOpts = activeShifts.map((s) => `<option value="S:${esc(s.id)}:H">${esc(s.name)}（休息日出勤）</option>`).join('');
-    // 休息日加班只能改回休息日或換一個休息日出勤的班（伺服器同樣擋，Eason 2026-10-11）
-    const opts = c.day_type === 'H' && c.shift_id ? otOpts + '<option value="H">休息日</option>'
-      : activeShifts.map((s) => `<option value="S:${esc(s.id)}">${esc(s.name)} ${esc(s.start)}–${esc(s.end)}</option>`).join('') + otOpts
-      + '<option value="R">例假</option><option value="H">休息日</option><option value="L:特">特休</option><option value="L:補">補休</option>'
-      + (guoOk ? '<option value="L:國">國定假日假</option>' : '') + '<option value="CLEAR">清空</option>';
     const iss = byCell[S.sel.emp + '|' + S.sel.date] || [];
-    editor = `<div class="card sc-editor" id="scEditor"><b>${esc(st ? st.name : '')}　${md(S.sel.date)}（${WD[weekday(S.sel.date)]}）</b>
+    const head2 = `<b>${esc(st ? st.name : '')}　${md(S.sel.date)}（${WD[weekday(S.sel.date)]}）</b>`;
+    const stRow = c.shift_id && (stActive.length || c.station_id) ? `<div class="row mt"><label for="scStationSel">工作站</label><select id="scStationSel" aria-label="這一格的工作站"><option value="">不選</option>${
+      stList.filter((x) => x.active || x.id === c.station_id).map((x) => `<option value="${esc(x.id)}"${x.id === c.station_id ? ' selected' : ''}>${esc(x.name)}${x.active ? '' : '（已停用）'}</option>`).join('')}</select>
+      <button type="button" class="btn" id="scStationOk">儲存站別</button>${locked ? '<button type="button" class="btn ghost" id="scCellX">取消</button>' : ''}</div>` : '';
+    if (locked) {
+      const sh = c.shift_id ? shifts[c.shift_id] : null;
+      editor = `<div class="card sc-editor" id="scEditor">${head2}<span class="hint">　${esc(sh ? `${sh.name} ${sh.start}–${sh.end}` : '')}　已鎖定，只能改工作站（改完會自動重送 LINE）</span>${stRow || '<div class="row mt"><button type="button" class="btn ghost" id="scCellX">取消</button></div>'}</div>`;
+    } else {
+      const cur = c.shift_id ? 'S:' + c.shift_id + (c.day_type === 'H' ? ':H' : '') : c.day_type === 'L' ? 'L:' + c.leave : c.day_type || '';
+      // 國定假日假：國定假日當天都可選；正職在有國定假日的期別可移到別天（Eason 2026-10-12）
+      const isFt = (termAt(D.terms, S.sel.emp, S.sel.date) || {}).kind === 'ft';
+      const guoOk = !!D.holidays.days[S.sel.date] || (isFt && D.dates.some((d) => D.holidays.days[d]));
+      const otOpts = activeShifts.map((s) => `<option value="S:${esc(s.id)}:H">${esc(s.name)}（休息日出勤）</option>`).join('');
+      // 休息日加班只能改回休息日或換一個休息日出勤的班（伺服器同樣擋，Eason 2026-10-11）
+      const opts = c.day_type === 'H' && c.shift_id ? otOpts + '<option value="H">休息日</option>'
+        : activeShifts.map((s) => `<option value="S:${esc(s.id)}">${esc(s.name)} ${esc(s.start)}–${esc(s.end)}</option>`).join('') + otOpts
+        + '<option value="R">例假</option><option value="H">休息日</option><option value="L:特">特休</option><option value="L:補">補休</option>'
+        + (guoOk ? '<option value="L:國">國定假日假</option>' : '') + '<option value="CLEAR">清空</option>';
+      editor = `<div class="card sc-editor" id="scEditor">${head2}
       <div class="row mt"><select id="scCellSel" aria-label="這一格要排什麼">${opts.replace(`value="${cur}"`, `value="${cur}" selected`)}</select>
-      <button type="button" class="btn" id="scCellOk">套用</button><button type="button" class="btn ghost" id="scCellX">取消</button></div>
+      <button type="button" class="btn" id="scCellOk">套用</button><button type="button" class="btn ghost" id="scCellX">取消</button></div>${stRow}
       ${iss.length ? `<ul class="sc-list">${iss.map((r) => `<li class="lv-${r.level}">${esc(r.msg)}</li>`).join('')}</ul>` : ''}</div>`;
+    }
   }
 
   el.innerHTML = head + sum + body + editor;
@@ -176,7 +205,13 @@ export function renderBoard(ctx) {
   q('#scViewDay').onclick = () => { S.view = 'day'; rerender(); };
   el.querySelectorAll('.sc-daychip').forEach((b) => { b.onclick = () => { S.day = b.dataset.day; rerender(); }; });
   el.querySelectorAll('.sc-c[data-emp], .sc-drow').forEach((td) => {
-    td.onclick = () => { if (!canLock) { say('你只能查看班表，排班請找本店店長', true); return rerender(); } if (locked) { say('這一期已鎖定，要先解除鎖定才能修改', true); return rerender(); } S.sel = { emp: td.dataset.emp, date: td.dataset.date }; rerender(); };
+    td.onclick = () => {
+      if (!canLock) { say('你只能查看班表，排班請找本店店長', true); return rerender(); }
+      const c = (D.days[td.dataset.emp] || {})[td.dataset.date];
+      // 已鎖定：只有「上班格而且店裡有站別」能點開（只改站別）；其他照舊提示要先解鎖
+      if (locked && !(c && c.shift_id && (stActive.length || c.station_id))) { say('這一期已鎖定，要先解除鎖定才能修改', true); return rerender(); }
+      S.sel = { emp: td.dataset.emp, date: td.dataset.date }; rerender();
+    };
   });
   el.querySelectorAll('.sc-mrev').forEach((inp) => {
     inp.onchange = async () => {
@@ -191,6 +226,13 @@ export function renderBoard(ctx) {
     if (view !== 'grid') { S.view = 'grid'; rerender(); setTimeout(go, 400); } else go();
   };
   if (q('#scCellX')) q('#scCellX').onclick = () => { S.sel = null; rerender(); };
+  if (q('#scStationOk')) q('#scStationOk').onclick = () => busy(q('#scStationOk'), async () => {
+    try {
+      const r = await mutate('setStation', { cells: [{ emp_id: S.sel.emp, date: S.sel.date, station_id: q('#scStationSel').value || null }] });
+      S.sel = null; say(r.publication ? '已存站別，LINE 班表正在重新送出' : '已存站別');
+    } catch (e) { say(e.message, true); }
+    rerender();
+  });
   if (q('#scCellOk')) q('#scCellOk').onclick = () => busy(q('#scCellOk'), async () => {
     const v = q('#scCellSel').value, cell = { emp_id: S.sel.emp, date: S.sel.date };
     if (v === 'CLEAR') cell.clear = true;

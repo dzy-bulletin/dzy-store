@@ -1,5 +1,5 @@
 // 出勤核定比對班表（spec 10.3）：只提示、不擋核定、不鎖定。差超過 15 分鐘標橘色（Eason 2026-10-11）。
-// plan：{ day_type, leave, shift_name, start, end, label? }（dayPlan 的一筆；label＝月曆版休假名稱，例：休假、指定休）或 undefined；segments：打卡段 [{in:'HH:MM', out:'HH:MM'|null}]
+// plan：{ day_type, leave, shift_name, start, end, station?, label? }（dayPlan 的一筆；label＝月曆版休假名稱，例：休假、指定休）或 undefined；segments：打卡段 [{in:'HH:MM', out:'HH:MM'|null}]
 export const THRESHOLD_MIN = 15;
 const toMin = (hm) => { const m = /^(\d{1,2}):(\d{2})$/.exec(hm || ''); return m ? +m[1] * 60 + +m[2] : null; };
 const LEAVE = { '特': '特休', '補': '補休', '國': '國定假日' };
@@ -14,7 +14,7 @@ export function comparePlan(plan, segments, opts) {
     const label = plan.label ? plan.label : plan.day_type === 'L' ? (LEAVE[plan.leave] || '請假') : plan.day_type === 'R' ? '例假' : '休息日';
     return { text: '班表：' + label, flags: punched ? [label + '卻有打卡'] : [] };
   }
-  const text = `班表：${plan.shift_name || ''} ${plan.start}–${plan.end}`.replace('：  ', '：');
+  const text = `班表：${plan.shift_name || ''} ${plan.start}–${plan.end}`.replace('：  ', '：') + (plan.station ? '・' + plan.station : '');   // 有排工作站別時後面加「・炒鍋」
   if (!punched) return { text, flags: past ? ['有排班沒打卡'] : [] };
   const flags = [];
   const s = toMin(plan.start);

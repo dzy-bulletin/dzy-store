@@ -12,6 +12,7 @@
 //   pairs: [[emp_a, emp_b]],
 //   holidays: { validThrough, days: { date: name } },
 //   monthOtMin: { 'YYYY-MM': { emp_id: 分鐘 } },     // 本期碰到的曆月、期外日子的加班分鐘（伺服器先算好）
+//   stations: { id: { name, active, sort } }, stationNeed: { date: { station_id: 最少人數 } }   // 工作站別（沒有使用中的站就不檢查 T1／T2）；days 的格子多 station_id
 // }
 // 回傳 [{ code, level:'block'|'warn'|'info', emp_id, date, msg }]
 import { periodDates, addDays, diffDays, weekday } from './period.js';
@@ -275,6 +276,30 @@ export function checkPeriod(ctx) {
     for (const [a, b] of (ctx.pairs || [])) {
       for (const sid in onShift) if (onShift[sid].includes(a) && onShift[sid].includes(b))
         add('D5', 'warn', a, d, `${name[a] || a} 和 ${name[b] || b} ${md(d)} 排在同一班`);
+    }
+  }
+
+  // 工作站別（station-spec §4、§11）：店裡沒有任何使用中的站就都不跑。兩條都只提醒（warn），不擋鎖定。
+  const stations = ctx.stations || {};
+  if (Object.values(stations).some(x => x.active)) {
+    // T1 沒選站：每人一條，最多列 5 個日期；只算在職日的上班格
+    for (const st of ctx.staff) {
+      const mine = ctx.days[st.emp_id] || {};
+      const miss = dates.filter(d => employed(st, d) && mine[d] && mine[d].shift_id && !mine[d].station_id);
+      if (miss.length) add('T1', 'warn', st.emp_id, null, `${st.name} 還有 ${miss.length} 個上班日沒選站（${miss.slice(0, 5).map(md).join('、')}${miss.length > 5 ? ' 等' : ''}）`);
+    }
+    // T2 站別缺人：每天一條彙總；只看使用中的站（停用站的需求列保留但不提醒）；沒選站的人不算進任何站
+    for (const d of dates) {
+      const need = (ctx.stationNeed || {})[d] || {};
+      const count = {};
+      for (const st of ctx.staff) {
+        const c = employed(st, d) ? (ctx.days[st.emp_id] || {})[d] : null;
+        if (c && c.shift_id && c.station_id) count[c.station_id] = (count[c.station_id] || 0) + 1;
+      }
+      const lack = Object.keys(need).filter(id => stations[id] && stations[id].active && (count[id] || 0) < need[id])
+        .sort((a, b) => (stations[a].sort || 0) - (stations[b].sort || 0) || (a < b ? -1 : 1))
+        .map(id => `${stations[id].name} ${need[id] - (count[id] || 0)}`);
+      if (lack.length) add('T2', 'warn', null, d, `${md(d)} 缺人：${lack.join('、')}`);
     }
   }
   return R;

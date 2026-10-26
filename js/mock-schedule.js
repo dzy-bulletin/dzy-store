@@ -4,7 +4,7 @@ import { checkPeriod, comboError, minutesOf } from '../modules/schedule/rules.js
 import { autoSchedule } from '../modules/schedule/auto.js';
 import { periodDates, periodOf, todayTaipei, addDays, weekday, parseLabel, shiftPeriod } from '../modules/schedule/period.js';
 import { shiftMinutes, breakOk } from '../modules/schedule/hours.js';
-import { hqAction, seedHq } from './mock-schedule-hq.js';
+import { hqAction, seedHq, putDay, stationNeedFor, publishPeriod, hasActiveDay } from './mock-schedule-hq.js';
 
 const E2E = () => (typeof window !== 'undefined' && window.__E2E_DATA) || {};
 const ok = (data) => ({ ok: true, data: data === undefined ? {} : data });
@@ -17,7 +17,8 @@ async function holidays() {
 
 function seed(code) {
   const names = ['王小安', '陳大華', '林美玲', '張志明', '黃怡君', '李建宏', '吳佳穎', '劉家豪', '蔡雅婷', '鄭宇翔'];
-  const st = { shifts: {}, staff: [], terms: {}, tpl: {}, dayDemand: {}, pins: {}, pairs: [], days: {}, revenue: {}, periods: {}, pubs: {}, cfg: { ratio_target: 1200 }, actuals: {} };
+  const st = { shifts: {}, staff: [], terms: {}, tpl: {}, dayDemand: {}, pins: {}, pairs: [], days: {}, revenue: {}, periods: {}, pubs: {}, cfg: { ratio_target: 1200 }, actuals: {},
+    stations: {}, stNeedTpl: {}, stNeedDay: {}, log: [] };
   st.shifts.S1 = { id: 'S1', name: '早班', start: '10:00', end: '19:00', break_min: 60, color: '#FFF4CC', sort: 1, active: 1 };
   st.shifts.S2 = { id: 'S2', name: '晚班', start: '14:00', end: '23:00', break_min: 60, color: '#FCE3D9', sort: 2, active: 1 };
   names.forEach((n, i) => {
@@ -25,6 +26,11 @@ function seed(code) {
     st.staff.push({ emp_id: e, name: n, hire_date: `202${3 + (i % 3)}-0${1 + (i % 9)}-15`, leave_date: null, birthday: `199${i % 10}-11-${String(3 + i * 2).padStart(2, '0')}`, phone: '09' + String(12345678 + i).padStart(8, '0'), sort: i });
     st.terms[e] = [{ from_date: '2026-10-04', kind: i < 6 ? 'ft' : 'pt', target_min: i < 6 ? 9600 : 64 * 60, week_min: i < 6 ? null : 16 * 60, same_days: 0, allowed_shifts: i === 5 ? ['S2'] : [] }];
   });
+  // 工作站別（TEST2＝沒有 LINE 打卡的店不放，留一家「沒有站別」的店看畫面零變化）：4 個站，平日每站最少 1 人
+  if (code !== 'TEST2') {
+    [['W1', '炒鍋', '#E8590C'], ['W2', '外場', '#1C7ED6'], ['W3', '收銀', '#2F9E44'], ['W4', '備料', '#9C36B5']].forEach(([id, name, color], i) => { st.stations[id] = { id, name, color, sort: i + 1, active: 1 }; });
+    st.stNeedTpl = { wd: { W1: 1, W2: 1, W3: 1, W4: 1 } };
+  }
   for (const k of ['wd', 'sat', 'sun']) st.tpl[k] = { S1: { min: k === 'wd' ? 2 : 3, max: k === 'wd' ? 3 : 4 }, S2: { min: k === 'wd' ? 2 : 3, max: k === 'wd' ? 3 : 4 } };
   return st;
 }
@@ -39,11 +45,13 @@ function demandFor(st, dates) {
   for (const d of dates) { const w = weekday(d), k = w === 0 ? 'sun' : w === 6 ? 'sat' : 'wd'; out[d] = Object.assign({}, st.dayDemand[d] || st.tpl[k] || {}); }
   return out;
 }
+// 各站人數的 min：0–99 整數，空白＝0（同 server/schedule.js stationNeedRows）；不合回 null
+const needMin = (v) => { if (v === null || v === undefined || v === '') return 0; const n = Number(v); return Number.isInteger(n) && n >= 0 && n <= 99 ? n : null; };
 function ctxOf(st, period, hol) {
   const dates = periodDates(period);
   const pins = {};
   for (const e in st.pins) for (const d in st.pins[e]) if (dates.includes(d)) (pins[e] = pins[e] || {})[d] = st.pins[e][d];
-  return { period, shifts: st.shifts, staff: st.staff, terms: st.terms, days: st.days, actuals: st.actuals, demand: demandFor(st, dates), pins, pairs: st.pairs, holidays: hol, monthOtMin: {} };
+  return { period, shifts: st.shifts, staff: st.staff, terms: st.terms, days: st.days, actuals: st.actuals, demand: demandFor(st, dates), pins, pairs: st.pairs, holidays: hol, monthOtMin: {}, stations: st.stations, stationNeed: stationNeedFor(st, dates) };
 }
 
 export async function schedule(action, me, b, db, s, hooks) {
@@ -57,7 +65,7 @@ export async function schedule(action, me, b, db, s, hooks) {
   const guard = (wantLocked) => {
     const r = prow(st, period);
     if (b.version !== r.version) return fail('CONFLICT', '別人剛改過這一期的班表，請重新整理後再改');
-    if (!!r.locked !== !!wantLocked) return fail('LOCKED', wantLocked ? '這一期還沒鎖定' : '這一期已經鎖定，要先解鎖才能修改');
+    if (wantLocked !== null && !!r.locked !== !!wantLocked) return fail('LOCKED', wantLocked ? '這一期還沒鎖定' : '這一期已經鎖定，要先解鎖才能修改');
     return null;
   };
   const bump = () => { prow(st, period).version++; return prow(st, period).version; };
@@ -67,8 +75,8 @@ export async function schedule(action, me, b, db, s, hooks) {
     if (!r || !r.locked) return;
     r.needs_recheck = checkPeriod(ctxOf(st, nx, hol)).some((x) => x.level === 'block' && ['C1', 'F6', 'P3'].includes(x.code));
   };
-  const pubSet = (kind) => {
-    const list = st.pubs[period] = st.pubs[period] || [];
+  const pubSet = (kind, per) => {
+    const list = st.pubs[per || period] = st.pubs[per || period] || [];
     const failNow = !!(E2E().schedule || {}).pubFail;
     list.push({ seq: list.length + 1, kind, status: failNow ? 'failed' : 'sent', attempts: 1, last_error: failNow ? '連不上打卡系統' : null, created_at: new Date().toISOString(), sent_at: failNow ? null : new Date().toISOString() });
   };
@@ -95,7 +103,8 @@ export async function schedule(action, me, b, db, s, hooks) {
       return ok({ period, dates, today: todayTaipei(), store: me.code,
         meta: { version: r.version, locked: !!r.locked, locked_at: r.locked_at, locked_by: r.locked_by, needs_recheck: !!r.needs_recheck, publication: pubs.length ? pubs[pubs.length - 1] : null, clockAlias, lineFrom: '2026-11-01' },
         shifts: Object.values(st.shifts).sort((a, x) => a.sort - x.sort), staff: st.staff, terms: st.terms, days, actuals: st.actuals, demand: ctx.demand, demandTpl: tpl, demandOverrides: ov,
-        pins: ctx.pins, pairs: st.pairs, months, cfg: st.cfg, holidays: hol, monthOtMin: {}, results: checkPeriod(Object.assign(ctx, { days: st.days })), roster: { synced: clockAlias !== null } });
+        pins: ctx.pins, pairs: st.pairs, months, cfg: st.cfg, holidays: hol, monthOtMin: {}, results: checkPeriod(Object.assign(ctx, { days: st.days })), roster: { synced: clockAlias !== null },
+        stations: Object.values(st.stations).sort((a, x) => a.sort - x.sort || (a.id < x.id ? -1 : 1)), stationNeedTpl: st.stNeedTpl, stationNeedDay: Object.fromEntries(dates.filter((d) => hasActiveDay(st, d)).map((d) => [d, st.stNeedDay[d]])), stationNeed: ctx.stationNeed });
     }
     case 'saveDays': {
       const g = guard(false); if (g) return g;
@@ -107,7 +116,7 @@ export async function schedule(action, me, b, db, s, hooks) {
         const cell = { day_type: c.day_type, shift_id: c.shift_id || null, leave: c.leave || null };
         const err = comboError(cell, hol, c.date); if (err) return fail('BAD_INPUT', err);
         if (otLocked && cell.day_type === 'W') return fail('BAD_INPUT', '這天是休息日加班（要付加班費），不能改成一般工作日；不需要上班可以改回休息日');
-        (st.days[c.emp_id] = st.days[c.emp_id] || {})[c.date] = Object.assign(cell, { source: 'manual' });
+        putDay(st, c.emp_id, c.date, cell, 'manual');
       }
       const v = bump(); recheckNext(); return ok({ version: v });
     }
@@ -115,7 +124,7 @@ export async function schedule(action, me, b, db, s, hooks) {
       const g = guard(false); if (g) return g;
       const res = autoSchedule(ctxOf(st, period, hol), { keepManual: b.keepManual !== false });
       if (!res.ok) return ok({ ok: false, problems: res.problems, version: prow(st, period).version });
-      for (const x of st.staff) { st.days[x.emp_id] = st.days[x.emp_id] || {}; for (const d of dates) { if (res.days[x.emp_id] && res.days[x.emp_id][d]) st.days[x.emp_id][d] = res.days[x.emp_id][d]; else delete st.days[x.emp_id][d]; } }
+      for (const x of st.staff) { st.days[x.emp_id] = st.days[x.emp_id] || {}; for (const d of dates) { const c = (res.days[x.emp_id] || {})[d]; if (c) putDay(st, x.emp_id, d, c, c.source || 'auto'); else delete st.days[x.emp_id][d]; } }
       const v = bump(); recheckNext(); return ok({ ok: true, problems: res.problems, version: v });
     }
     case 'saveRevenue': {
@@ -163,6 +172,11 @@ export async function schedule(action, me, b, db, s, hooks) {
       const row = st.staff.find((y) => y.emp_id === e); if (!row) return fail('BAD_INPUT', '找不到這位同仁');
       if (x.phone && !/^[0-9+\-\s]{6,20}$/.test(x.phone)) return fail('BAD_INPUT', '手機格式不對');
       if (x.hire_date && x.leave_date && x.leave_date < x.hire_date) return fail('BAD_INPUT', '離職日期不能早於報到日期');
+      if (Object.prototype.hasOwnProperty.call(x, 'default_station')) {
+        const ds = x.default_station || null;
+        if (ds && ds !== row.default_station && !(st.stations[ds] && st.stations[ds].active)) return fail('BAD_INPUT', '預設站別不存在或已停用');
+        row.default_station = ds;
+      }
       Object.assign(row, { hire_date: x.hire_date || null, leave_date: x.leave_date || null, birthday: x.birthday || null, phone: x.phone || null });
       return ok({ emp_id: e });
     }
@@ -201,6 +215,103 @@ export async function schedule(action, me, b, db, s, hooks) {
       st.pairs = (b.pairs || []).map((p) => (p[0] < p[1] ? p : [p[1], p[0]])); return ok();
     }
     case 'saveCfg': st.cfg = { ratio_target: b.ratio_target == null ? null : Number(b.ratio_target) }; return ok();
+    // ---- 工作站別（照 server/schedule.js）----
+    case 'saveStation': {
+      const x = b.station || b;
+      const name = String(x.name || '').trim();
+      if (!name) return fail('BAD_INPUT', '站別名稱不能空白');
+      if (name.length > 10) return fail('BAD_INPUT', '站別名稱太長');
+      const color = x.color || '';
+      if (!/^(#[0-9A-Fa-f]{6})?$/.test(color)) return fail('BAD_INPUT', '顏色格式不對');
+      if (x.id && !/^W[0-9A-Za-z]{1,8}$/.test(String(x.id))) return fail('BAD_INPUT', '站別代號格式不對');
+      let sort = 0;
+      if (x.sort !== null && x.sort !== undefined && x.sort !== '') { sort = Number(x.sort); if (!Number.isInteger(sort) || sort < 0 || sort > 999) return fail('BAD_INPUT', '排序要是 0 以上的整數'); }
+      let active = 1;
+      if (x.active !== undefined) {
+        if (x.active === true || x.active === 1 || x.active === '1' || x.active === 'true') active = 1;
+        else if (x.active === false || x.active === 0 || x.active === '0' || x.active === 'false') active = 0;
+        else return fail('BAD_INPUT', '啟用狀態格式不對');
+      }
+      const before = x.id ? st.stations[x.id] : null;
+      if (x.id && !before) return fail('BAD_INPUT', '找不到這個站別');
+      if (active && Object.values(st.stations).some((y) => y.name === name && y.active && y.id !== x.id)) return fail('BAD_INPUT', `已經有使用中的「${name}」站別`);
+      let id = x.id; if (!id) { let i = Object.keys(st.stations).length + 1; while (st.stations['W' + i]) i++; id = 'W' + i; }
+      st.stations[id] = { id, name, color, sort, active };
+      // 改名或停用／啟用：已鎖定、會送 LINE、還沒結束、有格子用到這個站的期重送（照 server/schedule.js saveStation）
+      const republished = [];
+      if (before && (before.name !== name || before.active !== active) && clockAlias !== null) {
+        // 央廚固定排班（fixed）沒有「鎖定」：用到這個站、今天以後還有格子的每一期都重送
+        const cands = st.mode === 'fixed' ? [...new Set(Object.values(st.days).flatMap((m) => Object.entries(m).filter(([d, c]) => c.shift_id && c.station_id === id && d >= todayTaipei()).map(([d]) => periodOf(d))).filter(Boolean))].sort() : Object.keys(st.periods).sort();
+        for (const per of cands) {
+          if (st.mode !== 'fixed' && !st.periods[per].locked) continue;
+          if (parseLabel(per) < 1) continue;
+          const dts = periodDates(per);
+          if (dts[27] < todayTaipei()) continue;
+          if (!st.staff.some((m) => dts.some((d) => { const c = (st.days[m.emp_id] || {})[d]; return c && c.shift_id && c.station_id === id; }))) continue;
+          if (st.mode === 'fixed') publishPeriod(st, per); else pubSet('publish', per);
+          republished.push(per);
+          st.log.push({ period: per, who: me.code, action: 'station_rename', detail: `${before.name}${before.active ? '' : '（停用）'}→${name}${active ? '' : '（停用）'}，重送 LINE` });
+        }
+      }
+      return ok({ id, republished });
+    }
+    case 'saveStationNeedTpl': {
+      const keep = {};
+      for (const k of ['wd', 'sat', 'sun']) for (const id in (st.stNeedTpl[k] || {})) if (st.stations[id] && !st.stations[id].active) (keep[k] = keep[k] || {})[id] = st.stNeedTpl[k][id];
+      for (const r of b.rows || []) {
+        if (!['wd', 'sat', 'sun'].includes(r.kind) || !st.stations[r.station_id] || !st.stations[r.station_id].active) return fail('BAD_INPUT', '各站人數的站別不存在或已停用');
+        const mn = needMin(r.min);
+        if (mn === null) return fail('BAD_INPUT', '最少人數要是 0 以上的整數');
+        (keep[r.kind] = keep[r.kind] || {})[r.station_id] = mn;
+      }
+      st.stNeedTpl = keep; return ok();
+    }
+    case 'saveStationNeedDay': {
+      const g = guard(null); if (g) return g;
+      if (!dates.includes(b.date)) return fail('BAD_INPUT', '日期不在這一期');
+      const rows = Array.isArray(b.rows) ? b.rows : [];
+      for (const r of rows) {
+        if (!st.stations[r.station_id] || !st.stations[r.station_id].active) return fail('BAD_INPUT', '各站人數的站別不存在或已停用');
+        if (needMin(r.min) === null) return fail('BAD_INPUT', '最少人數要是 0 以上的整數');
+      }
+      if (!rows.length) delete st.stNeedDay[b.date];                    // rows 空＝改回範本：該日全部列都刪（含停用站）
+      else {
+        const kept = {};                                                // 非空更新：停用站的單日列保留（同範本）
+        for (const id in (st.stNeedDay[b.date] || {})) if (st.stations[id] && !st.stations[id].active) kept[id] = st.stNeedDay[b.date][id];
+        st.stNeedDay[b.date] = Object.assign(kept, Object.fromEntries(rows.map((r) => [r.station_id, needMin(r.min)])));
+      }
+      return ok({ version: bump() });
+    }
+    case 'setStation': {                  // 鎖定中也能改、不要求核定密碼；已鎖定且會送 LINE 的期重送一筆
+      const g = guard(null); if (g) return g;
+      const cells = b.cells || [];
+      if (!cells.length || cells.length > 2000) return fail('BAD_INPUT', '沒有要存的格子');
+      let changed = 0;
+      const todo = [];
+      const seen = new Set();
+      for (const c of cells) {
+        if (!dates.includes(c.date) || !st.staff.some((x) => x.emp_id === c.emp_id)) return fail('BAD_INPUT', '格子的人或日期不在這一期');
+        const key = c.emp_id + '|' + c.date;
+        if (seen.has(key)) return fail('BAD_INPUT', '同一格送了兩次');
+        seen.add(key);
+        const cur = (st.days[c.emp_id] || {})[c.date];
+        if (!cur || !cur.shift_id) return fail('BAD_INPUT', '這天沒有上班，不能選站別');
+        const sf = st.staff.find((x) => x.emp_id === c.emp_id);
+        if (!((!sf.hire_date || sf.hire_date <= c.date) && (!sf.leave_date || c.date <= sf.leave_date))) return fail('BAD_INPUT', '這天不在職，不能選站別');
+        const to = c.station_id || null;
+        if (to && (!st.stations[to] || (!st.stations[to].active && to !== cur.station_id))) return fail('BAD_INPUT', '站別不存在或已停用');
+        if ((cur.station_id || null) !== to) todo.push([cur, c, to]);
+      }
+      for (const [cur, c, to] of todo) {
+        const nm = (id) => (id ? st.stations[id].name : '未選站'), who = st.staff.find((x) => x.emp_id === c.emp_id).name;
+        st.log.push({ period, who: me.code, action: 'station', detail: `${who} ${+c.date.slice(5, 7)}/${+c.date.slice(8)} ${nm(cur.station_id)}→${nm(to)}` });
+        cur.station_id = to; changed++;
+      }
+      if (!changed) return ok({ version: prow(st, period).version, changed: 0, publication: null });
+      const publish = !!prow(st, period).locked && clockAlias !== null && parseLabel(period) >= 1;
+      if (publish) pubSet('publish');
+      return ok({ version: bump(), changed, publication: publish ? { status: 'pending' } : null });
+    }
     case 'lock': {
       const n = needDuty(); if (n) return n;
       const g = guard(false); if (g) return g;
@@ -244,7 +355,7 @@ export async function schedule(action, me, b, db, s, hooks) {
       const mine = st.mode === 'self' && !pa.approveAll ? new Set([].concat(pa.selfIds || [], pa.approveIds || [])) : null;
       for (const x of st.staff) {
         if (st.mode === 'self') { const r = ((st.selfMonths || {})[x.emp_id] || {})[b.date.slice(0, 7)]; if (!(r && r.status === 'approved' && b.date >= st.modeFrom) || (mine && !mine.has(x.emp_id))) continue; }
-        const c = (st.days[x.emp_id] || {})[b.date]; if (!c) continue; const sh = c.shift_id ? st.shifts[c.shift_id] : null; out[x.emp_id] = { name: x.name, day_type: c.day_type, leave: c.leave, shift_id: c.shift_id, shift_name: sh ? sh.name : null, start: sh ? sh.start : null, end: sh ? sh.end : null }; }
+        const c = (st.days[x.emp_id] || {})[b.date]; if (!c) continue; const sh = c.shift_id ? st.shifts[c.shift_id] : null; out[x.emp_id] = { name: x.name, day_type: c.day_type, leave: c.leave, shift_id: c.shift_id, shift_name: sh ? sh.name : null, start: sh ? sh.start : null, end: sh ? sh.end : null, station: sh && c.station_id && st.stations[c.station_id] ? st.stations[c.station_id].name : null }; }
       return ok({ date: b.date, plan: out });
     }
     default: return fail('NOT_FOUND', '找不到這個功能');

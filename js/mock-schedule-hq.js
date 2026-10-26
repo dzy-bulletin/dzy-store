@@ -15,6 +15,26 @@ const prevMonth = (m) => addDays(m + '-01', -1).slice(0, 7);
 const toCell = (c) => { const o = { t: c.day_type }; if (c.shift_id) o.s = c.shift_id; if (c.leave) o.l = c.leave; return o; };
 const sameCell = (a, b) => !!a && !!b && a.day_type === b.day_type && (a.shift_id || null) === (b.shift_id || null) && (a.leave || null) === (b.leave || null);
 const MODE_FROM = '2026-11-01';
+// ---- 工作站別（station-spec）：與 mock-schedule.js 共用的小工具（寫在這裡避免兩個檔案互相 import）----
+// 各站最少人數（照 server/schedule.js stationNeedOf）：某日有「使用中站別」的單日列就整天取代範本（只有停用站的單日列不算另設）
+export const hasActiveDay = (st, d) => Object.keys((st.stNeedDay || {})[d] || {}).some((id) => st.stations[id] && st.stations[id].active);
+export function stationNeedFor(st, dates) {
+  const out = {};
+  for (const d of dates) { const w = weekday(d), k = w === 0 ? 'sun' : w === 6 ? 'sat' : 'wd'; out[d] = Object.assign({}, (hasActiveDay(st, d) ? st.stNeedDay[d] : (st.stNeedTpl || {})[k]) || {}); }
+  return out;
+}
+// 寫格子的唯一入口（照 server/schedule.js upsertDay，station-spec I1／I3）：沒有班別→清站別；新變成上班格且沒站別→帶該人使用中的預設站；已是上班格換班別→站別不動。
+// 本檔所有「寫格子」（央廚自動產生、廠長改格子、固定班別重產、總部自填存草稿與核准）都走這裡；刪格子（delete）整列沒了，站別跟著沒了。
+export function putDay(st, e, d, cell, source) {
+  const old = (st.days[e] || {})[d];
+  let station = null;
+  if (cell.shift_id) {
+    if (old && old.shift_id) station = old.station_id || null;
+    else { const p = st.staff.find((x) => x.emp_id === e); const def = p && p.default_station ? st.stations[p.default_station] : null; if (def && def.active) station = def.id; }
+  }
+  (st.days[e] = st.days[e] || {})[d] = Object.assign({}, cell, { source, station_id: station });
+}
+
 
 /** 這兩家店（示範用 TESTHQ、TESTCF）第一次用到時建好假資料 */
 export function seedHq(db, code, hol) {
@@ -22,7 +42,8 @@ export function seedHq(db, code, hol) {
   if (db.sched[code]) return db.sched[code];
   const acc = db.accounts[code];
   const st = { shifts: {}, staff: [], terms: {}, tpl: {}, dayDemand: {}, pins: {}, pairs: [], days: {}, revenue: {}, periods: {}, pubs: {}, cfg: { ratio_target: null }, actuals: {},
-    mode: acc.mode, modeFrom: MODE_FROM, selfMonths: {}, pending: {}, fixedVersion: 0, genLog: {} };
+    mode: acc.mode, modeFrom: MODE_FROM, selfMonths: {}, pending: {}, fixedVersion: 0, genLog: {},
+    stations: {}, stNeedTpl: {}, stNeedDay: {}, log: [] };
   if (acc.mode === 'self') {
     st.shifts.S1 = { id: 'S1', name: '早班', start: '09:00', end: '18:00', break_min: 60, color: '', sort: 1, active: 1 };
     st.shifts.S2 = { id: 'S2', name: '晚班', start: '10:00', end: '19:00', break_min: 60, color: '', sort: 2, active: 1 };
@@ -58,7 +79,7 @@ function generate(st, month, hol) {
       const want = wantFixed(st, e, d, hol);
       if (!want) { if (ex) { delete st.days[e.emp_id][d]; generated++; } continue; }
       if (ex && sameCell(ex, want)) { kept++; continue; }
-      st.days[e.emp_id][d] = Object.assign(want, { source: 'auto' });
+      putDay(st, e.emp_id, d, want, 'auto');
       generated++;
     }
   }
@@ -67,19 +88,18 @@ function generate(st, month, hol) {
 
 const periodsOfMonth = (m) => { const s = new Set(); for (const d of monthDates(m)) { const p = periodOf(d); if (p && parseLabel(p) >= 1) s.add(p); } return [...s].sort(); };
 // 發布：每個重疊的 T 期入列一筆（self 只放已核准月份的格子）
-function publish(st, month) {
-  for (const p of periodsOfMonth(month)) {
-    const dates = periodDates(p);
-    const rows = st.staff.map((e) => ({ emp_id: e.emp_id, name: e.name, cells: dates.map((d) => {
-      const c = (st.days[e.emp_id] || {})[d];
-      if (!c) return { t: '' };
-      if (st.mode === 'self') { const r = (st.selfMonths[e.emp_id] || {})[d.slice(0, 7)]; if (!(r && r.status === 'approved' && d >= st.modeFrom)) return { t: '' }; }
-      return toCell(c);
-    }) })).filter((r) => st.mode !== 'self' || r.cells.some((c) => c.t));
-    const list = st.pubs[p] = st.pubs[p] || [];
-    list.push({ seq: list.length + 1, kind: 'publish', status: 'sent', attempts: 1, created_at: new Date().toISOString(), payload: { period: p, rows } });
-  }
+export function publishPeriod(st, p) {
+  const dates = periodDates(p);
+  const rows = st.staff.map((e) => ({ emp_id: e.emp_id, name: e.name, cells: dates.map((d) => {
+    const c = (st.days[e.emp_id] || {})[d];
+    if (!c) return { t: '' };
+    if (st.mode === 'self') { const r = (st.selfMonths[e.emp_id] || {})[d.slice(0, 7)]; if (!(r && r.status === 'approved' && d >= st.modeFrom)) return { t: '' }; }
+    return Object.assign(toCell(c), c.shift_id && c.station_id ? { w: c.station_id } : {});      // 站別（payload 的 w）
+  }) })).filter((r) => st.mode !== 'self' || r.cells.some((c) => c.t));
+  const list = st.pubs[p] = st.pubs[p] || [];
+  list.push({ seq: list.length + 1, kind: 'publish', status: 'sent', attempts: 1, created_at: new Date().toISOString(), payload: { period: p, rows } });
 }
+function publish(st, month) { for (const p of periodsOfMonth(month)) publishPeriod(st, p); }
 
 const mrow = (st, e, m) => ((st.selfMonths[e] = st.selfMonths[e] || {})[m]) || { status: 'draft', version: 0, submitted_at: null, decided_at: null, decided_by: null, reject_reason: null };
 function putMonth(st, e, m, patch) {
@@ -118,7 +138,7 @@ export function hqAction(action, me, b, db, hol, pa) {
   const today = todayTaipei();
   const monthArg = () => (typeof b.month === 'string' && MONTH_RE.test(b.month) ? b.month : null);
   const month = monthArg();
-  if (!month && action !== 'fixedShift') return fail('BAD_INPUT', '月份格式不對（要是 YYYY-MM）');      // fixedShift 不分月
+  if (!month && action !== 'fixedShift' && action !== 'fixedDefaultStation') return fail('BAD_INPUT', '月份格式不對（要是 YYYY-MM）');      // fixedShift、fixedDefaultStation 不分月
   const shiftList = () => Object.values(st.shifts).filter((s) => s.active).map((s) => ({ id: s.id, name: s.name, start: s.start, end: s.end, break_min: s.break_min }));
   const mine = pa.selfIds || [];
   if (st.mode === 'self') for (const e of mine) if (!st.staff.some((x) => x.emp_id === e)) st.staff.push({ emp_id: e, name: person.name, hire_date: null, leave_date: null, birthday: null, phone: null, sort: st.staff.length, fixed_shift: null });      // 同 server ensureStaff：本人的員編沒有列就建
@@ -137,12 +157,13 @@ export function hqAction(action, me, b, db, hol, pa) {
     if (action === 'fixedLoad') {
       const dates = monthDates(month);
       const cells = {};
-      for (const s of st.staff) { cells[s.emp_id] = {}; for (const d of dates) { const c = (st.days[s.emp_id] || {})[d]; if (c) cells[s.emp_id][d] = Object.assign(toCell(c), { src: c.source }); } }
+      for (const s of st.staff) { cells[s.emp_id] = {}; for (const d of dates) { const c = (st.days[s.emp_id] || {})[d]; if (c) cells[s.emp_id][d] = Object.assign(toCell(c), { src: c.source }, c.shift_id && c.station_id ? { w: c.station_id } : {}); } }
       const res = fixedResults();
       for (const s of st.staff) if (!s.fixed_shift) res.push({ level: 'warn', code: 'X1', emp_id: s.emp_id, date: null, msg: `${s.name} 還沒設固定班別，平日不會自動排班` });
       return ok({ month, mode: 'fixed', canEdit: !!pa.scheduleAdmin, version: st.fixedVersion, mode_from: st.modeFrom, shifts: shiftList(),
         holidays: Object.fromEntries(Object.entries(Object.assign({}, (hol.gov && hol.gov.off) || {}, hol.days)).filter(([k]) => k.slice(0, 7) === month)),
-        staff: st.staff.map((s) => ({ emp_id: s.emp_id, name: s.name, fixed_shift: s.fixed_shift || null })), cells, results: res });
+        staff: st.staff.map((s) => ({ emp_id: s.emp_id, name: s.name, fixed_shift: s.fixed_shift || null, default_station: s.default_station || null })), cells, results: res,
+        stations: Object.values(st.stations).sort((a, x) => a.sort - x.sort || (a.id < x.id ? -1 : 1)), stationNeed: stationNeedFor(st, dates) });
     }
     const e0 = edit(); if (e0) return e0;
     if (action === 'fixedSave') {
@@ -159,13 +180,51 @@ export function hqAction(action, me, b, db, hol, pa) {
           if (c && c.t === '') { delete (st.days[emp] || {})[d]; touched.push(d); n++; continue; }
           const cell = { day_type: c.t, shift_id: c.s || null, leave: c.l || null };
           const err = comboError(cell, hol, d); if (err) return fail('BAD_INPUT', err);
-          (st.days[emp] = st.days[emp] || {})[d] = Object.assign(cell, { source: 'manual' }); touched.push(d); n++;
+          putDay(st, emp, d, cell, 'manual'); touched.push(d); n++;
         }
       }
       if (!n) return fail('BAD_INPUT', '沒有要存的格子');
       st.fixedVersion++;
       publish(st, month);
       return ok({ version: st.fixedVersion, results: fixedResults() });
+    }
+    if (action === 'fixedStation') {
+      if (Number(b.version) !== st.fixedVersion) return fail('CONFLICT', '別人剛改過央廚班表，請重新整理後再改');
+      const cells = Array.isArray(b.cells) ? b.cells : [];
+      if (!cells.length) return fail('BAD_INPUT', '沒有要存的格子');
+      if (cells.length > 2000) return fail('BAD_INPUT', '一次最多改 2000 格');
+      const todo = [], seen = new Set();
+      for (const c of cells) {
+        const sf = st.staff.find((x) => x.emp_id === c.emp_id);
+        if (!sf || typeof c.date !== 'string' || c.date.slice(0, 7) !== month) return fail('BAD_INPUT', '格子的人或日期不在這個月');
+        if (c.date < st.modeFrom) return fail('BAD_INPUT', `${st.modeFrom} 以前的日子不在固定排班`);
+        const key = c.emp_id + '|' + c.date;
+        if (seen.has(key)) return fail('BAD_INPUT', '同一格送了兩次');
+        seen.add(key);
+        const cur = (st.days[c.emp_id] || {})[c.date];
+        if (!cur || !cur.shift_id) return fail('BAD_INPUT', '這天沒有上班，不能選站別');
+        if (!employed(sf, c.date)) return fail('BAD_INPUT', '這天不在職，不能選站別');
+        const to = c.station_id || null;
+        if (to && (!st.stations[to] || (!st.stations[to].active && to !== cur.station_id))) return fail('BAD_INPUT', '站別不存在或已停用');
+        if ((cur.station_id || null) !== to) todo.push([cur, c, to, sf]);
+      }
+      if (!todo.length) return ok({ version: st.fixedVersion, changed: 0 });
+      for (const [cur, c, to, sf] of todo) {
+        const nm = (id) => (id ? st.stations[id].name : '未選站');
+        st.log.push({ period: null, who: person.name, action: 'station', detail: `${sf.name} ${+c.date.slice(5, 7)}/${+c.date.slice(8)} ${nm(cur.station_id)}→${nm(to)}` });
+        cur.station_id = to;
+      }
+      st.fixedVersion++;
+      publish(st, month);
+      return ok({ version: st.fixedVersion, changed: todo.length });
+    }
+    if (action === 'fixedDefaultStation') {
+      const emp = st.staff.find((s) => s.emp_id === b.emp_id);
+      if (!emp) return fail('BAD_INPUT', '找不到這位同仁');
+      const ds = b.station_id || null;
+      if (ds && ds !== emp.default_station && !(st.stations[ds] && st.stations[ds].active)) return fail('BAD_INPUT', '預設站別不存在或已停用');
+      emp.default_station = ds;
+      return ok({});
     }
     if (action === 'fixedGenerate') {
       const r = generate(st, month, hol);
@@ -191,7 +250,7 @@ export function hqAction(action, me, b, db, hol, pa) {
           const want = wantFixed(st, emp, d, hol);
           if (!want) { if (ex) { delete mine2[d]; generated++; } continue; }
           if (ex && sameCell(ex, want)) continue;
-          mine2[d] = Object.assign(want, { source: 'auto' }); generated++;
+          putDay(st, emp.emp_id, d, want, 'auto'); generated++;
         }
       }
       if (generated > 0) { st.fixedVersion++; for (let m = from.slice(0, 7); m <= last.slice(0, 7); m = nextMonth(m)) publish(st, m); }
@@ -230,7 +289,7 @@ export function hqAction(action, me, b, db, hol, pa) {
       staff, cells, results: results(st, rows.map((s) => s.emp_id), month, hol), mode_from: st.modeFrom });
   }
   const own = () => (typeof b.emp_id === 'string' && mine.includes(b.emp_id) ? null : fail('FORBIDDEN', '只能改自己的班表'));
-  const prefill = (e) => { st.days[e] = st.days[e] || {}; for (const d of holDates(month, hol)) if (!st.days[e][d] && d >= st.modeFrom) st.days[e][d] = Object.assign(holDefault(), { source: 'self' }); };
+  const prefill = (e) => { st.days[e] = st.days[e] || {}; for (const d of holDates(month, hol)) if (!st.days[e][d] && d >= st.modeFrom) putDay(st, e, d, holDefault(), 'self'); };
   if (action === 'selfSave') {
     const f = own(); if (f) return f;
     const w = window_(); if (w) return w;
@@ -259,7 +318,7 @@ export function hqAction(action, me, b, db, hol, pa) {
       }
     } else {
       if (row.status !== 'approved') prefill(e);
-      for (const [d, c] of items) { if (!c) delete st.days[e][d]; else st.days[e][d] = Object.assign(c, { source: 'self' }); }
+      for (const [d, c] of items) { if (!c) delete st.days[e][d]; else putDay(st, e, d, c, 'self'); }
       if (row.status === 'approved') pub = true;
     }
     const n = putMonth(st, e, month, {});
@@ -297,7 +356,7 @@ export function hqAction(action, me, b, db, hol, pa) {
     if (action === 'selfApprove') {
       if (!(row.status === 'submitted' || (row.status === 'approved' && pd.length))) return fail('CONFLICT', '這份班表現在沒有等待核准的內容');
       st.days[e] = st.days[e] || {};
-      for (const d of pd) { st.days[e][d] = Object.assign({}, pend[d], { source: 'self' }); delete pend[d]; }
+      for (const d of pd) { putDay(st, e, d, pend[d], 'self'); delete pend[d]; }
       const n = putMonth(st, e, month, { status: 'approved', decided_at: new Date().toISOString(), decided_by: person.name, reject_reason: null });
       publish(st, month);
       return ok({ status: 'approved', version: n.version });
