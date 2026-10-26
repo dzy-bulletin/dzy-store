@@ -91,6 +91,10 @@ export function h(tag, cls, text, attrs) {
   return e;
 }
 
+// 支援標示（2026-10-26）：伺服器在支援帳號那筆加 support_from（原單位名稱，可能是空字串）；舊版沒有＝不標
+export const supportText = it => (it && typeof it.support_from === 'string' ? '支援' + (it.support_from ? '（' + it.support_from + '）' : '') : '');
+export function supportTag(it) { const t = supportText(it); return t ? h('span', 'du-support', t, { 'data-support': it.support_from }) : null; }
+
 // 載入失敗提示條 + 重新載入（伺服器已自動重試過一次，這裡交給人按）
 export function failBar(el, label, e, retry) {
   el.innerHTML = '';

@@ -521,6 +521,13 @@ function dutyStore(code) {
 }
 function withFake(code, fn) { const prev = curFake; curFake = code && code !== 'TEST1' ? DUTY2_FAKE : null; try { return fn(); } finally { curFake = prev; } }
 const ALL_OPS = { mgr_day: 'employees', mgr_pending_approvals: 'items', mgr_req_pending: 'items', mgr_req_day: null, payroll_leave_options: null };
+// 支援標示（對照 server/proxy/duty.js filterFor 的 support_from，2026-10-26）：示範人物的 support＝{門市代號: {員編: 原單位名稱}}，只在個人登入時加
+const SUPPORT_LISTS = { mgr_day: 'employees', mgr_pending_approvals: 'items', mgr_req_pending: 'items', mgr_roster: 'roster' };
+function markSupport(per, code, action, data) {
+  const m = per && per.support && per.support[code], list = SUPPORT_LISTS[action];
+  if (!m || !list || !data || !Array.isArray(data[list])) return;
+  data[list] = data[list].map(it => (it && Object.prototype.hasOwnProperty.call(m, it.emp_id) ? { ...it, support_from: m[it.emp_id] } : it));
+}
 // action=all（對照 server/proxy/duty.js handleAll）：e2e 可把門市代號放進 db.dutyDown，模擬那家打卡暫時讀不到
 function dutyAll(b, s) {
   const per = PM && PM.personaOf(db, s.sub);
@@ -534,6 +541,7 @@ function dutyAll(b, s) {
     d.calls[b.op] = (d.calls[b.op] || 0) + 1;
     if ((db.dutyDown || []).includes(st.code)) { out.failed.push({ store: st.code, storeName: st.name, message: '打卡系統暫時沒有回應，請稍後再試' }); out.stores.push({ store: st.code, storeName: st.name, ok: false }); continue; }
     const r = withFake(st.code, () => dutyDo(d, b.op, b.date !== undefined ? { date: b.date } : {}));
+    if (r.ok) markSupport(per, st.code, b.op, r.data);
     if (!r.ok) { out.failed.push({ store: st.code, storeName: st.name, message: r.message }); out.stores.push({ store: st.code, storeName: st.name, ok: false }); continue; }
     out.stores.push({ store: st.code, storeName: st.name, ok: true, meta: { clockStore: st.code, label: st.name, breakStart: d.brk[0], breakEnd: d.brk[1] } });
     if (b.op === 'mgr_day' && out.date === undefined) out.date = r.data.date;
@@ -629,6 +637,7 @@ function duty(action, me, s, b) {
   if (fault && fault.mode === 'timeout') return fail('TIMEOUT', '打卡系統回應太久，請稍後再試');
   if (fault && fault.mode === 'down') return fail('UPSTREAM', '打卡系統暫時沒有回應，請稍後再試');
   const r = tgt ? withFake(tgt, () => dutyDo(d, action, b)) : dutyDo(d, action, b);
+  if (r.ok && me.person) markSupport(PM && PM.personaOf(db, s.sub), tgt || s.code, action, r.data);
   if (r.ok) r.data.meta = { clockStore: tgt, label: tgt ? (db.accounts[tgt] || {}).name : '麻的小辛辣 新竹光復店', breakStart: d.brk[0], breakEnd: d.brk[1] };
   return r;
 }

@@ -1,7 +1,7 @@
 // 核定工時：照原系統 ~/mala-clock-in/manager.html 搬。日期列（前一天／後一天／今天）、本月待核定提醒、員工卡（收合展開、時段、
 // 核定時數即時算、休息、假別、出差、遲到分鐘）、送出核定。外觀換成營運系統風格，規則與文案不改。
 import { confirmBox } from '../../js/ui.js';
-import { S, dutyManager, call, callAll, brk, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow } from './state.js';
+import { S, dutyManager, call, callAll, brk, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow, supportTag } from './state.js';
 import * as C from './calc.js';
 import { qrButton } from './qr.js';
 import { api } from '../../js/api.js';
@@ -36,6 +36,7 @@ export function renderApprove(ctx) {
       row.append(h('div', 'du-pa-date', C.weekdayLabel(g.date)));
       g.names.forEach(n => {
         const chip = h('button', 'du-chip', n.name + (n.storeName ? '・' + n.storeName : ''), { type: 'button' });
+        const sup = supportTag(n); if (sup) chip.append(sup);
         chip.dataset.date = g.date; chip.dataset.emp = String(n.emp_id); if (n.store) chip.dataset.store = n.store;
         chip.onclick = () => { S.focusEmp = rowKey(n); loadDay(g.date); };
         names.append(chip);
@@ -195,6 +196,7 @@ function buildCard(emp, date) {
 
   // ---- 頭部（收合時看得到：姓名、班別、打卡摘要、精簡徽章）----
   const nameEl = h('div', 'du-name', emp.name);
+  const sup = supportTag(emp); if (sup) nameEl.append(sup);      // 支援（原單位）：別單位來這家店支援的同仁
   if (emp.store) nameEl.append(h('span', 'du-where', '打卡地點：' + emp.storeName, { 'data-where': emp.store }));      // 全部門市：這個人在哪一家店打的卡（同一人同一天在多家打卡會依店分列）
   if (emp.shift_in && emp.shift_out)
     nameEl.append(h('span', 'du-shift', emp.shift_in + '–' + emp.shift_out + (C.shiftCoversBreak(br, emp.shift_in, emp.shift_out) ? '・休' + C.breakHoursText(br) + 'h' : '')));

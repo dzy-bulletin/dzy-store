@@ -3,7 +3,7 @@
 // 照 ~/mala-clock-in manager.html（feature/requests-qr）的 loadPendingRequests／buildReqItem 搬，文案不改；外觀換成營運系統風格。
 // 核准申請「不會」直接寫入核定：只是讓那天的核定頁先幫主管填好，主管核定那天時確認送出才算數（見 approve.js 的 __applyReq）。
 import { confirmBox } from '../../js/ui.js';
-import { S, call, callAll, h, failBar, failedStores, setReqBadge, loadLeave, leaveFor, canWriteRow } from './state.js';
+import { S, call, callAll, h, failBar, failedStores, setReqBadge, loadLeave, leaveFor, canWriteRow, supportTag } from './state.js';
 import { tsLabel, shortDate, punchEvidence, compBalanceNote, REQ_KIND_LABEL, REQ_BATCH_MAX } from './calc.js';
 
 export function renderRequest(ctx) {
@@ -98,7 +98,8 @@ function buildItem(it, card, title) {
   const pick = h('input', 'du-rq-pick', null, { type: 'checkbox', 'aria-label': '勾選 ' + it.name + ' ' + it.summary });
   pick.onchange = () => syncBatch(card);
   if (canDecide) who.append(pick);
-  who.append(h('span', 'du-rq-kind ' + (REQ_KIND_LABEL[it.kind] ? it.kind : ''), REQ_KIND_LABEL[it.kind] || it.kind), h('span', 'du-rq-name', it.name), ...(it.storeName ? [h('span', 'du-where', '打卡地點：' + it.storeName, { 'data-where': it.store })] : []));
+  const sup = supportTag(it);      // 支援（原單位）
+  who.append(h('span', 'du-rq-kind ' + (REQ_KIND_LABEL[it.kind] ? it.kind : ''), REQ_KIND_LABEL[it.kind] || it.kind), h('span', 'du-rq-name', it.name), ...(sup ? [sup] : []), ...(it.storeName ? [h('span', 'du-where', '打卡地點：' + it.storeName, { 'data-where': it.store })] : []));
   l1.append(who, h('span', 'du-rq-date', shortDate(it.date)));
   el.append(l1, h('div', 'du-rq-l2', it.summary + (it.reason ? '\n原因：' + it.reason : '') + compBalanceNote(leaveFor(it.store), it) + '\n送出：' + tsLabel(it.created_at)));
   const ev = punchEvidence(it);

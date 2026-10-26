@@ -2,7 +2,7 @@
 // 2026-10-18 起新人統一在管理系統新增，這裡只剩備案（收合）；建立帳號只建打卡帳號，要通知總部在管理系統建檔。建立後專屬打卡連結收合成次要資訊（LINE 打卡上線後少用）；連結裡的 k 是該員工自己的打卡金鑰（不是主管金鑰）。
 import { esc, confirmBox } from '../../js/ui.js';
 import { DZY_ORIGIN } from '../../js/config.js';
-import { S, dutyManager, call, h, failBar, viewNoHoursStore } from './state.js';
+import { S, dutyManager, call, h, failBar, viewNoHoursStore, supportText } from './state.js';
 import { clockLink } from './calc.js';
 
 export function renderRoster(ctx) {
@@ -34,18 +34,19 @@ export function renderRoster(ctx) {
   // ---- 同仁異動 ----
   function drawRoster(rows) {
     const actives = rows.filter(r => r.active && r.name !== myName), off = rows.filter(r => !r.active);
+    const sup = r => { const t = supportText(r); return t ? `<span class="du-support" data-support="${esc(r.support_from)}">${esc(t)}</span>` : ''; };      // 支援（原單位）
     if (dm) {
-      sel.innerHTML = '<option value="">選擇同仁…</option>' + actives.map(r => `<option value="${esc(r.emp_id)}">${esc(r.name)}（${esc(r.emp_id)}）</option>`).join('');
+      sel.innerHTML = '<option value="">選擇同仁…</option>' + actives.map(r => `<option value="${esc(r.emp_id)}">${esc(r.name)}（${esc(r.emp_id)}）${supportText(r) ? '・' + esc(supportText(r)) : ''}</option>`).join('');
       reBtn.disabled = actives.length === 0;
     }
-    if (!dm) gone.innerHTML = `<div class="du-subtitle">在職（${actives.length}）</div>` + actives.map(r => `<div class="du-item"><span class="du-item-body">${esc(r.name)}（${esc(r.emp_id)}）</span></div>`).join('');
+    if (!dm) gone.innerHTML = `<div class="du-subtitle">在職（${actives.length}）</div>` + actives.map(r => `<div class="du-item"><span class="du-item-body">${esc(r.name)}（${esc(r.emp_id)}）${sup(r)}</span></div>`).join('');
     if (!off.length) { if (dm) gone.innerHTML = ''; return; }
-    if (!dm) gone.innerHTML += '<div class="du-subtitle">已離職（' + off.length + '）</div>' + off.map(r => `<div class="du-item"><span class="du-item-body">${esc(r.name)}（${esc(r.emp_id)}）</span></div>`).join('');
+    if (!dm) gone.innerHTML += '<div class="du-subtitle">已離職（' + off.length + '）</div>' + off.map(r => `<div class="du-item"><span class="du-item-body">${esc(r.name)}（${esc(r.emp_id)}）${sup(r)}</span></div>`).join('');
     if (!dm) return;
     gone.innerHTML = `<div class="du-subtitle">已離職（${off.length}）</div>` + off.map(r => {
       const when = shortDate(r.removed_at), by = r.removed_by ? '由 ' + esc(r.removed_by) + ' 設定' : '';
       const meta = when || by ? `<span class="du-when">${[when, by].filter(Boolean).join('・')}</span>` : '';
-      return `<div class="du-item" data-emp="${esc(r.emp_id)}"><span class="du-item-body">${esc(r.name)}（${esc(r.emp_id)}）${meta}</span>
+      return `<div class="du-item" data-emp="${esc(r.emp_id)}"><span class="du-item-body">${esc(r.name)}（${esc(r.emp_id)}）${sup(r)}${meta}</span>
         <button type="button" class="btn sm ghost re-restore" data-emp="${esc(r.emp_id)}" data-name="${esc(r.name)}">恢復在職</button></div>`;
     }).join('');
     gone.querySelectorAll('.re-restore').forEach(b => b.onclick = async () => {
