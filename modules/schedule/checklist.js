@@ -4,7 +4,8 @@
 import { termAt, employed } from './rules.js';
 
 const NAME_MAX = 5;
-const anyMin = (tpl) => Object.values(tpl || {}).some((byId) => Object.values(byId || {}).some((x) => (typeof x === 'number' ? x : (x && x.min) || 0) > 0));
+// ids：只算這些班別／站別（停用的不算）
+const anyMin = (tpl, ids) => Object.values(tpl || {}).some((byId) => Object.entries(byId || {}).some(([id, x]) => ids.has(id) && (typeof x === 'number' ? x : (x && x.min) || 0) > 0));
 
 export function setupChecklist(D) {
   const dates = D.dates || [];
@@ -19,12 +20,12 @@ export function setupChecklist(D) {
     text: !inPeriod.length ? '同仁身分：這一期還沒有在職的同仁，請先到「同仁」確認名單'
       : missing.length ? `同仁身分：${missing.length} 人還沒設正職或計時：${names}` : `同仁身分：${inPeriod.length} 人都設好`, tab: 'staff' });
 
-  const demandOk = anyMin(D.demandTpl);
+  const demandOk = anyMin(D.demandTpl, new Set((D.shifts || []).filter((s) => s.active).map((s) => s.id)));
   items.push({ key: 'demand', label: '每天每班要幾個人', level: 'rec', ok: demandOk,
     text: demandOk ? '每天每班要幾個人：已設' : '每天每班要幾個人：還沒設，排出來人力可能不對', tab: 'needs' });
 
   if ((D.stations || []).some((s) => s.active)) {
-    const stOk = anyMin(D.stationNeedTpl);
+    const stOk = anyMin(D.stationNeedTpl, new Set(D.stations.filter((s) => s.active).map((s) => s.id)));
     items.push({ key: 'stations', label: '工作站', level: 'opt', ok: stOk, text: stOk ? '工作站：各站最少人數已設' : '工作站：各站最少人數還沒設（選填）', tab: 'shifts' });
   }
 
@@ -33,8 +34,9 @@ export function setupChecklist(D) {
   items.push({ key: 'pins', label: '指定休假／上班', level: 'opt', ok: true, text: `指定休假／上班：${nPin} 筆（選填）`, tab: 'needs' });
 
   const revOk = (D.months || []).length > 0 && D.months.every((m) => m.revenue != null);
+  const revMiss = (D.months || []).find((m) => m.revenue == null);
   items.push({ key: 'revenue', label: '月預估營業額', level: 'opt', ok: revOk,
-    text: revOk ? '月預估營業額：已填' : '月預估營業額：還沒填（選填，只影響每工時營業額）', tab: null });
+    text: revOk ? '月預估營業額：已填' : '月預估營業額：還沒填（選填，只影響每工時營業額）', tab: null, field: revMiss ? 'scRev-' + revMiss.ym : null });
 
   return {
     items,

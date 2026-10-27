@@ -15,6 +15,7 @@
 .sc-ck.ok .sc-ckmark,.sc-ckdone{color:#2e7a4f;font-weight:700}
 .sc-ck.bad{color:var(--bad)} .sc-ck.warn{color:#9a6a00} .sc-ck.opt{color:var(--muted)}
 .sc-ckgo{white-space:nowrap;font-weight:700}
+button.sc-ckgo{background:none;border:0;padding:0;font:inherit;font-weight:700;color:var(--red);text-decoration:underline;cursor:pointer}
 .sc-ckfoot{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:2px}
 .sc-ckguide{white-space:nowrap;font-weight:700}
 .sc-acts .grow{flex:1}

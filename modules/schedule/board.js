@@ -96,7 +96,7 @@ export function renderBoard(ctx) {
   if (!locked && canLock) {
     if (ck.allDone && !S.ckOpen) checkHtml = `<div id="scCheck" class="sc-check done"><span class="sc-ckdone">✓ 排班前設定都完成了</span><button type="button" class="btn ghost sm" id="scCkMore">展開</button>${guideA}</div>`;
     else checkHtml = `<div id="scCheck" class="sc-check"><b class="sc-cktitle">開始排班前，先把這幾項設好</b>
-      ${ck.items.map((i) => `<div class="sc-ck ${ckCls(i)}" data-key="${i.key}"><span class="sc-ckmark" aria-hidden="true">${ckMark(i)}</span><span class="sc-cktext">${esc(i.text)}</span>${!i.ok && i.tab ? `<a class="sc-ckgo" href="#/schedule/${i.tab}">去設定 ›</a>` : ''}</div>`).join('')}
+      ${ck.items.map((i) => `<div class="sc-ck ${ckCls(i)}" data-key="${i.key}"><span class="sc-ckmark" aria-hidden="true">${ckMark(i)}</span><span class="sc-cktext">${esc(i.text)}</span>${!i.ok && i.tab ? `<a class="sc-ckgo" href="#/schedule/${i.tab}">去設定 ›</a>` : !i.ok && i.field ? `<button type="button" class="sc-ckgo sc-ckfield" data-field="${i.field}">去填寫 ›</button>` : ''}</div>`).join('')}
       <div class="sc-ckfoot">${guideA}${ck.allDone ? '<button type="button" class="btn ghost sm" id="scCkMore">收起</button>' : ''}</div></div>`;
   }
 
@@ -242,6 +242,7 @@ export function renderBoard(ctx) {
   if (q('#scStToggle')) q('#scStToggle').onclick = () => { setStHidden(!stHidden()); rerender(); };
   q('#scViewGrid').onclick = () => { S.view = 'grid'; rerender(); };
   if (q('#scCkMore')) q('#scCkMore').onclick = () => { S.ckOpen = !S.ckOpen; rerender(); };
+  el.querySelectorAll('.sc-ckfield').forEach((b) => { b.onclick = () => { const f = document.getElementById(b.dataset.field); if (f) { f.scrollIntoView({ block: 'center' }); f.focus(); } }; });
   q('#scViewDay').onclick = () => { S.view = 'day'; rerender(); };
   el.querySelectorAll('.sc-daychip').forEach((b) => { b.onclick = () => { S.day = b.dataset.day; rerender(); }; });
   el.querySelectorAll('.sc-c[data-emp], .sc-drow').forEach((td) => {
