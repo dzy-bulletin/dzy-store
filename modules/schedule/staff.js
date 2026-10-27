@@ -16,7 +16,8 @@ export function renderStaff(ctx) {
   const noClock = D.meta.clockAlias === null;
   const noDuty = !noClock && D.meta.dutyOn === false;          // 有打卡但沒開出勤核定：不同步名冊、不能帶入實際出勤、不能新增（要先開出勤核定）
   const card = (st) => {
-    const t = termAt(D.terms, st.emp_id, asOf) || {};
+    // 期中才報到的人，身分通常從報到日起算：要用報到日去找，不然期首那天找不到、卡片誤標「還沒設正職或計時」（2026-10-27 林秀縈：10/12 報到、身分 10/12 起，看 T00＝10/4 起時被誤標）
+    const t = termAt(D.terms, st.emp_id, st.hire_date && st.hire_date > asOf ? st.hire_date : asOf) || {};
     const lv = st.hire_date ? leaveOf(t, st.hire_date, D.today) : null;
     const lvTxt = !lv ? '填報到日期後顯示' : lv.days == null ? `${lv.hours} 小時（照工時比例）` : `${lv.days} 天`;
     const allowed = t.allowed_shifts || [];
