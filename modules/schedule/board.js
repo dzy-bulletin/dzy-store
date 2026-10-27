@@ -5,6 +5,7 @@ import { S, canEdit, loadAnnual, load, mutate, movePeriod, WD, md, hm, DAY_LABEL
 import { weekday, periodEnd } from './period.js';
 import { termAt } from './rules.js';
 import { stHidden, setStHidden, stToggleHtml } from './stview.js';
+import { setupChecklist } from './checklist.js';
 import { getSession } from '../../js/auth.js';
 
 const PUB_TEXT = { pending: '等待送到 LINE', sent: '已發布到 LINE', failed: '送 LINE 失敗', stale: '已被較新版本取代' };
@@ -86,6 +87,19 @@ export function renderBoard(ctx) {
       <input type="number" inputmode="numeric" min="0" id="scRev-${m.ym}" class="sc-mrev" data-ym="${m.ym}" value="${m.revenue == null ? '' : m.revenue}"> 元
       <span class="hint">每工時營業額 <b class="${ratioCls(m.ratio)}">${m.ratio == null ? '—' : m.ratio.toLocaleString() + ' 元'}</b>（整月排班 ${hm(m.minutes)} 小時${target ? `，目標 ${target.toLocaleString()} 元` : ''}）</span></div>`).join('');
 
+  // 排班前檢查清單（Eason 2026-10-27）：只給能排班的人、未鎖定的期；班別、同仁身分沒設好擋自動排班；全部設好收成一行
+  const ck = setupChecklist(D);
+  const ckMark = (i) => (!i.ok ? { must: '✕', rec: '!', opt: '○' }[i.level] : i.key === 'pins' ? '○' : '✓');
+  const ckCls = (i) => (i.key === 'pins' || (i.level === 'opt' && !i.ok) ? 'opt' : i.ok ? 'ok' : i.level === 'must' ? 'bad' : 'warn');
+  const guideA = '<a id="scGuide" class="sc-ckguide" href="schedule-guide.html" target="_blank" rel="noopener">📖 看完整圖解</a>';
+  let checkHtml = '';
+  if (!locked && canLock) {
+    if (ck.allDone && !S.ckOpen) checkHtml = `<div id="scCheck" class="sc-check done"><span class="sc-ckdone">✓ 排班前設定都完成了</span><button type="button" class="btn ghost sm" id="scCkMore">展開</button>${guideA}</div>`;
+    else checkHtml = `<div id="scCheck" class="sc-check"><b class="sc-cktitle">開始排班前，先把這幾項設好</b>
+      ${ck.items.map((i) => `<div class="sc-ck ${ckCls(i)}" data-key="${i.key}"><span class="sc-ckmark" aria-hidden="true">${ckMark(i)}</span><span class="sc-cktext">${esc(i.text)}</span>${!i.ok && i.tab ? `<a class="sc-ckgo" href="#/schedule/${i.tab}">去設定 ›</a>` : ''}</div>`).join('')}
+      <div class="sc-ckfoot">${guideA}${ck.allDone ? '<button type="button" class="btn ghost sm" id="scCkMore">收起</button>' : ''}</div></div>`;
+  }
+
   const head = `<div class="card sc-head">
     <div class="sc-printtitle">${esc((ctx.session && ctx.session.name) || '')} 班表　${esc(D.period)}　${md(D.dates[0])}–${md(periodEnd(D.period))}</div>
     <div class="sc-period"><button type="button" class="btn ghost sm" id="scPrev" aria-label="上一期">‹</button>
@@ -97,8 +111,9 @@ export function renderBoard(ctx) {
       ${pub ? `<span class="tag ${pub.status === 'sent' ? 'on' : pub.status === 'failed' ? 'bad' : ''}" id="scPubTag" title="${esc(pub.last_error || '')}">${PUB_TEXT[pub.status] || ''}${pub.kind === 'unpublish' && pub.status === 'sent' ? '（已撤下）' : ''}</span>` : ''}
       ${D.meta.clockAlias === null && D.period !== 'T00' ? '<span class="tag">這家店沒有 LINE 打卡，鎖定不送 LINE</span>' : ''}
     </div>
+    ${checkHtml}
     <div class="row sc-acts">
-      ${locked || !canLock ? '' : `<button type="button" class="btn" id="scAuto">自動排班</button><label class="sc-chk"><input type="checkbox" id="scAll"> 連手動改過的也重排</label>`}
+      ${locked || !canLock ? '' : `<button type="button" class="btn" id="scAuto"${ck.blockers.length ? ' disabled' : ''}>${ck.blockers.length ? `自動排班（先完成：${esc(ck.blockers.join('、'))}）` : '自動排班'}</button><label class="sc-chk"><input type="checkbox" id="scAll"> 連手動改過的也重排</label>`}
       ${canLock ? `<button type="button" class="btn ${locked ? 'ghost' : ''}" id="scLock">${locked ? '解除鎖定' : '鎖定並發布'}</button>` : ''}
       ${canLock && pub && (pub.status === 'failed' || pub.status === 'pending') ? '<button type="button" class="btn ghost" id="scResend">立即重送</button>' : ''}
       <button type="button" class="btn ghost" id="scPdf">匯出 PDF</button>
@@ -226,6 +241,7 @@ export function renderBoard(ctx) {
   q('#scNext').onclick = () => { movePeriod(1); say(''); rerender(); };
   if (q('#scStToggle')) q('#scStToggle').onclick = () => { setStHidden(!stHidden()); rerender(); };
   q('#scViewGrid').onclick = () => { S.view = 'grid'; rerender(); };
+  if (q('#scCkMore')) q('#scCkMore').onclick = () => { S.ckOpen = !S.ckOpen; rerender(); };
   q('#scViewDay').onclick = () => { S.view = 'day'; rerender(); };
   el.querySelectorAll('.sc-daychip').forEach((b) => { b.onclick = () => { S.day = b.dataset.day; rerender(); }; });
   el.querySelectorAll('.sc-c[data-emp], .sc-drow').forEach((td) => {

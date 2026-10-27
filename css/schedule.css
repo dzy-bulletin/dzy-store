@@ -5,6 +5,18 @@
 .sc-state{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
 .tag.on{background:#e6f3ea;color:var(--ok)}
 .sc-acts{flex-wrap:wrap;gap:8px;align-items:center}
+/* 排班前檢查清單（Eason 2026-10-27）：未完成＝黃框；全部完成收成一行綠框 */
+.sc-check{display:grid;gap:6px;border:2px solid #e8a33d;border-radius:10px;padding:10px 12px;margin:4px 0 10px;font-size:14px}
+.sc-check.done{display:flex;flex-wrap:wrap;align-items:center;gap:10px;border-color:#2e7a4f}
+.sc-cktitle{font-size:15px}
+.sc-ck{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline}
+.sc-ckmark{width:1.2em;flex:none;text-align:center;font-weight:700}
+.sc-cktext{flex:1;min-width:0}
+.sc-ck.ok .sc-ckmark,.sc-ckdone{color:#2e7a4f;font-weight:700}
+.sc-ck.bad{color:var(--bad)} .sc-ck.warn{color:#9a6a00} .sc-ck.opt{color:var(--muted)}
+.sc-ckgo{white-space:nowrap;font-weight:700}
+.sc-ckfoot{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:2px}
+.sc-ckguide{white-space:nowrap;font-weight:700}
 .sc-acts .grow{flex:1}
 .sc-chk{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);margin-right:10px}
 .sc-seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
@@ -126,7 +138,7 @@ button.hq-day{cursor:pointer}
 @media print{
   @page{size:A4 landscape;margin:8mm}
   body{background:#fff}
-  #sidebar,header.hdr,.topbar,nav.tabs,.banner,.demo-bar,.sc-period,.sc-state,.sc-acts,#scPw,.sc-months,#scMsg,.sc-sum,.sc-editor,.note{display:none!important}
+  #sidebar,header.hdr,.topbar,nav.tabs,.banner,.demo-bar,.sc-period,.sc-state,.sc-acts,#scPw,.sc-months,#scMsg,.sc-sum,.sc-editor,.sc-check,.note{display:none!important}
   .sc-printtitle{display:block;font-size:16px;font-weight:700;margin:0 0 8px}
   .card{box-shadow:none;border:0;padding:0;margin:0}
   .main-wrap,.app{display:block;margin:0;padding:0}

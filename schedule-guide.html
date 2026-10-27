@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>鼎兆元｜排班管理・第一次排班圖解</title>
+<meta name="description" content="第一次自己排班的店長看這頁：先設定什麼、再按自動排班、最後鎖定發布。">
+<link rel="stylesheet" href="css/tokens.css">
+<style>
+/* 樣式沿用 guide.html（門市操作手冊），排班圖解多一個「第幾步」標籤 */
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{font-family:var(--font);background:var(--bg);color:var(--black);font-size:16px;line-height:1.75;overflow-x:hidden}
+header{background:var(--black);color:#fff;padding:14px 18px}
+header h1{font-size:18px;font-weight:900;letter-spacing:.5px}
+header p{font-size:12.5px;color:#e8dfd8;margin-top:2px}
+.wrap{max-width:760px;margin:0 auto;padding:18px 16px 64px}
+nav.toc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:18px}
+nav.toc b{display:block;font-size:14px;margin-bottom:6px}
+nav.toc a{display:inline-block;margin:2px 14px 2px 0;color:var(--red);font-weight:700;text-decoration:none;padding:5px 0;min-height:32px}
+section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 16px;margin-bottom:16px;border-top:4px solid var(--red)}
+h2{font-size:18px;font-weight:900;margin-bottom:8px}
+.step{display:inline-block;background:var(--red);color:#fff;border-radius:999px;font-size:12.5px;font-weight:900;padding:0 10px;margin-right:6px;vertical-align:2px}
+.opt{display:inline-block;background:var(--head);border-radius:999px;font-size:12px;font-weight:700;padding:0 8px;margin-left:6px;vertical-align:2px}
+p{margin:6px 0;overflow-wrap:anywhere}
+ul{margin:6px 0 6px 1.4em}
+li{margin:4px 0;overflow-wrap:anywhere}
+.tip{background:#fff8ec;border-left:4px solid var(--gold);padding:10px 12px;border-radius:0 7px 7px 0;font-size:14.5px;margin:10px 0}
+.btn{display:inline-block;background:var(--head);border-radius:5px;padding:0 7px;font-weight:700;white-space:nowrap}
+.shot{margin:14px 0;text-align:center}
+.shot img{display:block;width:100%;max-width:390px;height:auto;margin:0 auto;border:1px solid var(--line);border-radius:10px;background:#fff}
+.shot figcaption{color:var(--muted);font-size:13px;margin-top:5px}
+footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
+</style>
+</head>
+<body>
+<header><h1>第一次排班圖解</h1><p>管理系統 › 人資部門 › 排班管理（門市排班）</p></header>
+<div class="wrap">
+<nav class="toc" aria-label="目錄"><b>依序做這 8 步</b>
+  <a href="#sg-1">1 建班別</a><a href="#sg-2">2 設同仁</a><a href="#sg-3">3 每班人數</a><a href="#sg-4">4 指定休假</a><a href="#sg-5">5 工作站</a><a href="#sg-6">6 自動排班</a><a href="#sg-7">7 備註</a><a href="#sg-8">8 鎖定並發布</a>
+</nav>
+
+<section id="intro">
+  <h2>先看班表最上面的檢查清單</h2>
+  <p>打開「班表」，最上面會列出排班前要設好的項目，系統自己打勾。<b>紅字</b>是一定要設的，沒設好「自動排班」按不下去；<b>黃字</b>建議設；灰字是選填。點「去設定 ›」直接跳到那一頁。</p>
+  <figure class="shot"><img src="img/guide/sg-00-checklist.jpg" width="780" height="1688" alt="班表最上面的排班前檢查清單，每一項前面有打勾"><figcaption>全部設好會收成一行「排班前設定都完成了」</figcaption></figure>
+  <div class="tip"><b>班表是改一格存一格</b>：點格子選好按 <span class="btn">套用</span> 就存好了，沒有整頁的儲存鈕。但存好不等於同仁看得到，要按 <span class="btn">鎖定並發布</span>，同仁的 LINE 才會出現班表。</div>
+</section>
+
+<section id="sg-1">
+  <h2><span class="step">第 1 步</span>建班別</h2>
+  <p>到「班別與設定」，把店裡會用到的班都建起來：名稱、上班、下班、休息幾分鐘。例：早班 10:00–19:00、休息 60 分。</p>
+  <ul><li>一個班沒排休息最多 6 小時，超過要排至少 30 分鐘休息才存得進去。</li><li>不用的班按「停用」，不要刪，已排過的班表才不會亂掉。</li></ul>
+  <figure class="shot"><img src="img/guide/sg-01-shifts.jpg" width="780" height="1688" alt="班別與設定頁的班別欄位：名稱、上班、下班、休息"><figcaption>班別與設定</figcaption></figure>
+</section>
+
+<section id="sg-2">
+  <h2><span class="step">第 2 步</span>設同仁身分</h2>
+  <p>到「同仁」，每個人都要選<b>正職或計時</b>，沒選的人自動排班會排不出來。計時同仁再填每期時數上限。</p>
+  <ul><li>「只能上的班」：例如只能上晚班的人，勾晚班就好。</li><li>有用工作站的店，可以設「預設工作站」，排上班時自動帶入。</li><li>同仁名單從打卡系統帶進來，新同仁請到管理系統新增。</li></ul>
+  <figure class="shot"><img src="img/guide/sg-02-staff.jpg" width="780" height="1688" alt="同仁頁：每個人的身分（正職或計時）設定"><figcaption>同仁</figcaption></figure>
+</section>
+
+<section id="sg-3">
+  <h2><span class="step">第 3 步</span>設每天每班要幾個人</h2>
+  <p>到「指定與需求」，平日、週六、週日各填一組「每班最少幾人、最多幾人」。自動排班會照這個人數排。</p>
+  <p>遇到活動、國定假日這種特別的日子，選那一天另外調人數，只影響那一天。</p>
+  <figure class="shot"><img src="img/guide/sg-03-needs.jpg" width="780" height="1688" alt="指定與需求頁：平日、週六、週日每班人數"><figcaption>指定與需求：每班人數</figcaption></figure>
+</section>
+
+<section id="sg-4">
+  <h2><span class="step">第 4 步</span>先標指定休假、指定上班<span class="opt">選填</span></h2>
+  <p>同仁事先講好要休的日子，在「指定休假、指定上班」選那個人，點日期切換：沒指定 → 休 → 上 → 某個班。自動排班不會動這些格子。</p>
+  <figure class="shot"><img src="img/guide/sg-04-pins.jpg" width="780" height="1688" alt="指定休假與指定上班的日曆，點日期切換"><figcaption>指定休假、指定上班</figcaption></figure>
+</section>
+
+<section id="sg-5">
+  <h2><span class="step">第 5 步</span>工作站與各站人數<span class="opt">有用站別的店</span></h2>
+  <p>店裡要分炒鍋、外場、收銀這類站別的，先在「班別與設定」建工作站，再到「指定與需求」填每站最少幾人。沒用站別的店跳過這一步。</p>
+  <figure class="shot"><img src="img/guide/sg-05-stations.jpg" width="780" height="1688" alt="班別與設定頁下方的工作站清單"><figcaption>工作站設定</figcaption></figure>
+</section>
+
+<section id="sg-6">
+  <h2><span class="step">第 6 步</span>按自動排班，看提醒、手動改</h2>
+  <p>回到「班表」按 <span class="btn">自動排班</span>。排好後看「提醒」：紅色「要修正」一定要改，才能鎖定；黃色是警告，看過自己判斷。</p>
+  <ul><li>要改哪一格就點那一格，選好按 <span class="btn">套用</span>。</li><li>手機預設看單日，點上方日期換天；電腦可以切「整期」看 28 天。</li><li>再按一次自動排班，預設會保留你手動改過的格子。</li></ul>
+  <figure class="shot"><img src="img/guide/sg-06-auto.jpg" width="780" height="1688" alt="自動排班後的單日班表與提醒"><figcaption>排好的班表（單日檢視）</figcaption></figure>
+</section>
+
+<section id="sg-7">
+  <h2><span class="step">第 7 步</span>寫午餐、晚餐備註<span class="opt">選填</span></h2>
+  <p>某天要提醒全店的事寫在備註，例：「12:00 有 30 人團體訂位」「晚餐提早盤點」，每格最多 60 字。手機按 <span class="btn">寫備註</span>，電腦點日期下方的備註格。</p>
+  <p>同仁在 LINE 出勤班表點那一天就看得到。已鎖定的班表也能直接改，存了會自動重送到 LINE。</p>
+  <figure class="shot"><img src="img/guide/sg-07-notes.jpg" width="780" height="1688" alt="午餐備註、晚餐備註的編輯框"><figcaption>午餐、晚餐備註</figcaption></figure>
+</section>
+
+<section id="sg-8">
+  <h2><span class="step">第 8 步</span>鎖定並發布</h2>
+  <p>沒有紅色「要修正」之後，按 <span class="btn">鎖定並發布</span>。同仁在 LINE「鼎兆元打卡」的出勤班表就看得到這一期的班。</p>
+  <ul><li>鎖定後要改班，先按「解除鎖定」，改好再鎖定一次；解除期間同仁暫時看不到這一期。</li><li>「送 LINE 失敗」時按「立即重送」，系統也會每 5 分鐘自動再試。</li></ul>
+  <figure class="shot"><img src="img/guide/sg-08-lock.jpg" width="780" height="1240" alt="班表上方的鎖定並發布按鈕"><figcaption>鎖定並發布</figcaption></figure>
+</section>
+
+<footer>有問題請找人資或管理者。</footer>
+</div>
+</body>
+</html>
