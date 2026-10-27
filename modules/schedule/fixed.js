@@ -4,6 +4,7 @@
 import { esc, busy } from '../../js/ui.js';
 import { call, cellInfo, cellOptions, cellOfValue, valueOfCell, mLabel, md, monthDates, nextMonth, prevMonth, curMonth, resultsHtml, WD } from './hq.js';
 import { weekday } from './period.js';
+import { stHidden, setStHidden, stToggleHtml } from './stview.js';
 
 export const F = { key: null, month: null, data: null, loading: null, sel: null, msg: '', err: '' };
 // 設定頁（班別、站別）改了東西後，央廚班表／固定班別的快取要作廢，下次進去重讀（不然新站別、新班別要換月才看得到）
@@ -59,8 +60,9 @@ function drawFixed(ctx) {
   // 工作站別（station-spec §7）：店裡沒有任何站別就完全不畫站別相關的東西。stMap 含停用的站（舊格子照樣顯示）。
   const stList = D.stations || [], stMap = Object.fromEntries(stList.map((x) => [x.id, x]));
   const stActive = stList.filter((x) => x.active);
+  const hideSt = stHidden();   // 「隱藏工作站」：只藏格子小標與各站人數列，改站別的面板照常
   const stTag = (c) => {
-    if (!c || c.t === 'L' || !c.s) return '';
+    if (hideSt || !c || c.t === 'L' || !c.s) return '';
     const x = c.w && stMap[c.w];
     if (x) return `<small class="sc-sn${x.active ? '' : ' off'}" data-station="${esc(x.id)}"${x.color ? ` style="color:${esc(x.color)}"` : ''}>${esc(x.name)}</small>`;
     return stActive.length ? '<small class="sc-sn none">未選站</small>' : '';
@@ -79,11 +81,13 @@ function drawFixed(ctx) {
     return `<tr><th class="sc-name" scope="row">${esc(st.name)}${st.fixed_shift ? `<small class="sc-al">${esc((shiftMap[st.fixed_shift] || {}).name || st.fixed_shift)}</small>` : '<small class="sc-al">未設固定班別</small>'}</th>${tds}</tr>`;
   }).join('');
   // 各站人數：每個使用中的站一列（有設最少人數才顯示「1/2」，不足紅字）
-  const stRows = stActive.map((x) => `<tr class="sc-stcnt" data-station="${esc(x.id)}"><th scope="row">${esc(x.name)}</th>${dates.map((d) => {
+  const stRows = (hideSt ? [] : stActive).map((x) => `<tr class="sc-stcnt" data-station="${esc(x.id)}"><th scope="row">${esc(x.name)}</th>${dates.map((d) => {
     const n = stCount(d, x.id), need = ((D.stationNeed || {})[d] || {})[x.id] || 0;
     return `<td class="${need && n < need ? 'short' : ''}${[0, 6].includes(weekday(d)) || D.holidays[d] ? ' we' : ''}" title="${esc(x.name)}${need ? `至少要 ${need} 人` : '沒有設人數'}">${n}${need ? '/' + need : ''}</td>`;
   }).join('')}</tr>`).join('');
-  const acts = D.canEdit ? `<div class="row sc-acts mt"><button type="button" class="btn" id="fxGen">重新產生這個月（手改的不會被蓋掉）</button></div>` : '<p class="hint mt">你只能查看央廚班表，修改請找廠長。</p>';
+  const tog = stList.length ? stToggleHtml('fxStToggle') : '';
+  const acts = (D.canEdit ? `<div class="row sc-acts mt"><button type="button" class="btn" id="fxGen">重新產生這個月（手改的不會被蓋掉）</button>${tog}</div>`
+    : `<p class="hint mt">你只能查看央廚班表，修改請找廠長。</p>${tog ? `<div class="row sc-acts mt">${tog}</div>` : ''}`);
   el.innerHTML = head(D, `央廚 ${D.staff.length} 位同仁`, `<p class="hint mt">平日＝固定班別、週六休息日、週日例假、國定假日／補假＝國定假日假。廠長改格子立即生效，系統約 1 分鐘內合併送到 LINE。有「・」的是手改過的格子。</p>${acts}`)
     + resultsHtml(D.results)
     + `<div class="card sc-gridcard"><div class="scroll"><table class="sc-grid fx-grid"><thead><tr><th class="sc-name">同仁</th>${th}</tr></thead><tbody>${rows}${stRows}</tbody></table></div></div>`;
@@ -111,6 +115,7 @@ function drawFixed(ctx) {
     try { await call('fixedStation', { month: F.month, version: D.version, cells: [{ emp_id: emp, date, station_id: q('#fxStationSel').value || null }] }); F.sel = null; await after('已存站別，立即生效，約 1 分鐘內送到 LINE'); }
     catch (e) { say(e.message, true); if (e.code === 'CONFLICT') { try { await reload(); } catch (e2) { /* 留原畫面 */ } } ctx.rerender(); }
   });
+  if (q('#fxStToggle')) q('#fxStToggle').onclick = () => { setStHidden(!stHidden()); ctx.rerender(); };
   if (q('#fxGen')) q('#fxGen').onclick = () => busy(q('#fxGen'), async () => {
     try { const r = await call('fixedGenerate', { month: F.month }); await after(`產生了 ${r.generated} 格，保留 ${r.kept} 格${r.generated ? '，正在送到 LINE' : '（沒有需要改的）'}`); }
     catch (e) { say(e.message, true); ctx.rerender(); }

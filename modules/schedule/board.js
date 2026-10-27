@@ -4,6 +4,7 @@ import { api } from '../../js/api.js';
 import { S, canEdit, loadAnnual, load, mutate, movePeriod, WD, md, hm, DAY_LABEL, LEAVE_LABEL, call } from './state.js';
 import { weekday, periodEnd } from './period.js';
 import { termAt } from './rules.js';
+import { stHidden, setStHidden, stToggleHtml } from './stview.js';
 import { getSession } from '../../js/auth.js';
 
 const PUB_TEXT = { pending: '等待送到 LINE', sent: '已發布到 LINE', failed: '送 LINE 失敗', stale: '已被較新版本取代' };
@@ -36,8 +37,10 @@ export function renderBoard(ctx) {
   // 工作站別（station-spec §7）：店裡沒有任何站別就完全不畫站別相關的東西（現有畫面零變化）。stMap 含停用的站（舊格子照樣顯示）。
   const stList = D.stations || [], stMap = Object.fromEntries(stList.map((x) => [x.id, x]));
   const stActive = stList.filter((x) => x.active);
+  // 「隱藏工作站」（Eason 2026-10-27）：只藏格子小標與各站人數（stShow），鎖定判斷、改站別面板照用 stActive
+  const hideSt = stHidden(), stShow = hideSt ? [] : stActive;
   const stTag = (c) => {
-    if (!c || !c.shift_id) return '';
+    if (hideSt || !c || !c.shift_id) return '';
     const x = c.station_id && stMap[c.station_id];
     if (x) return `<small class="sc-sn${x.active ? '' : ' off'}" data-station="${esc(x.id)}"${x.color ? ` style="color:${esc(x.color)}"` : ''}>${esc(x.name)}</small>`;
     return stActive.length ? '<small class="sc-sn none">未選站</small>' : '';
@@ -99,6 +102,7 @@ export function renderBoard(ctx) {
       ${canLock ? `<button type="button" class="btn ${locked ? 'ghost' : ''}" id="scLock">${locked ? '解除鎖定' : '鎖定並發布'}</button>` : ''}
       ${canLock && pub && (pub.status === 'failed' || pub.status === 'pending') ? '<button type="button" class="btn ghost" id="scResend">立即重送</button>' : ''}
       <button type="button" class="btn ghost" id="scPdf">匯出 PDF</button>
+      ${stList.length ? stToggleHtml('scStToggle') : ''}
       <span class="grow"></span>
       <div class="sc-seg" role="group" aria-label="檢視方式"><button type="button" id="scViewGrid" class="${view === 'grid' ? 'on' : ''}">整期</button><button type="button" id="scViewDay" class="${view === 'day' ? 'on' : ''}">單日</button></div>
     </div>
@@ -139,7 +143,7 @@ export function renderBoard(ctx) {
       return `<td class="sc-nt${isWe(d) ? ' we' : ''}${t ? ' has' : ''}${S.noteSel === d ? ' sel' : ''}" data-note="${d}" data-kind="${k}" title="${esc(t || (canLock ? '點一下寫' + label : ''))}">${t ? `<div class="sc-ntx">${esc(t)}</div>` : canLock ? '<span class="sc-ntadd" aria-hidden="true">＋</span>' : ''}</td>`;
     }).join('')}<td class="sc-off"></td></tr>`).join('');
     // 各站人數：每個使用中的站一列，不足最少人數的紅字「1/2」
-    const stRows = stActive.map((x) => `<tr class="sc-stcnt" data-station="${esc(x.id)}"><th scope="row">${esc(x.name)}</th>${D.dates.map((d) => {
+    const stRows = stShow.map((x) => `<tr class="sc-stcnt" data-station="${esc(x.id)}"><th scope="row">${esc(x.name)}</th>${D.dates.map((d) => {
       const n = stCount(d, x.id), need = stNeed(d, x.id);
       return `<td class="${need && n < need ? 'short' : ''}${isWe(d) ? ' we' : ''}" title="${esc(x.name)}${need ? `至少要 ${need} 人` : '沒有設人數'}">${n}${need ? '/' + need : ''}</td>`;
     }).join('')}<td class="sc-off"></td></tr>`).join('');
@@ -159,7 +163,7 @@ export function renderBoard(ctx) {
     }).join('');
     const n = dayTotal(d), nd = dayNeed(d);
     const cnt = `<span class="tag ${nd && n < nd ? 'bad' : ''}" id="scDayCount">當天 ${n}${nd ? '/' + nd : ''} 人</span>`
-      + stActive.map((x) => { const k = stCount(d, x.id), nn = stNeed(d, x.id); return `<span class="tag sc-dst ${nn && k < nn ? 'bad' : ''}" data-station="${esc(x.id)}">${esc(x.name)} ${k}${nn ? '/' + nn : ''}</span>`; }).join('');
+      + stShow.map((x) => { const k = stCount(d, x.id), nn = stNeed(d, x.id); return `<span class="tag sc-dst ${nn && k < nn ? 'bad' : ''}" data-station="${esc(x.id)}">${esc(x.name)} ${k}${nn ? '/' + nn : ''}</span>`; }).join('');
     body = `<div class="card"><div class="sc-days">${chips}</div>
       <h2 class="mt">${md(d)}（${WD[weekday(d)]}）${hol ? `<span class="tag">${esc(hol)}</span>` : ''}</h2>
       <div class="row">${cnt}</div>
@@ -220,6 +224,7 @@ export function renderBoard(ctx) {
   const onChip = el.querySelector('.sc-daychip.on'); if (onChip && onChip.scrollIntoView) onChip.scrollIntoView({ block: 'nearest', inline: 'center' });
   q('#scPrev').onclick = () => { movePeriod(-1); say(''); rerender(); };
   q('#scNext').onclick = () => { movePeriod(1); say(''); rerender(); };
+  if (q('#scStToggle')) q('#scStToggle').onclick = () => { setStHidden(!stHidden()); rerender(); };
   q('#scViewGrid').onclick = () => { S.view = 'grid'; rerender(); };
   q('#scViewDay').onclick = () => { S.view = 'day'; rerender(); };
   el.querySelectorAll('.sc-daychip').forEach((b) => { b.onclick = () => { S.day = b.dataset.day; rerender(); }; });
