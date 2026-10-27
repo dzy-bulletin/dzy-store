@@ -327,10 +327,10 @@ export function checkSelfMonth(ctx) {
   const R = [];
   const lvl = (l) => (ctx.soft && l === 'block' ? 'warn' : l);
   const add = (code, level, emp_id, date, msg) => R.push({ code, level: lvl(level), emp_id: emp_id || null, date: date || null, msg });
-  const first = ctx.month + '-01';
-  const dates = [];
-  for (let d = first; d.slice(0, 7) === ctx.month; d = addDays(d, 1)) dates.push(d);
-  const last = dates[dates.length - 1];
+  // ctx.dates：央廚以期（28 天）為單位時直接給日期清單（2026-10-27）；沒給就是 ctx.month 整月
+  const dates = ctx.dates ? ctx.dates.slice() : [];
+  if (!ctx.dates) for (let d = ctx.month + '-01'; d.slice(0, 7) === ctx.month; d = addDays(d, 1)) dates.push(d);
+  const first = dates[0], last = dates[dates.length - 1];
   const hol = ctx.holidays || { days: {} };
   const shifts = ctx.shifts || {};
   for (const st of ctx.staff) {

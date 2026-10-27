@@ -1,9 +1,9 @@
 // 總部自填排班／央廚固定排班的假後端（示範模式 ?mode=mock 與 e2e 用）。動作名稱、回傳形狀、狀態機與權限照 server/schedule-hq.js（docs/schedule-hq/spec.md §10.1）；
-// 檢查直接用 rules.js 的 checkSelfMonth。簡化處（真伺服器才有）：fixed 的「1 分鐘合併重送」這裡改成立刻入列；每月 20 號自動產生改成每次動作前補產（同伺服器 tick 的補產規則）。
-// 央廚（fixed）上線就自動切換（modeFrom＝MODE_FROM，開起來就已經有月曆）；沒設固定班別的人平日空白，fixedShift 設好後自動補上他從明天起的平日。
+// 檢查直接用 rules.js 的 checkSelfMonth。簡化處（真伺服器才有）：fixed 的「1 分鐘合併重送」這裡改成立刻入列；每期開始前 10 天自動產生下一期改成每次動作前補產（同伺服器 tick 的補產規則，不看 06:00）。
+// 央廚（fixed）上線就自動切換（modeFrom＝MODE_FROM，開起來就已經有班表；2026-10-27 起畫面與產生都以 T 期為單位）；沒設固定班別的人平日空白，fixedShift 設好後自動補上他從明天起的平日。
 // e2e 看發布：db.sched[<店>].pubs[<期>]＝[{seq, kind:'publish', status, payload:{cells…}}]。
 import { checkSelfMonth, comboError, employed, holName } from '../modules/schedule/rules.js';
-import { periodOf, periodDates, addDays, weekday, todayTaipei, parseLabel } from '../modules/schedule/period.js';
+import { periodOf, periodNo, periodDates, periodStart, periodEnd, label, addDays, weekday, todayTaipei, parseLabel } from '../modules/schedule/period.js';
 
 const ok = (data) => ({ ok: true, data: data === undefined ? {} : data });
 const fail = (error, message) => ({ ok: false, error, message });
@@ -15,6 +15,8 @@ const prevMonth = (m) => addDays(m + '-01', -1).slice(0, 7);
 const toCell = (c) => { const o = { t: c.day_type }; if (c.shift_id) o.s = c.shift_id; if (c.leave) o.l = c.leave; return o; };
 const sameCell = (a, b) => !!a && !!b && a.day_type === b.day_type && (a.shift_id || null) === (b.shift_id || null) && (a.leave || null) === (b.leave || null);
 const MODE_FROM = '2026-11-01';
+const GEN_LEAD = 10;      // 同 server/schedule-hq.js：下一期開始前 10 天自動產生
+const PERIOD_RE = /^T\d{2,}$/;
 // ---- 工作站別（station-spec）：與 mock-schedule.js 共用的小工具（寫在這裡避免兩個檔案互相 import）----
 // 各站最少人數（照 server/schedule.js stationNeedOf）：某日有「使用中站別」的單日列就整天取代範本（只有停用站的單日列不算另設）
 export const hasActiveDay = (st, d) => Object.keys((st.stNeedDay || {})[d] || {}).some((id) => st.stations[id] && st.stations[id].active);
@@ -53,8 +55,7 @@ export function seedHq(db, code, hol) {
     st.shifts.S2 = { id: 'S2', name: '中班', start: '10:00', end: '19:00', break_min: 60, color: '', sort: 2, active: 1 };
     [['C01', '葉廠長', 'S1'], ['C02', '周甲', 'S2'], ['C03', '吳乙', null]].forEach(([e, n, s], i) => st.staff.push({ emp_id: e, name: n, hire_date: null, leave_date: null, birthday: null, phone: null, sort: i, fixed_shift: s }));
     db.sched[code] = st;
-    const cur = todayTaipei().slice(0, 7), last = nextMonth(cur) > MODE_FROM.slice(0, 7) ? nextMonth(cur) : MODE_FROM.slice(0, 7);
-    for (let m = MODE_FROM.slice(0, 7); m <= last; m = nextMonth(m)) generate(st, m, hol);        // 開起來就已經有月曆（等於第一次切換＋每月自動產生）
+    autoGen(st, hol, todayTaipei());        // 開起來就已經有班表（等於第一次切換＋每期自動產生）
   }
   db.sched[code] = st;
   return st;
@@ -68,11 +69,21 @@ function wantFixed(st, e, d, hol) {
   const sh = e.fixed_shift && st.shifts[e.fixed_shift];
   return sh && sh.active ? { day_type: 'W', shift_id: e.fixed_shift, leave: null } : null;
 }
-function generate(st, month, hol) {
+// 同伺服器 tick：從 mode_from 所在期到「下一期」，沒產生過的期都補；下一期要在它開始前 GEN_LEAD 天起才產
+function autoGen(st, hol, today) {
+  if (!st.modeFrom) return;
+  const cn = periodNo(today) || 0, genDay = addDays(periodStart(label(cn + 1)), -GEN_LEAD);
+  for (let n = parseLabel(periodOf(st.modeFrom)); n <= cn + 1; n++) {
+    const p = label(n);
+    if (n === cn + 1 && today < genDay) continue;
+    if (!st.genLog[p]) { generate(st, periodDates(p), hol); st.genLog[p] = 1; }
+  }
+}
+function generate(st, span, hol) {
   let generated = 0, kept = 0;
   for (const e of st.staff) {
     st.days[e.emp_id] = st.days[e.emp_id] || {};
-    for (const d of monthDates(month)) {
+    for (const d of span) {
       if ((st.modeFrom && d < st.modeFrom) || !employed(e, d)) continue;
       const ex = st.days[e.emp_id][d];
       if (ex && (ex.source === 'manual' || (ex.day_type === 'L' && ex.leave !== '國'))) { kept++; continue; }
@@ -100,6 +111,7 @@ export function publishPeriod(st, p) {
   list.push({ seq: list.length + 1, kind: 'publish', status: 'sent', attempts: 1, created_at: new Date().toISOString(), payload: { period: p, rows } });
 }
 function publish(st, month) { for (const p of periodsOfMonth(month)) publishPeriod(st, p); }
+function publishDates(st, dates) { for (const p of [...new Set(dates.map(periodOf))].filter((p) => p && parseLabel(p) >= 1).sort()) publishPeriod(st, p); }
 
 const mrow = (st, e, m) => ((st.selfMonths[e] = st.selfMonths[e] || {})[m]) || { status: 'draft', version: 0, submitted_at: null, decided_at: null, decided_by: null, reject_reason: null };
 function putMonth(st, e, m, patch) {
@@ -138,7 +150,12 @@ export function hqAction(action, me, b, db, hol, pa) {
   const today = todayTaipei();
   const monthArg = () => (typeof b.month === 'string' && MONTH_RE.test(b.month) ? b.month : null);
   const month = monthArg();
-  if (!month && action !== 'fixedShift' && action !== 'fixedDefaultStation') return fail('BAD_INPUT', '月份格式不對（要是 YYYY-MM）');      // fixedShift、fixedDefaultStation 不分月
+  // 央廚：畫面送 period（T01…，2026-10-27 起），舊的 month 照樣收（同伺服器 spanArg）
+  const hasPeriod = action.startsWith('fixed') && b.period !== undefined;
+  if (hasPeriod && (typeof b.period !== 'string' || !PERIOD_RE.test(b.period) || parseLabel(b.period) < 1)) return fail('BAD_INPUT', '期別格式不對（要是 T01 以後）');
+  if (!month && !hasPeriod && action !== 'fixedShift' && action !== 'fixedDefaultStation') return fail('BAD_INPUT', '月份格式不對（要是 YYYY-MM）');      // fixedShift、fixedDefaultStation 不分月
+  const span = hasPeriod ? periodDates(b.period) : month ? monthDates(month) : [];
+  const spanUnit = hasPeriod ? '這一期' : '這個月', inSpan = (d) => span.length && d >= span[0] && d <= span[span.length - 1];
   const shiftList = () => Object.values(st.shifts).filter((s) => s.active).map((s) => ({ id: s.id, name: s.name, start: s.start, end: s.end, break_min: s.break_min }));
   const mine = pa.selfIds || [];
   if (st.mode === 'self') for (const e of mine) if (!st.staff.some((x) => x.emp_id === e)) st.staff.push({ emp_id: e, name: person.name, hire_date: null, leave_date: null, birthday: null, phone: null, sort: st.staff.length, fixed_shift: null });      // 同 server ensureStaff：本人的員編沒有列就建
@@ -148,20 +165,17 @@ export function hqAction(action, me, b, db, hol, pa) {
   if (action.startsWith('fixed')) {
     if (st.mode !== 'fixed') return fail('BAD_INPUT', '這家店不是央廚固定排班');
     const edit = () => (pa.scheduleAdmin ? null : fail('FORBIDDEN', '只有廠長（本店店長同等職）、人資主管或管理員可以改央廚班表'));
-    // 每月補產（同伺服器 tick）：從 mode_from 所在月到下個月，沒產生過的月份補（下個月要 20 號起）
-    if (st.modeFrom) {
-      const cur = today.slice(0, 7), nm = nextMonth(cur);
-      for (let m = st.modeFrom.slice(0, 7); m <= nm; m = nextMonth(m)) { if (m === nm && Number(today.slice(8, 10)) < 20) continue; if (!st.genLog[m]) { generate(st, m, hol); st.genLog[m] = 1; } }
-    }
-    const fixedResults = () => checkSelfMonth({ month, staff: st.staff, shifts: st.shifts, days: Object.fromEntries(st.staff.map((s) => [s.emp_id, st.days[s.emp_id] || {}])), holidays: hol, soft: true });
+    autoGen(st, hol, today);      // 每期補產（同伺服器 tick）
+    const fixedResults = () => checkSelfMonth({ month, dates: span, staff: st.staff, shifts: st.shifts, days: Object.fromEntries(st.staff.map((s) => [s.emp_id, st.days[s.emp_id] || {}])), holidays: hol, soft: true });
     if (action === 'fixedLoad') {
-      const dates = monthDates(month);
+      const dates = span;
       const cells = {};
       for (const s of st.staff) { cells[s.emp_id] = {}; for (const d of dates) { const c = (st.days[s.emp_id] || {})[d]; if (c) cells[s.emp_id][d] = Object.assign(toCell(c), { src: c.source }, c.shift_id && c.station_id ? { w: c.station_id } : {}); } }
       const res = fixedResults();
       for (const s of st.staff) if (!s.fixed_shift) res.push({ level: 'warn', code: 'X1', emp_id: s.emp_id, date: null, msg: `${s.name} 還沒設固定班別，平日不會自動排班` });
-      return ok({ month, mode: 'fixed', canEdit: !!pa.scheduleAdmin, version: st.fixedVersion, mode_from: st.modeFrom, shifts: shiftList(),
-        holidays: Object.fromEntries(Object.entries(Object.assign({}, (hol.gov && hol.gov.off) || {}, hol.days)).filter(([k]) => k.slice(0, 7) === month)),
+      return ok({ month: hasPeriod ? null : month, period: hasPeriod ? b.period : null, from: dates[0], to: dates[dates.length - 1], curPeriod: label(Math.max(1, periodNo(today) || 0)),
+        mode: 'fixed', canEdit: !!pa.scheduleAdmin, version: st.fixedVersion, mode_from: st.modeFrom, shifts: shiftList(),
+        holidays: Object.fromEntries(Object.entries(Object.assign({}, (hol.gov && hol.gov.off) || {}, hol.days)).filter(([k]) => inSpan(k))),
         staff: st.staff.map((s) => ({ emp_id: s.emp_id, name: s.name, fixed_shift: s.fixed_shift || null, default_station: s.default_station || null })), cells, results: res,
         stations: Object.values(st.stations).sort((a, x) => a.sort - x.sort || (a.id < x.id ? -1 : 1)), stationNeed: stationNeedFor(st, dates) });
     }
@@ -172,7 +186,7 @@ export function hqAction(action, me, b, db, hol, pa) {
       for (const emp of Object.keys(b.cells || {})) {
         if (!st.staff.some((s) => s.emp_id === emp)) return fail('BAD_INPUT', '找不到這位同仁');
         for (const d of Object.keys(b.cells[emp] || {})) {
-          if (d.slice(0, 7) !== month) return fail('BAD_INPUT', '格子的日期不在這個月');
+          if (!inSpan(d)) return fail('BAD_INPUT', `格子的日期不在${spanUnit}`);
           if (d < st.modeFrom) return fail('BAD_INPUT', `${st.modeFrom} 以前的日子不在固定排班`);
           const sf = st.staff.find((x) => x.emp_id === emp);
           if (!employed(sf, d)) return fail('BAD_INPUT', `${sf.name} ${d.slice(5)} 不在職，不能排班`);
@@ -185,7 +199,7 @@ export function hqAction(action, me, b, db, hol, pa) {
       }
       if (!n) return fail('BAD_INPUT', '沒有要存的格子');
       st.fixedVersion++;
-      publish(st, month);
+      publishDates(st, touched);
       return ok({ version: st.fixedVersion, results: fixedResults() });
     }
     if (action === 'fixedStation') {
@@ -196,7 +210,7 @@ export function hqAction(action, me, b, db, hol, pa) {
       const todo = [], seen = new Set();
       for (const c of cells) {
         const sf = st.staff.find((x) => x.emp_id === c.emp_id);
-        if (!sf || typeof c.date !== 'string' || c.date.slice(0, 7) !== month) return fail('BAD_INPUT', '格子的人或日期不在這個月');
+        if (!sf || typeof c.date !== 'string' || !inSpan(c.date)) return fail('BAD_INPUT', `格子的人或日期不在${spanUnit}`);
         if (c.date < st.modeFrom) return fail('BAD_INPUT', `${st.modeFrom} 以前的日子不在固定排班`);
         const key = c.emp_id + '|' + c.date;
         if (seen.has(key)) return fail('BAD_INPUT', '同一格送了兩次');
@@ -215,7 +229,7 @@ export function hqAction(action, me, b, db, hol, pa) {
         cur.station_id = to;
       }
       st.fixedVersion++;
-      publish(st, month);
+      publishDates(st, todo.map(([, c]) => c.date));
       return ok({ version: st.fixedVersion, changed: todo.length });
     }
     if (action === 'fixedDefaultStation') {
@@ -227,8 +241,9 @@ export function hqAction(action, me, b, db, hol, pa) {
       return ok({});
     }
     if (action === 'fixedGenerate') {
-      const r = generate(st, month, hol);
-      if (r.generated > 0) { st.fixedVersion++; publish(st, month); }
+      if (st.modeFrom && span[span.length - 1] < st.modeFrom) return fail('BAD_INPUT', `${spanUnit}在固定排班開始之前`);
+      const r = generate(st, span, hol);
+      if (r.generated > 0) { st.fixedVersion++; publishDates(st, span); }
       return ok({ generated: r.generated, kept: r.kept });
     }
     if (action === 'fixedShift') {
@@ -237,9 +252,10 @@ export function hqAction(action, me, b, db, hol, pa) {
       const sid = b.shift_id == null || b.shift_id === '' ? null : String(b.shift_id);
       if (sid !== null && !(st.shifts[sid] && st.shifts[sid].active)) return fail('BAD_INPUT', '班別不存在或已停用');
       emp.fixed_shift = sid;
-      // 同伺服器：自動重產他從 max(mode_from, 明天) 到已產生最後一天、不是 manual 的平日格子（請假 L 不動），有變動就送 LINE
+      // 同伺服器：自動重產他從 max(mode_from, 明天) 到「已產生過的期」（連續）期末、不是 manual 的平日格子（請假 L 不動），有變動就送 LINE
       const from = st.modeFrom > addDays(today, 1) ? st.modeFrom : addDays(today, 1);
-      const last = st.staff.flatMap((x) => Object.keys(st.days[x.emp_id] || {})).sort().pop();
+      let last = null;
+      for (let p = periodOf(from); st.genLog[p]; p = label(parseLabel(p) + 1)) last = periodEnd(p);
       let generated = 0;
       if (last && last >= from) {
         const mine2 = st.days[emp.emp_id] = st.days[emp.emp_id] || {};
@@ -253,7 +269,7 @@ export function hqAction(action, me, b, db, hol, pa) {
           putDay(st, emp.emp_id, d, want, 'auto'); generated++;
         }
       }
-      if (generated > 0) { st.fixedVersion++; for (let m = from.slice(0, 7); m <= last.slice(0, 7); m = nextMonth(m)) publish(st, m); }
+      if (generated > 0) { st.fixedVersion++; const ds = []; for (let d = from; d <= last; d = addDays(d, 1)) ds.push(d); publishDates(st, ds); }
       return ok({ ok: true, generated });
     }
     return fail('NOT_FOUND', '找不到這個功能');

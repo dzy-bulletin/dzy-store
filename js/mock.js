@@ -10,7 +10,7 @@ const KEY = 'dzystore_mockdb';
 // e2e 注入的資料（window.__E2E_DATA，由測試每次隨機產生）；沒有就用下面內建預設，示範模式不受影響。
 const E2E = () => (typeof window !== 'undefined' && window.__E2E_DATA) || {};
 const clone = x => JSON.parse(JSON.stringify(x));
-const DB_VERSION = 13;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
+const DB_VERSION = 14;   // 資料結構／預設名稱改版就加 1：舊瀏覽器留的舊資料版本不符，整包重建
 const MODS = ['purchase', 'cashbook', 'duty', 'transfer', 'loss', 'inventory', 'board', 'schedule'];
 const LABELS = { purchase: '貨單辨識', cashbook: '收支登記', duty: '出勤核定', transfer: '門市調撥', loss: '耗損登記', inventory: '庫存盤點', board: '叫貨看板', schedule: '自動排班' };
 const hex = n => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(b => b.toString(16).padStart(2, '0')).join('');
