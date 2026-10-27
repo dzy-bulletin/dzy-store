@@ -1,6 +1,7 @@
 // 總部自填排班／央廚固定排班畫面共用的小工具（self.js、fixed.js）：呼叫、月份換算、月曆、檢查結果清單。
 // 規格：docs/schedule-hq/spec.md §5、§10.1。月份是畫面單位；格子 {t:'W'|'R'|'H'|'L', s?:班別, l?:假別}。
 import { esc } from '../../js/ui.js';
+import { timeText } from './hours.js';
 import { api } from '../../js/api.js';
 import { addDays, weekday, todayTaipei } from './period.js';
 
@@ -45,7 +46,7 @@ export function valueOfCell(c) {
 }
 /** 格子可選的內容（班別、休息日、例假、特休、補休、國定假日假） */
 export function cellOptions(shifts, cur, withClear) {
-  const o = shifts.map((s) => `<option value="S:${esc(s.id)}">${esc(s.name)} ${esc(s.start)}–${esc(s.end)}</option>`).join('')
+  const o = shifts.map((s) => `<option value="S:${esc(s.id)}">${esc(s.name)} ${esc(timeText(s))}</option>`).join('')
     + '<option value="H">休息日</option><option value="R">例假</option><option value="L:特">特休</option><option value="L:補">補休</option><option value="L:國">國定假日假</option>'
     + (withClear ? '<option value="CLEAR">清空</option>' : '');
   return cur ? o.replace(`value="${esc(cur)}"`, `value="${esc(cur)}" selected`) : o;

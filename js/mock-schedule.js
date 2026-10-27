@@ -3,7 +3,7 @@
 import { checkPeriod, comboError, minutesOf } from '../modules/schedule/rules.js';
 import { autoSchedule } from '../modules/schedule/auto.js';
 import { periodDates, periodOf, todayTaipei, addDays, weekday, parseLabel, shiftPeriod } from '../modules/schedule/period.js';
-import { shiftMinutes, breakOk } from '../modules/schedule/hours.js';
+import { shiftMinutes, breakOk, normSegs } from '../modules/schedule/hours.js';
 import { hqAction, seedHq, putDay, stationNeedFor, publishPeriod, hasActiveDay } from './mock-schedule-hq.js';
 
 const E2E = () => (typeof window !== 'undefined' && window.__E2E_DATA) || {};
@@ -175,11 +175,33 @@ export async function schedule(action, me, b, db, s, hooks) {
       const x = b.shift || {};
       if (!x.name || !String(x.name).trim()) return fail('BAD_INPUT', '班別名稱不能空白');
       if (!/^\d{2}:\d{2}$/.test(x.start || '') || !/^\d{2}:\d{2}$/.test(x.end || '')) return fail('BAD_INPUT', '上下班時間格式要是 HH:MM');
-      const sh = { start: x.start, end: x.end, break_min: Number(x.break_min) || 0 };
-      if (!breakOk(sh)) return fail('BAD_INPUT', '一個班超過 6 小時，休息至少要 30 分鐘（勞基法 §35）');
+      let sh = { start: x.start, end: x.end, break_min: Number(x.break_min) || 0 };
+      if (Array.isArray(x.segs) && x.segs.length >= 2) { try { sh = normSegs(x.segs); } catch (e) { return fail('BAD_INPUT', e.message); } }   // 分段班（同 server/schedule.js saveShift）
+      if (!breakOk(sh)) return fail('BAD_INPUT', sh.segs ? '有一段超過 6 小時，那一段休息至少要 30 分鐘（勞基法 §35）' : '一個班超過 6 小時，休息至少要 30 分鐘（勞基法 §35）');
       if (shiftMinutes(sh) > 720) return fail('BAD_INPUT', '一班不能超過 12 小時');
       let id = x.id; if (!id) { let i = Object.keys(st.shifts).length + 1; while (st.shifts['S' + i]) i++; id = 'S' + i; }
       st.shifts[id] = Object.assign({ id, name: String(x.name).trim(), color: x.color || '', sort: Number(x.sort) || 0, active: x.active === false ? 0 : 1 }, sh);
+      return ok({ id });
+    }
+    case 'shiftUses':
+    case 'deleteShift': {   // 照 server/schedule.js shiftUses／deleteShift：沒被用過才刪，用過就列出用在哪裡
+      const id = String(b.id || '');
+      if (!st.shifts[id]) return fail('BAD_INPUT', '找不到這個班別（可能別人剛刪掉了），請重新整理');
+      const nm = (e) => (st.staff.find((x) => x.emp_id === e) || {}).name || e;
+      const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
+      const list = (rows, n) => rows.slice(0, n).map(([d, e]) => [d ? md(d) : '', e ? nm(e) : ''].filter(Boolean).join(' ')).join('、') + (rows.length > n ? ' 等' : '');
+      const cells = (src, hit) => Object.entries(src || {}).flatMap(([e, m]) => Object.entries(m || {}).filter(([, c]) => c && hit(c)).map(([d]) => [d, e])).sort((a, x) => (a[0] + a[1] < x[0] + x[1] ? -1 : 1));
+      const uses = [];
+      const days = cells(st.days, (c) => c.shift_id === id); if (days.length) uses.push(`班表 ${days.length} 格（${list(days, 2)}）`);
+      const pend = cells(st.pending, (c) => c.shift_id === id); if (pend.length) uses.push(`待核准的班表變更 ${pend.length} 格（${list(pend, 2)}）`);
+      const tpl = [['wd', '平日'], ['sat', '週六'], ['sun', '週日']].filter(([k]) => (st.tpl[k] || {})[id]).map(([, n]) => n); if (tpl.length) uses.push(`每班人數範本（${tpl.join('、')}）`);
+      const dd = Object.keys(st.dayDemand).filter((d) => (st.dayDemand[d] || {})[id]).sort().map((d) => [d, null]); if (dd.length) uses.push(`單日人數 ${dd.length} 天（${list(dd, 3)}）`);
+      const pins = cells(st.pins, (c) => c.kind === 'shift' && c.shift_id === id); if (pins.length) uses.push(`指定班別 ${pins.length} 格（${list(pins, 2)}）`);
+      const allow = st.staff.filter((x) => (st.terms[x.emp_id] || []).some((t) => (t.allowed_shifts || []).includes(id))).map((x) => [null, x.emp_id]); if (allow.length) uses.push(`同仁「只能上的班」${allow.length} 人（${list(allow, 3)}）`);
+      const fx = st.staff.filter((x) => x.fixed_shift === id).map((x) => [null, x.emp_id]); if (fx.length) uses.push(`央廚固定班別 ${fx.length} 人（${list(fx, 3)}）`);
+      if (action === 'shiftUses') return ok({ uses });
+      if (uses.length) return fail('BAD_INPUT', `這個班別已經用在：${uses.join('；')}。用過的班別不能刪除（舊班表、LINE 班表與出勤核定都還要對照它），不用的話請取消「使用中」再按儲存。`);
+      delete st.shifts[id];
       return ok({ id });
     }
     case 'saveStaff': {
@@ -372,7 +394,7 @@ export async function schedule(action, me, b, db, s, hooks) {
       const mine = st.mode === 'self' && !pa.approveAll ? new Set([].concat(pa.selfIds || [], pa.approveIds || [])) : null;
       for (const x of st.staff) {
         if (st.mode === 'self') { const r = ((st.selfMonths || {})[x.emp_id] || {})[b.date.slice(0, 7)]; if (!(r && r.status === 'approved' && b.date >= st.modeFrom) || (mine && !mine.has(x.emp_id))) continue; }
-        const c = (st.days[x.emp_id] || {})[b.date]; if (!c) continue; const sh = c.shift_id ? st.shifts[c.shift_id] : null; out[x.emp_id] = { name: x.name, day_type: c.day_type, leave: c.leave, shift_id: c.shift_id, shift_name: sh ? sh.name : null, start: sh ? sh.start : null, end: sh ? sh.end : null, station: sh && c.station_id && st.stations[c.station_id] ? st.stations[c.station_id].name : null }; }
+        const c = (st.days[x.emp_id] || {})[b.date]; if (!c) continue; const sh = c.shift_id ? st.shifts[c.shift_id] : null; out[x.emp_id] = { name: x.name, day_type: c.day_type, leave: c.leave, shift_id: c.shift_id, shift_name: sh ? sh.name : null, start: sh ? sh.start : null, end: sh ? sh.end : null, ...(sh && sh.segs ? { segs: sh.segs.map((y) => [y.start, y.end]) } : {}), station: sh && c.station_id && st.stations[c.station_id] ? st.stations[c.station_id].name : null }; }
       return ok({ date: b.date, plan: out });
     }
     default: return fail('NOT_FOUND', '找不到這個功能');

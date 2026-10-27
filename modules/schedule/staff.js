@@ -40,6 +40,9 @@ export function renderStaff(ctx) {
       <div class="row"><button type="button" class="btn sm f-save">儲存</button><span class="f-msg okmsg" role="status"></span></div></div>`;
   };
   const pairs = D.pairs;
+  // 離職同仁（離職日＝最後上班日已過；名冊 active=false 同步時也是寫成昨天）收到最下方、預設收合；離職日還沒到的仍算在職留在上面
+  const isLeft = (st) => !!st.leave_date && st.leave_date < D.today;
+  const onJob = D.staff.filter((st) => !isLeft(st)), gone = D.staff.filter(isLeft);
   const nameOf = (e) => (D.staff.find((s) => s.emp_id === e) || {}).name || e;
 
   const staffMsg = S.staffMsg; S.staffMsg = '';
@@ -73,7 +76,8 @@ export function renderStaff(ctx) {
     <div class="fld mt"><label>只能上的班（都不勾＝每班都能上）</label><div class="row">${shifts.map((s) => `<label class="sc-chk"><input type="checkbox" class="hi-al" value="${esc(s.id)}"> ${esc(s.name)}</label>`).join('')}</div></div>
     <div class="row mt"><button type="button" class="btn" id="hiAdd">新增同仁</button></div>
     <div id="hiMsg" class="okmsg" role="status"></div></details></div>
-  ${D.staff.map(card).join('')}
+  ${onJob.map(card).join('')}
+  ${gone.length ? `<details class="sc-left" id="stLeft"${S.leftOpen ? ' open' : ''}><summary>離職同仁（${gone.length} 人）</summary>${gone.map(card).join('')}</details>` : ''}
   <div class="card"><h2>不要排在同一班的兩個人</h2>
     <div class="row"><select id="prA" aria-label="第一個人">${D.staff.map((s) => `<option value="${esc(s.emp_id)}">${esc(s.name)}</option>`).join('')}</select>
     <select id="prB" aria-label="第二個人">${D.staff.map((s, i) => `<option value="${esc(s.emp_id)}" ${i === 1 ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
@@ -91,11 +95,20 @@ export function renderStaff(ctx) {
       const emp = c.dataset.emp;
       try {
         await call('saveStaff', { staff: { emp_id: emp, hire_date: f('.f-hire').value || null, leave_date: f('.f-leave').value || null, birthday: f('.f-bday').value || null, phone: f('.f-phone').value || null, ...(f('.f-dst') ? { default_station: f('.f-dst').value || null } : {}) } });
-        if (f('.f-kind').value) await call('saveTerm', { term: { emp_id: emp, from_date: f('.f-from').value || null, kind: f('.f-kind').value, target_min: hrs(f('.f-target').value), week_min: hrs(f('.f-week').value), same_days: f('.f-same').checked, allowed_shifts: [...c.querySelectorAll('.f-al:checked')].map((x) => x.value) } });
+        const kind = f('.f-kind').value;
+        if (kind) await call('saveTerm', { term: { emp_id: emp, from_date: f('.f-from').value || null, kind, target_min: hrs(f('.f-target').value), week_min: hrs(f('.f-week').value), same_days: f('.f-same').checked, allowed_shifts: [...c.querySelectorAll('.f-al:checked')].map((x) => x.value) } });
+        // 沒選身分：其他欄位照存，但要講清楚身分還沒存（2026-10-27 林秀縈：紅標還在、又沒提示，看起來像存失敗）
+        S.staffSaved = { emp, bad: !kind, text: kind ? '✓ 已儲存' : '報到日、生日等資料已存。身分還沒設定：請在「身分」選正職或計時再按一次儲存，才排得進班表（開始日期可空白＝一直都是）。' };
         await load(); ctx.rerender();
       } catch (e) { say(f('.f-msg'), e.message, true); }
     });
   });
+  const saved = S.staffSaved; S.staffSaved = null;
+  const sc = saved && [...el.querySelectorAll('.sc-staff')].find((c) => c.dataset.emp === saved.emp);
+  if (sc) {
+    say(sc.querySelector('.f-msg'), saved.text, saved.bad);
+    if (saved.bad) { sc.querySelector('.f-kind').focus(); sc.scrollIntoView({ block: 'center' }); }
+  }
   q('#hiAdd').onclick = () => busy(q('#hiAdd'), async () => {
     const box = q('#hiMsg');
     const name = q('#hiName').value.trim();
@@ -122,6 +135,7 @@ export function renderStaff(ctx) {
     try { const r = await call('importActuals', {}); await load(); S.staffMsg = `已帶入 ${r.from}～${r.to} 的實際出勤，共 ${r.rows} 筆`; ctx.rerender(); }
     catch (e) { say(q('#stMsg'), e.message, true); }
   });
+  if (q('#stLeft')) q('#stLeft').ontoggle = () => { S.leftOpen = q('#stLeft').open; };   // 在收合區裡按儲存重畫後維持展開
   const savePairs = async (list) => { await call('savePairs', { pairs: list }); await load(); ctx.rerender(); };
   q('#prAdd').onclick = () => busy(q('#prAdd'), async () => {
     const a = q('#prA').value, b = q('#prB').value;

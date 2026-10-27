@@ -103,6 +103,10 @@ button.sc-ckgo{background:none;border:0;padding:0;font:inherit;font-weight:700;c
 @media (max-width:360px){.sc-pins{gap:4px}.sc-pin{padding:6px 0;white-space:nowrap}.sc-pin .m{display:block;font-size:10px;line-height:1.1}.sc-pin.no-m .m{display:none}}      /* 2026-10-26 手機巡檢：286 寬（管理系統嵌入框）四位數日期塞不下 */
 .sc-pin.on.k-off{background:#f1eeeb} .sc-pin.on.k-work,.sc-pin.on.k-shift{background:#fff4d1}
 .sc-staff h3{margin:0 8px 0 0;font-size:16px}
+.sc-left{margin:12px 0}
+.sc-left>summary{cursor:pointer;font-weight:700;font-size:14px;color:var(--muted);padding:10px 12px;border:1px dashed var(--line);border-radius:10px;background:#fff}
+.sc-left[open]>summary{margin-bottom:12px}
+.sc-segs{display:flex;flex-direction:column;gap:6px;margin-top:8px} .sc-seg{flex-wrap:wrap;gap:8px;align-items:center} .sc-seg label{display:flex;align-items:center;gap:4px;font-size:.9em} .sc-seg .g-break{width:72px} .sc-segn{min-width:3.5em}
 .sc-station .row{flex-wrap:wrap;gap:8px;align-items:center} .sc-station.off .st-name{color:var(--muted)} .sc-station .st-name{width:160px}
 @media (max-width:760px){
   .sc-head .sc-period b{font-size:18px}
