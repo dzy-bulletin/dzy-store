@@ -26,7 +26,7 @@ export function setupChecklist(D) {
 
   if ((D.stations || []).some((s) => s.active)) {
     const stOk = anyMin(D.stationNeedTpl, new Set(D.stations.filter((s) => s.active).map((s) => s.id)));
-    items.push({ key: 'stations', label: '工作站', level: 'opt', ok: stOk, text: stOk ? '工作站：各站最少人數已設' : '工作站：各站最少人數還沒設（選填）', tab: 'shifts' });
+    items.push({ key: 'stations', label: '工作站', level: 'opt', ok: stOk, text: stOk ? '工作站：各站最少人數已設' : '工作站：各站最少人數還沒設（選填）', tab: 'needs' });   // 各站最少人數在「指定與需求」（站別本身在班別與設定建）
   }
 
   let nPin = 0;

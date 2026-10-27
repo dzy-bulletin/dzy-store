@@ -9,7 +9,7 @@ export const canEdit = (ses) => !!(ses && ses.person && ses.scheduleAdmin);
 
 export function reset(key) {
   S.key = key; S.period = null; S.data = null; S.loading = null; S.sel = null; S.view = null; S.day = null; S.msg = ''; S.err = '';
-  S.annual = undefined; S.annualP = null; S.ckOpen = false;      // 排班前檢查清單的展開狀態不跨店
+  S.annual = undefined; S.annualP = null; S.ckOpen = false; S.noteSel = null;      // 排班前檢查清單的展開狀態、打開中的備註框都不跨店
 }
 /** 剩餘特休（薪資系統，{emp_id: 天}）：班表畫好後另外抓、抓到再重畫；整個登入期間抓一次，抓不到就不顯示（2026-10-12 Eason） */
 export function loadAnnual(rerender) {
@@ -28,7 +28,7 @@ export function movePeriod(k) {
   const n = parseLabel(S.period) + k;
   if (n < 0) return;
   S.period = shiftPeriod(S.period, k);
-  S.data = null; S.sel = null; S.day = null;
+  S.data = null; S.sel = null; S.day = null; S.noteSel = null; S.ckOpen = false;   // 換期：備註框不跟過去、清單回到預設收合（2026-10-27 補審）
 }
 export async function load() {
   if (!S.period) S.period = defaultPeriod();
