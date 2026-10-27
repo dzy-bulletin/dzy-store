@@ -20,7 +20,9 @@ import { shiftMinutes, gapMinutes } from './hours.js';
 
 export const H = 60;
 const FT_DAY_NORMAL = 10 * H, PT_DAY_NORMAL = 8 * H, DAY_MAX = 12 * H;
-const PERIOD_NORMAL = 160 * H, WEEK_NORMAL = 40 * H, MONTH_OT = 46 * H;
+const PERIOD_NORMAL = 160 * H, WEEK_NORMAL = 40 * H;
+export const MONTH_OT = 46 * H, MONTH_OT_WARN = 36 * H;   // 每月加班：超過 46 擋、超過 36 警告（Eason 2026-10-27，取代 10-11 的「46 只提醒」）
+const PT_OT_RUN = 6;                         // 計時連上第 6 天＝休息日加班，提醒（Eason 2026-10-27；第 7 天由 P3 擋）
 export const MIN_GAP = 12 * H;                // 換班間隔（內規）：Eason 2026-10-11 從 11 小時改 12 小時，自動排班與檢查共用這一個值
 const LEAVE_MIN = 8 * H;                     // 請假、國定假日放假一天算 8 小時（F7）
 const LOOKBACK = 13;
@@ -161,6 +163,8 @@ export function checkPeriod(ctx) {
       if (!t || told) continue;
       if (t.kind === 'ft' && run >= 13) { add('F6', 'block', e, d, `${who} 到 ${md(d)} 已連續上班 ${run} 天，最多 12 天`); told = true; }
       if (t.kind === 'pt' && run >= 7) { add('P3', 'block', e, d, `${who} 到 ${md(d)} 已連續上班 ${run} 天，一定要休一天`); told = true; }
+      // 計時連上第 6 天：這天算休息日加班。已經排成「休息日出勤」的由 P2 提醒，這裡只提醒還排成一般工作日的
+      if (t.kind === 'pt' && run === PT_OT_RUN && mine[d] && mine[d].day_type === 'W') add('P7', 'warn', e, d, `${who} ${md(d)} 是連續上班第 ${PT_OT_RUN} 天，這天算休息日加班（要付加班費）：請改成「班別（休息日出勤）」`);
     }
 
     // 換班間隔 12 小時（內規，比 §34 的 11 小時嚴；跨期也比）
@@ -234,12 +238,13 @@ export function checkPeriod(ctx) {
       if (t0.target_min != null && total > t0.target_min) add('P6', 'warn', e, end, `${who} 這期排了 ${hm(total)}，超過上限 ${hm(t0.target_min)}`);
     }
 
-    // 曆月加班 46 小時（含期外月份）
+    // 曆月加班（含期外月份）：超過 46 小時擋、超過 36 小時警告（Eason 2026-10-27）
     const byMonth = {};
     for (const d of dates) { const m = d.slice(0, 7); byMonth[m] = (byMonth[m] || 0) + mins[d].ot; }
     for (const m in byMonth) {
       const tot = byMonth[m] + ((ctx.monthOtMin && ctx.monthOtMin[m] || {})[e] || 0);
-      if (tot > MONTH_OT) add('C2', 'info', e, null, `${who} ${+m.slice(5)} 月加班 ${hm(tot)}，超過 46 小時`);
+      if (tot > MONTH_OT) add('C2', 'block', e, null, `${who} ${+m.slice(5)} 月加班 ${hm(tot)}，超過上限 46 小時，要減少加班才能鎖定`);
+      else if (tot > MONTH_OT_WARN) add('C9', 'warn', e, null, `${who} ${+m.slice(5)} 月加班 ${hm(tot)}，超過 36 小時（上限 46 小時）`);
     }
 
     // 可上班別、指定

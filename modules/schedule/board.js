@@ -12,12 +12,14 @@ const PUB_TEXT = { pending: '等待送到 LINE', sent: '已發布到 LINE', fail
 
 function cellText(c, shifts) {
   if (!c) return { t: '', cls: 'empty' };
-  if (c.shift_id) { const s = shifts[c.shift_id]; return { t: s ? s.name : c.shift_id, cls: 'work' + (c.day_type === 'H' ? ' ot' : '') }; }
+  if (c.shift_id) { const s = shifts[c.shift_id]; return { t: s ? s.name : c.shift_id, cls: 'work' + (c.day_type === 'H' ? ' ot' : ''), ot: c.day_type === 'H' }; }
   if (c.day_type === 'L') return { t: LEAVE_LABEL[c.leave] || '假', cls: 'leave' };
   if (c.day_type === 'W') return { t: '?', cls: 'empty' };
   return { t: DAY_LABEL[c.day_type] || '', cls: c.day_type === 'R' ? 'rest' : 'off' };
 }
 const LV_RANK = { block: 0, warn: 1, info: 2 };
+// 休息日加班特別標示（Eason 2026-10-27：正職連上 12 天裡含的休息日加班、計時第 6 天都要一眼看得出來）
+const otTag = (x) => (x.ot ? '<i class="sc-ot">休加</i>' : '');
 
 export function renderBoard(ctx) {
   const el = ctx.el, D = S.data;
@@ -144,7 +146,7 @@ export function renderBoard(ctx) {
         const pin = (D.pins[st.emp_id] || {})[d];
         const sel = S.sel && S.sel.emp === st.emp_id && S.sel.date === d;
         const pinCls = !pin ? '' : pin.kind === 'off' ? ' pin-off' : ' pin';   // 指定休假：黃底；指定上班／班別：右上小黑點
-        return `<td class="sc-c ${x.cls}${isWe(d) ? ' we' : ''}${bday(st, d) ? ' bd' : ''}${lv ? ' i-' + lv : ''}${sel ? ' sel' : ''}${pinCls}" data-emp="${esc(st.emp_id)}" data-date="${d}" title="${esc(iss.map((r) => r.msg).concat(pin && pin.kind === 'off' ? ['指定休假'] : []).join('\n'))}">${esc(x.t)}${stTag(c)}${bday(st, d) ? '<i class="sc-bd" title="生日">生日</i>' : ''}</td>`;
+        return `<td class="sc-c ${x.cls}${isWe(d) ? ' we' : ''}${bday(st, d) ? ' bd' : ''}${lv ? ' i-' + lv : ''}${sel ? ' sel' : ''}${pinCls}" data-emp="${esc(st.emp_id)}" data-date="${d}" title="${esc(iss.map((r) => r.msg).concat(pin && pin.kind === 'off' ? ['指定休假'] : [], x.ot ? ['休息日加班'] : []).join('\n'))}">${esc(x.t)}${otTag(x)}${stTag(c)}${bday(st, d) ? '<i class="sc-bd" title="生日">生日</i>' : ''}</td>`;
       }).join('');
       const o = offOf(st), lvs = Object.entries(o.lv).map(([k, v]) => k + ' ' + v).join('・');
       return `<tr><th class="sc-name" scope="row">${esc(st.name)}${annualTxt(st)}</th>${tds}<td class="sc-off"><b>${o.n}</b>${lvs ? `<small>${esc(lvs)}</small>` : ''}</td></tr>`;
@@ -173,7 +175,7 @@ export function renderBoard(ctx) {
       const s = c && c.shift_id ? shifts[c.shift_id] : null;
       const pin = (D.pins[st.emp_id] || {})[d];
       return `<button type="button" class="sc-drow ${x.cls}${bday(st, d) ? ' bd' : ''}${pin && pin.kind === 'off' ? ' pin-off' : ''}${iss.length ? ' i-' + iss.sort((a, b) => LV_RANK[a.level] - LV_RANK[b.level])[0].level : ''}" data-emp="${esc(st.emp_id)}" data-date="${d}">
-        <span class="sc-dn">${esc(st.name)}${bday(st, d) ? ' <i class="sc-bd">生日</i>' : ''}${annualTxt(st)}</span><span class="sc-dv">${esc(x.t)}${s ? `<small>${esc(s.start)}–${esc(s.end)}</small>` : ''}${stTag(c)}</span>
+        <span class="sc-dn">${esc(st.name)}${bday(st, d) ? ' <i class="sc-bd">生日</i>' : ''}${annualTxt(st)}</span><span class="sc-dv">${esc(x.t)}${otTag(x)}${s ? `<small>${esc(s.start)}–${esc(s.end)}</small>` : ''}${stTag(c)}</span>
         ${iss.length ? `<span class="sc-dmsg">${esc(iss.map((i) => i.msg).join('；'))}</span>` : ''}</button>`;
     }).join('');
     const n = dayTotal(d), nd = dayNeed(d);
