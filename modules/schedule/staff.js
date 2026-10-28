@@ -22,17 +22,18 @@ export function renderStaff(ctx) {
     const list = D.terms[st.emp_id] || [];
     const sel = (S.termSel || {})[st.emp_id] || eff.from_date || '';
     const isNew = sel === '__new';
+    // 卡片標題的標籤（還沒設身分、備援）一律看「這期生效」那筆，不跟著選單選到的那筆跑（2026-10-28 Eason）
     const t = isNew ? Object.assign({}, eff, { from_date: null }) : (list.find((x) => x.from_date === sel) || eff);
     const lv = st.hire_date ? leaveOf(t, st.hire_date, D.today) : null;
     const lvTxt = !lv ? '填報到日期後顯示' : lv.days == null ? `${lv.hours} 小時（照工時比例）` : `${lv.days} 天`;
     const allowed = t.allowed_shifts || [], allowedHol = t.allowed_shifts_hol || [];
     const termLabel = (x) => `${x.from_date <= '2026-10-04' ? '一開始' : x.from_date + ' 起'}：${x.kind === 'ft' ? '正職' : '計時'}${x.kind === 'pt' && x.backup ? '・備援' : ''}${(x.allowed_shifts || []).length ? '・平日限班' : ''}${(x.allowed_shifts_hol || []).length ? '・假日限班' : ''}`;
-    const hist = list.length ? `<div class="fld"><label>身分設定（依日期生效，選一筆來看或修改）</label><div class="row"><select class="f-term">${list.map((x) => `<option value="${esc(x.from_date)}" ${x.from_date === sel ? 'selected' : ''}>${esc(termLabel(x))}${x === eff ? '（這期生效）' : ''}</option>`).join('')}<option value="__new" ${isNew ? 'selected' : ''}>＋ 從某天起改設定（新增一筆）</option></select>${list.length > 1 && !isNew ? '<button type="button" class="btn sm ghost f-tdel">刪除這筆</button>' : ''}</div>${isNew ? '<p class="hint">新增一筆：請在「身分從哪天開始」填日期，那天起改用下面的設定，之前照舊。</p>' : ''}</div>` : '';
-    return `<div class="card sc-staff" data-emp="${esc(st.emp_id)}"><div class="row"><h3>${esc(st.name)}</h3><span class="hint">${esc(st.emp_id)}</span>${st.leave_date ? `<span class="tag">${esc(st.leave_date)} 離職</span>` : ''}${!t.kind ? '<span class="tag bad">還沒設正職或計時</span>' : ''}${!st.hire_date && !st.leave_date ? '<span class="tag bad">還沒填報到日期</span>' : ''}${t.kind === 'pt' && t.backup ? '<span class="tag">備援</span>' : ''}</div>
+    const hist = list.length ? `<div class="fld"><label>身分設定（依日期生效，選一筆來看或修改）</label><div class="row"><select class="f-term">${list.map((x) => `<option value="${esc(x.from_date)}" ${x.from_date === sel ? 'selected' : ''}>${esc(termLabel(x))}${x === eff ? '（這期生效）' : ''}</option>`).join('')}<option value="__new" ${isNew ? 'selected' : ''}>＋ 從某天起改設定（新增一筆）</option></select>${list.length > 1 && !isNew && sel !== list[0].from_date ? '<button type="button" class="btn sm ghost f-tdel">刪除這筆</button>' : ''}</div>${isNew ? '<p class="hint">新增一筆：請在「身分從哪天開始」填日期，那天起改用下面的設定，之前照舊。</p>' : ''}</div>` : '';
+    return `<div class="card sc-staff" data-emp="${esc(st.emp_id)}"><div class="row"><h3>${esc(st.name)}</h3><span class="hint">${esc(st.emp_id)}</span>${st.leave_date ? `<span class="tag">${esc(st.leave_date)} 離職</span>` : ''}${!eff.kind ? '<span class="tag bad">還沒設正職或計時</span>' : ''}${!st.hire_date && !st.leave_date ? '<span class="tag bad">還沒填報到日期</span>' : ''}${eff.kind === 'pt' && eff.backup ? '<span class="tag">備援</span>' : ''}</div>
       ${hist}
       <div class="grid2">
         <div class="fld"><label>身分</label><select class="f-kind"><option value="">請選擇</option><option value="ft" ${t.kind === 'ft' ? 'selected' : ''}>正職（四週變形）</option><option value="pt" ${t.kind === 'pt' ? 'selected' : ''}>計時（每週一例一休）</option></select></div>
-        <div class="fld"><label>身分從哪天開始</label><input type="date" class="f-from" value="${esc(t.from_date && t.from_date > '2026-10-04' ? t.from_date : '')}" placeholder="空白＝一直都是"></div>
+        <div class="fld"><label>身分從哪天開始</label><input type="date" class="f-from" value="${esc(t.from_date && t.from_date > '2026-10-04' ? t.from_date : '')}"${list.length && !isNew ? ' readonly title="要換日期：選「＋ 從某天起改設定」新增一筆，再刪掉這筆"' : ''} placeholder="空白＝一直都是"></div>
         <div class="fld"><label>每期目標工時（小時）</label><input type="number" min="0" max="300" class="f-target" value="${t.target_min != null ? Math.round(t.target_min / 60) : ''}" placeholder="正職預設 160"></div>
         <div class="fld"><label>計時：契約每週工時（小時）</label><input type="number" min="0" max="60" class="f-week" value="${t.week_min != null ? Math.round(t.week_min / 60) : ''}"></div>
         <div class="fld"><label>報到日期</label><input type="date" class="f-hire" value="${esc(st.hire_date || '')}"></div>
@@ -112,7 +113,7 @@ export function renderStaff(ctx) {
     if (f('.f-tdel')) f('.f-tdel').onclick = () => busy(f('.f-tdel'), async () => {
       const from = f('.f-term').value;
       if (!(await confirmBox(`刪除「${f('.f-term').selectedOptions[0].textContent}」這筆身分設定？\n刪掉後那段日子改用前一筆的設定。`, '刪除'))) return;
-      try { await call('deleteTerm', { emp_id: c.dataset.emp, from_date: from }); S.termSel[c.dataset.emp] = undefined; await load(); ctx.rerender(); }
+      try { await call('deleteTerm', { emp_id: c.dataset.emp, from_date: from }); S.termSel = S.termSel || {}; delete S.termSel[c.dataset.emp]; await load(); ctx.rerender(); }
       catch (e) { say(f('.f-msg'), e.message, true); }
     });
     f('.f-save').onclick = () => busy(f('.f-save'), async () => {
@@ -123,10 +124,14 @@ export function renderStaff(ctx) {
         await call('saveStaff', { staff: { emp_id: emp, hire_date: f('.f-hire').value || null, leave_date: f('.f-leave').value || null, birthday: f('.f-bday').value || null, phone: f('.f-phone').value || null, ...(f('.f-dst') ? { default_station: f('.f-dst').value || null } : {}),
           prio: f('.f-prio').value === '' ? null : Number(f('.f-prio').value), pref_shift: f('.f-pref').value || null } });
         const kind = f('.f-kind').value;
-        if (kind) await call('saveTerm', { term: { emp_id: emp, from_date: f('.f-from').value || null, kind, target_min: hrs(f('.f-target').value), week_min: hrs(f('.f-week').value), same_days: f('.f-same').checked, allowed_shifts: [...c.querySelectorAll('.f-al:checked')].map((x) => x.value),
+        // 既有那筆：開始日不能在這裡改（改了等於新增一筆、舊的還在，Codex 審查），一律存回選到的那筆
+        const fromDate = f('.f-term') && !newTerm ? f('.f-term').value : (f('.f-from').value || null);
+        try {
+          if (kind) await call('saveTerm', { term: { emp_id: emp, from_date: fromDate, kind, target_min: hrs(f('.f-target').value), week_min: hrs(f('.f-week').value), same_days: f('.f-same').checked, allowed_shifts: [...c.querySelectorAll('.f-al:checked')].map((x) => x.value),
           allowed_shifts_hol: [...c.querySelectorAll('.f-alh:checked')].map((x) => x.value), backup: kind === 'pt' && f('.f-bk').checked } });
+        } catch (e) { throw new Error(`排班順位、報到日等已存；身分設定沒存：${e.message}`); }   // 兩段存檔不是一次完成，講清楚哪些已存（Codex 審查）
         // 沒選身分：其他欄位照存，但要講清楚身分還沒存（2026-10-27 林秀縈：紅標還在、又沒提示，看起來像存失敗）
-        if (kind) { S.termSel = S.termSel || {}; S.termSel[emp] = f('.f-from').value || (newTerm ? '' : f('.f-term') ? f('.f-term').value : '') || undefined; }
+        if (kind) { S.termSel = S.termSel || {}; S.termSel[emp] = fromDate || undefined; }
         S.staffSaved = { emp, bad: !kind, text: kind ? '✓ 已儲存' : '報到日、生日等資料已存。身分還沒設定：請在「身分」選正職或計時再按一次儲存，才排得進班表（開始日期可空白＝一直都是）。' };
         await load(); ctx.rerender();
       } catch (e) { say(f('.f-msg'), e.message, true); }

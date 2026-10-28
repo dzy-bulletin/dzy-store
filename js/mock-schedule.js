@@ -223,7 +223,7 @@ export async function schedule(action, me, b, db, s, hooks) {
         row.default_station = ds;
       }
       if (Object.prototype.hasOwnProperty.call(x, 'prio')) {
-        const pr = x.prio === null || x.prio === '' ? null : Number(x.prio);
+        const pr = x.prio === null || x.prio === '' ? null : typeof x.prio === 'number' || (typeof x.prio === 'string' && /^\d+$/.test(x.prio)) ? Number(x.prio) : NaN;
         if (pr !== null && !(Number.isInteger(pr) && pr >= 1 && pr <= 99)) return fail('BAD_INPUT', '排班順位要是 1～99 的整數（1 最優先），不設就留空白');
         row.prio = pr;
       }
@@ -266,7 +266,8 @@ export async function schedule(action, me, b, db, s, hooks) {
       const nt = { kind: t.kind, target_min: t.target_min == null && t.kind === 'ft' ? 9600 : t.target_min, week_min: t.week_min == null ? null : t.week_min, same_days: t.same_days ? 1 : 0,
         allowed_shifts: (t.allowed_shifts || []).filter((x) => st.shifts[x]), allowed_shifts_hol: (t.allowed_shifts_hol || []).filter((x) => st.shifts[x]), backup: t.backup ? 1 : 0 };
       const old = (st.terms[t.emp_id] || []).find((x) => x.from_date === from);
-      if (old && ['kind', 'target_min', 'week_min', 'same_days', 'backup'].every((k) => (old[k] ?? null) === nt[k])
+      const norm = (x) => ({ kind: x.kind, target_min: x.target_min ?? null, week_min: x.week_min ?? null, same_days: x.same_days ? 1 : 0, backup: x.backup ? 1 : 0 });   // 舊資料／示範種子少欄位：先正規化再比（Codex 審查）
+      if (old && ['kind', 'target_min', 'week_min', 'same_days', 'backup'].every((k) => norm(old)[k] === norm(nt)[k])
         && JSON.stringify(old.allowed_shifts || []) === JSON.stringify(nt.allowed_shifts) && JSON.stringify(old.allowed_shifts_hol || []) === JSON.stringify(nt.allowed_shifts_hol)) return ok();   // 內容沒變放行（照伺服器）
       const lk = termLocked(st, from); if (lk) return lk;
       const list = (st.terms[t.emp_id] || []).filter((x) => x.from_date !== from);
@@ -278,6 +279,7 @@ export async function schedule(action, me, b, db, s, hooks) {
     case 'deleteTerm': {   // 照伺服器：至少留一筆；會影響已鎖定的期就擋
       const list = st.terms[b.emp_id] || [];
       if (list.length <= 1) return fail('BAD_INPUT', '至少要留一筆身分設定');
+      if (b.from_date === list.map((x) => x.from_date).sort()[0]) return fail('BAD_INPUT', '最早那一筆身分設定不能刪（刪了之後那段日子就沒有身分、排不了班）；要改內容請直接修改它');
       const lk = termLocked(st, String(b.from_date || '')); if (lk) return lk;
       st.terms[b.emp_id] = list.filter((x) => x.from_date !== b.from_date);
       return ok();

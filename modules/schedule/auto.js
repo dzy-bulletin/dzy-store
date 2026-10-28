@@ -253,7 +253,7 @@ export function assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixed
   for (const e of workers.filter(x => prefOf(ctx, x) && assign[x] && assign[x] !== prefOf(ctx, x))) {
     const p = prefOf(ctx, e), cur = assign[e];
     if (!ok(e, p)) continue;
-    const y = workers.find(x => x !== e && assign[x] === p && (prefOf(ctx, x) !== p || prioOf(ctx, x) > prioOf(ctx, e)) && ok(x, cur));
+    const y = workers.slice().reverse().find(x => x !== e && assign[x] === p && (prefOf(ctx, x) !== p || prioOf(ctx, x) > prioOf(ctx, e)) && ok(x, cur));
     if (y) { assign[y] = cur; assign[e] = p; continue; }
     const mx = (need[p] || {}).max;
     if ((mx == null || (count[p] || 0) < mx) && (count[cur] || 0) > ((need[cur] || {}).min || 0)) { assign[e] = p; count[p] = (count[p] || 0) + 1; count[cur]--; }
@@ -559,7 +559,9 @@ function scheduleOnce(ctx, opts, guoSkip) {
   // 備援補了哪幾天：由 rules.js 的 B1 放進提醒清單（重新整理也看得到），這裡不再另外列
   // 7. 優先排上班（2026-10-28 Eason）：有人設了排班順位時，某天某班超過最多人數，就讓順位最後的計時同仁那天改休（沒設順位的算最後），
   //    直到不超過；正職、指定、手動、請假的格子不動。整期重驗，不能多出「擋」或缺人。沒有任何人設順位就跳過（維持原本的排法）
-  if (ctx.staff.some(st => st.prio != null)) {
+  if (ctx.staff.some(st => st.prio != null && dates.some(d => employed(st, d)))) {   // 只看本期在職的人（離職的人留著順位不該啟動，Fable 審查）
+    const trimmed = {};
+    const worked = (e) => dates.filter(x => out[e][x] && out[e][x].shift_id).length;
     const offType = (e, d) => { const w = Math.floor(dates.indexOf(d) / 7); return dates.slice(w * 7, w * 7 + 7).some(x => out[e][x] && out[e][x].day_type === 'R') ? 'H' : 'R'; };
     for (const d of dates) {
       const need = needOf(ctx, d);
@@ -567,17 +569,19 @@ function scheduleOnce(ctx, opts, guoSkip) {
         if (need[sid].max == null) continue;
         const on = () => ctx.staff.filter(st => employed(st, d) && (out[st.emp_id][d] || {}).shift_id === sid);
         const cands = on().filter(st => { const c = out[st.emp_id][d], t = termAt(ctx.terms, st.emp_id, d); return t && t.kind === 'pt' && c.day_type === 'W' && c.source === 'auto' && !pinOf(ctx, st.emp_id, d); })
-          .sort((a, b) => prioOf(ctx, b.emp_id) - prioOf(ctx, a.emp_id) || (a.emp_id < b.emp_id ? 1 : -1));
+          .sort((a, b) => prioOf(ctx, b.emp_id) - prioOf(ctx, a.emp_id) || worked(b.emp_id) - worked(a.emp_id) || (a.emp_id < b.emp_id ? 1 : -1));   // 同順位：這期上班天數多的先休，輪流（Codex 審查：原本照編號固定刷同一人，會有人整期 0 天）
         for (const st of cands) {
           if (on().length <= need[sid].max) break;
           const e = st.emp_id, before = out[e][d];
           out[e][d] = { day_type: offType(e, d), shift_id: null, leave: null, source: 'auto' };
           const tres = checkPeriod(merged(ctx, dates, out));
-          if (blockCount(tres) <= blockCount(res) && d1Count(tres) <= d1Count(res)) res = tres;
+          if (blockCount(tres) <= blockCount(res) && d1Count(tres) <= d1Count(res)) { res = tres; (trimmed[e] = trimmed[e] || []).push(d); }
           else out[e][d] = before;
         }
       }
     }
+    // 被刷掉的天數列在提醒裡（有時整週一天都沒排到），店長才知道為什麼他班少（Fable 審查）
+    for (const e in trimmed) problems.push(`${staffRow(ctx, e).name || e} 順位在後，人手過多的 ${trimmed[e].length} 天改休（${trimmed[e].map(md).join('、')}）`);
   }
 
   const blocks = res.filter(r => r.level === 'block');
