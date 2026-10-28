@@ -20,9 +20,9 @@ export function renderStaff(ctx) {
     const t = termAt(D.terms, st.emp_id, st.hire_date && st.hire_date > asOf ? st.hire_date : asOf) || {};
     const lv = st.hire_date ? leaveOf(t, st.hire_date, D.today) : null;
     const lvTxt = !lv ? '填報到日期後顯示' : lv.days == null ? `${lv.hours} 小時（照工時比例）` : `${lv.days} 天`;
-    const allowed = t.allowed_shifts || [];
+    const allowed = t.allowed_shifts || [], allowedHol = t.allowed_shifts_hol || [];
     const hist = (D.terms[st.emp_id] || []).length > 1 ? `<div class="hint">身分紀錄：${(D.terms[st.emp_id] || []).map((x) => `${esc(x.from_date)} 起${x.kind === 'ft' ? '正職' : '計時'}`).join('、')}</div>` : '';
-    return `<div class="card sc-staff" data-emp="${esc(st.emp_id)}"><div class="row"><h3>${esc(st.name)}</h3><span class="hint">${esc(st.emp_id)}</span>${st.leave_date ? `<span class="tag">${esc(st.leave_date)} 離職</span>` : ''}${!t.kind ? '<span class="tag bad">還沒設正職或計時</span>' : ''}${!st.hire_date && !st.leave_date ? '<span class="tag bad">還沒填報到日期</span>' : ''}</div>
+    return `<div class="card sc-staff" data-emp="${esc(st.emp_id)}"><div class="row"><h3>${esc(st.name)}</h3><span class="hint">${esc(st.emp_id)}</span>${st.leave_date ? `<span class="tag">${esc(st.leave_date)} 離職</span>` : ''}${!t.kind ? '<span class="tag bad">還沒設正職或計時</span>' : ''}${!st.hire_date && !st.leave_date ? '<span class="tag bad">還沒填報到日期</span>' : ''}${t.kind === 'pt' && t.backup ? '<span class="tag">備援</span>' : ''}</div>
       <div class="grid2">
         <div class="fld"><label>身分</label><select class="f-kind"><option value="">請選擇</option><option value="ft" ${t.kind === 'ft' ? 'selected' : ''}>正職（四週變形）</option><option value="pt" ${t.kind === 'pt' ? 'selected' : ''}>計時（每週一例一休）</option></select></div>
         <div class="fld"><label>身分從哪天開始</label><input type="date" class="f-from" value="${esc(t.from_date && t.from_date > '2026-10-04' ? t.from_date : '')}" placeholder="空白＝一直都是"></div>
@@ -34,7 +34,9 @@ export function renderStaff(ctx) {
         <div class="fld"><label>手機</label><input type="tel" class="f-phone" value="${esc(st.phone || '')}" maxlength="20"></div>
       </div>
       <label class="sc-chk"><input type="checkbox" class="f-same" ${t.same_days ? 'checked' : ''}> 計時但每週上班天數跟正職一樣（特休給完整天數）</label>
-      <div class="fld mt"><label>只能上的班（都不勾＝每班都能上）</label><div class="row">${shifts.map((s) => `<label class="sc-chk"><input type="checkbox" class="f-al" value="${esc(s.id)}" ${allowed.includes(s.id) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('')}</div></div>
+      <label class="sc-chk f-bkbox"${t.kind === 'pt' ? '' : ' hidden'}><input type="checkbox" class="f-bk" ${t.kind === 'pt' && t.backup ? 'checked' : ''}> 備援：其他同仁都排不開才排他（只限計時；自動排班先不排他，哪天缺人才叫他補）</label>
+      <div class="fld mt"><label>平日只能上的班（都不勾＝每班都能上）</label><div class="row">${shifts.map((s) => `<label class="sc-chk"><input type="checkbox" class="f-al" value="${esc(s.id)}" ${allowed.includes(s.id) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('')}</div></div>
+      <div class="fld mt"><label>假日只能上的班（六日、國定假日、補假；都不勾＝跟平日一樣）</label><div class="row">${shifts.map((s) => `<label class="sc-chk"><input type="checkbox" class="f-alh" value="${esc(s.id)}" ${allowedHol.includes(s.id) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('')}</div></div>
       ${stations.length ? `<div class="fld mt"><label>預設站別（新排的上班日自動帶入，班表上可以再改）</label><select class="f-dst"><option value="">不設</option>${
         stations.filter((x) => x.active || x.id === st.default_station).map((x) => `<option value="${esc(x.id)}" ${x.id === st.default_station ? 'selected' : ''}>${esc(x.name)}${x.active ? '' : '（已停用）'}</option>`).join('')}</select></div>` : ''}
       <p class="hint">特休：${lvTxt}</p>${hist}
@@ -74,7 +76,9 @@ export function renderStaff(ctx) {
       <div class="fld"><label for="hiPhone">手機</label><input type="tel" id="hiPhone" maxlength="20"></div>
     </div>
     <label class="sc-chk"><input type="checkbox" id="hiSame"> 計時但每週上班天數跟正職一樣（特休給完整天數）</label>
-    <div class="fld mt"><label>只能上的班（都不勾＝每班都能上）</label><div class="row">${shifts.map((s) => `<label class="sc-chk"><input type="checkbox" class="hi-al" value="${esc(s.id)}"> ${esc(s.name)}</label>`).join('')}</div></div>
+    <label class="sc-chk" id="hiBkBox" hidden><input type="checkbox" id="hiBk"> 備援：其他同仁都排不開才排他（只限計時）</label>
+    <div class="fld mt"><label>平日只能上的班（都不勾＝每班都能上）</label><div class="row">${shifts.map((s) => `<label class="sc-chk"><input type="checkbox" class="hi-al" value="${esc(s.id)}"> ${esc(s.name)}</label>`).join('')}</div></div>
+    <div class="fld mt"><label>假日只能上的班（六日、國定假日、補假；都不勾＝跟平日一樣）</label><div class="row">${shifts.map((s) => `<label class="sc-chk"><input type="checkbox" class="hi-alh" value="${esc(s.id)}"> ${esc(s.name)}</label>`).join('')}</div></div>
     <div class="row mt"><button type="button" class="btn" id="hiAdd">新增同仁</button></div>
     <div id="hiMsg" class="okmsg" role="status"></div></details></div>
   ${onJob.map(card).join('')}
@@ -92,12 +96,14 @@ export function renderStaff(ctx) {
 
   el.querySelectorAll('.sc-staff').forEach((c) => {
     const f = (s) => c.querySelector(s);
+    f('.f-kind').onchange = () => { f('.f-bkbox').hidden = f('.f-kind').value !== 'pt'; };   // 備援只限計時
     f('.f-save').onclick = () => busy(f('.f-save'), async () => {
       const emp = c.dataset.emp;
       try {
         await call('saveStaff', { staff: { emp_id: emp, hire_date: f('.f-hire').value || null, leave_date: f('.f-leave').value || null, birthday: f('.f-bday').value || null, phone: f('.f-phone').value || null, ...(f('.f-dst') ? { default_station: f('.f-dst').value || null } : {}) } });
         const kind = f('.f-kind').value;
-        if (kind) await call('saveTerm', { term: { emp_id: emp, from_date: f('.f-from').value || null, kind, target_min: hrs(f('.f-target').value), week_min: hrs(f('.f-week').value), same_days: f('.f-same').checked, allowed_shifts: [...c.querySelectorAll('.f-al:checked')].map((x) => x.value) } });
+        if (kind) await call('saveTerm', { term: { emp_id: emp, from_date: f('.f-from').value || null, kind, target_min: hrs(f('.f-target').value), week_min: hrs(f('.f-week').value), same_days: f('.f-same').checked, allowed_shifts: [...c.querySelectorAll('.f-al:checked')].map((x) => x.value),
+          allowed_shifts_hol: [...c.querySelectorAll('.f-alh:checked')].map((x) => x.value), backup: kind === 'pt' && f('.f-bk').checked } });
         // 沒選身分：其他欄位照存，但要講清楚身分還沒存（2026-10-27 林秀縈：紅標還在、又沒提示，看起來像存失敗）
         S.staffSaved = { emp, bad: !kind, text: kind ? '✓ 已儲存' : '報到日、生日等資料已存。身分還沒設定：請在「身分」選正職或計時再按一次儲存，才排得進班表（開始日期可空白＝一直都是）。' };
         await load(); ctx.rerender();
@@ -110,6 +116,7 @@ export function renderStaff(ctx) {
     say(sc.querySelector('.f-msg'), saved.text, saved.bad);
     if (saved.bad) { sc.querySelector('.f-kind').focus(); sc.scrollIntoView({ block: 'center' }); }
   }
+  q('#hiKind').onchange = () => { q('#hiBkBox').hidden = q('#hiKind').value !== 'pt'; };   // 備援只限計時
   q('#hiAdd').onclick = () => busy(q('#hiAdd'), async () => {
     const box = q('#hiMsg');
     const name = q('#hiName').value.trim();
@@ -121,7 +128,8 @@ export function renderStaff(ctx) {
     if (!noClock && !(await confirmBox(`要新增「${name}」嗎？\n會同時在打卡系統建立他的帳號，他就能開始打卡。`, '新增'))) return;
     try {
       const r = await call('addHire', { hire: { name, hire_date: q('#hiHire').value, kind: q('#hiKind').value, target_min: hrs(q('#hiTarget').value), week_min: hrs(q('#hiWeek').value),
-        same_days: q('#hiSame').checked, birthday: q('#hiBday').value || null, phone: q('#hiPhone').value || null, allowed_shifts: [...el.querySelectorAll('.hi-al:checked')].map((x) => x.value) } });
+        same_days: q('#hiSame').checked, birthday: q('#hiBday').value || null, phone: q('#hiPhone').value || null, allowed_shifts: [...el.querySelectorAll('.hi-al:checked')].map((x) => x.value),
+        allowed_shifts_hol: [...el.querySelectorAll('.hi-alh:checked')].map((x) => x.value), backup: q('#hiKind').value === 'pt' && q('#hiBk').checked } });
       S.hireResult = { name: r.name, emp_id: r.emp_id, clock: r.clock, link: r.clock && r.key ? clockLink(r.clockStore, r.key) : '' };
       await load(); ctx.rerender();
     } catch (e) { say(box, e.code === 'NOT_FOUND' ? '伺服器還沒更新到這個功能，請先到「出勤核定 › 員工名冊」建打卡帳號，再回來補報到日與身分。' : e.message, true); }

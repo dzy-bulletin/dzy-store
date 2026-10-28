@@ -197,7 +197,7 @@ export async function schedule(action, me, b, db, s, hooks) {
       const tpl = [['wd', '平日'], ['sat', '週六'], ['sun', '週日']].filter(([k]) => (st.tpl[k] || {})[id]).map(([, n]) => n); if (tpl.length) uses.push(`每班人數範本（${tpl.join('、')}）`);
       const dd = Object.keys(st.dayDemand).filter((d) => (st.dayDemand[d] || {})[id]).sort().map((d) => [d, null]); if (dd.length) uses.push(`單日人數 ${dd.length} 天（${list(dd, 3)}）`);
       const pins = cells(st.pins, (c) => c.kind === 'shift' && c.shift_id === id); if (pins.length) uses.push(`指定班別 ${pins.length} 格（${list(pins, 2)}）`);
-      const allow = st.staff.filter((x) => (st.terms[x.emp_id] || []).some((t) => (t.allowed_shifts || []).includes(id))).map((x) => [null, x.emp_id]); if (allow.length) uses.push(`同仁「只能上的班」${allow.length} 人（${list(allow, 3)}）`);
+      const allow = st.staff.filter((x) => (st.terms[x.emp_id] || []).some((t) => (t.allowed_shifts || []).includes(id) || (t.allowed_shifts_hol || []).includes(id))).map((x) => [null, x.emp_id]); if (allow.length) uses.push(`同仁「只能上的班」${allow.length} 人（${list(allow, 3)}）`);
       const fx = st.staff.filter((x) => x.fixed_shift === id).map((x) => [null, x.emp_id]); if (fx.length) uses.push(`央廚固定班別 ${fx.length} 人（${list(fx, 3)}）`);
       if (action === 'shiftUses') return ok({ uses });
       if (uses.length) return fail('BAD_INPUT', `這個班別已經用在：${uses.join('；')}。用過的班別不能刪除（舊班表、LINE 班表與出勤核定都還要對照它），不用的話請取消「使用中」再按儲存。`);
@@ -226,6 +226,7 @@ export async function schedule(action, me, b, db, s, hooks) {
       if (name.length > 20) return fail('BAD_INPUT', '姓名太長');
       if (!h.hire_date) return fail('BAD_INPUT', '請填報到日期（報到日前不會排班）');
       if (!['ft', 'pt'].includes(h.kind)) return fail('BAD_INPUT', '請選正職或計時');
+      if (h.backup && h.kind !== 'pt') return fail('BAD_INPUT', '備援只限計時同仁（正職每週要排滿基本天數）');
       if (h.phone && !/^[0-9+\-\s]{6,20}$/.test(h.phone)) return fail('BAD_INPUT', '手機格式不對');
       const today = todayTaipei();
       const dup = st.staff.find((x) => x.name === name && (!x.leave_date || x.leave_date >= today));
@@ -237,15 +238,18 @@ export async function schedule(action, me, b, db, s, hooks) {
         e = r.data.emp_id; key = r.data.key;
       } else e = 'local-' + String(st.staff.filter((y) => y.emp_id.startsWith('local-')).length + 1).padStart(6, '0');
       st.staff.push({ emp_id: e, name, hire_date: h.hire_date, leave_date: null, birthday: h.birthday || null, phone: h.phone || null, sort: st.staff.length });
-      st.terms[e] = [{ from_date: '2026-10-04', kind: h.kind, target_min: h.target_min == null && h.kind === 'ft' ? 9600 : h.target_min, week_min: h.week_min == null ? null : h.week_min, same_days: h.same_days ? 1 : 0, allowed_shifts: (h.allowed_shifts || []).filter((x) => st.shifts[x]) }];
+      st.terms[e] = [{ from_date: '2026-10-04', kind: h.kind, target_min: h.target_min == null && h.kind === 'ft' ? 9600 : h.target_min, week_min: h.week_min == null ? null : h.week_min, same_days: h.same_days ? 1 : 0, allowed_shifts: (h.allowed_shifts || []).filter((x) => st.shifts[x]),
+        allowed_shifts_hol: (h.allowed_shifts_hol || []).filter((x) => st.shifts[x]), backup: h.backup ? 1 : 0 }];
       return ok({ emp_id: e, name, clock: clockAlias !== null, clockStore: clockAlias, key });
     }
     case 'saveTerm': {
       const t = b.term || {};
       if (!['ft', 'pt'].includes(t.kind)) return fail('BAD_INPUT', '請選正職或計時');
+      if (t.backup && t.kind !== 'pt') return fail('BAD_INPUT', '備援只限計時同仁（正職每週要排滿基本天數）');
       const from = t.from_date || '2026-10-04';
       const list = (st.terms[t.emp_id] || []).filter((x) => x.from_date !== from);
-      list.push({ from_date: from, kind: t.kind, target_min: t.target_min == null && t.kind === 'ft' ? 9600 : t.target_min, week_min: t.week_min, same_days: t.same_days ? 1 : 0, allowed_shifts: t.allowed_shifts || [] });
+      list.push({ from_date: from, kind: t.kind, target_min: t.target_min == null && t.kind === 'ft' ? 9600 : t.target_min, week_min: t.week_min, same_days: t.same_days ? 1 : 0, allowed_shifts: t.allowed_shifts || [],
+        allowed_shifts_hol: (t.allowed_shifts_hol || []).filter((x) => st.shifts[x]), backup: t.backup ? 1 : 0 });
       st.terms[t.emp_id] = list.sort((a, x) => (a.from_date < x.from_date ? -1 : 1));
       return ok();
     }

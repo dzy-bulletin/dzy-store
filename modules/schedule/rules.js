@@ -4,7 +4,8 @@
 //   period: 'T01',
 //   shifts: { S1: {id,name,start,end,break_min}, … },
 //   staff: [{ emp_id, name, hire_date, leave_date }],
-//   terms: { emp_id: [{ from_date, kind:'ft'|'pt', target_min, week_min, same_days, allowed_shifts:[] }] },
+//   terms: { emp_id: [{ from_date, kind:'ft'|'pt', target_min, week_min, same_days, allowed_shifts:[], allowed_shifts_hol:[], backup:0|1 }] },
+//     allowed_shifts_hol＝假日（六日、國定假日、補假）只能上的班，空＝跟平日一樣；backup＝備援（只限計時：其他人排不了才排他）
 //   days: { emp_id: { 'YYYY-MM-DD': { day_type:'W'|'R'|'H'|'L', shift_id, leave } } }   // 本期＋前期最後 13 天
 //   actuals: { emp_id: { date: {start,end} } }       // 前期沒有 days 時用（T01 的 10 月實際出勤）
 //   demand: { date: { shift_id: {min,max} } },
@@ -41,6 +42,19 @@ export function termAt(terms, emp, date) {
 export const isHoliday = (hol, d) => !!(hol && hol.days && hol.days[d]);
 /** 國定假日或補假（holidays.json 的 days＋gov.off）的名稱；不是回 ''。總部自填／央廚固定排班用（門市排班的補假另有一套 C7 規則） */
 export const holName = (hol, d) => (hol && ((hol.days && hol.days[d]) || (hol.gov && hol.gov.off && hol.gov.off[d]))) || '';
+/** 排班用的「假日」：六日（行政院補班的週六除外）、國定假日、補假，跟班表淡紅底同一套（board.js isWe）（2026-10-28 Eason：國定假日算假日） */
+export const isRedDay = (hol, d) => {
+  const w = weekday(d), gov = (hol && hol.gov) || {};
+  return ((w === 0 || w === 6) && !(gov.work || []).includes(d)) || !!(hol && hol.days && hol.days[d]) || !!(gov.off && gov.off[d]);
+};
+/** 這個身分條款在 d 那天只能上的班；空陣列＝每班都能上。假日有另外設就用假日那組（2026-10-28 Eason） */
+export const allowedList = (t, hol, d) => {
+  if (!t) return [];
+  if (t.allowed_shifts_hol && t.allowed_shifts_hol.length && isRedDay(hol, d)) return t.allowed_shifts_hol;
+  return t.allowed_shifts || [];
+};
+/** 這天他是不是備援（只限計時；依當天的身分條款，期中開啟／解除都照日期算） */
+export const backupAt = (terms, emp, d) => { const t = termAt(terms, emp, d); return !!(t && t.kind === 'pt' && t.backup); };
 export const employed = (st, d) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date);
 
 /** 合法組合（spec 第 3 節）。回傳錯誤字串或 null */
@@ -251,14 +265,19 @@ export function checkPeriod(ctx) {
     for (const d of dates) {
       const c = mine[d];
       const t = termAt(ctx.terms, e, d);
-      if (c && c.shift_id && t && t.allowed_shifts && t.allowed_shifts.length && !t.allowed_shifts.includes(c.shift_id))
-        add('D3', 'block', e, d, `${who} 不能上${(ctx.shifts[c.shift_id] || {}).name || c.shift_id}（${md(d)}）`);
+      const al = allowedList(t, ctx.holidays, d);
+      if (c && c.shift_id && al.length && !al.includes(c.shift_id))
+        add('D3', 'block', e, d, `${who} ${isRedDay(ctx.holidays, d) && t.allowed_shifts_hol && t.allowed_shifts_hol.length ? '假日' : ''}不能上${(ctx.shifts[c.shift_id] || {}).name || c.shift_id}（${md(d)}）`);
       const p = (ctx.pins && ctx.pins[e] || {})[d];
       if (!p || !c) continue;
       if (p.kind === 'off' && c.shift_id) add('D4', 'block', e, d, `${who} ${md(d)} 指定休假，卻排了班`);
       if (p.kind === 'work' && !c.shift_id) add('D4', 'block', e, d, `${who} ${md(d)} 指定上班，卻沒有排班`);
       if (p.kind === 'shift' && c.shift_id !== p.shift_id) add('D4', 'block', e, d, `${who} ${md(d)} 指定上${(ctx.shifts[p.shift_id] || {}).name || p.shift_id}，卻排了別的`);
     }
+
+    // 備援這期被自動叫來補的日子（手動排、指定上班／班別的不算）：放進提醒清單，重新整理也看得到（2026-10-28）
+    const bkDays = dates.filter(d => mine[d] && mine[d].shift_id && backupAt(ctx.terms, e, d) && mine[d].source !== 'manual' && mine[d].source !== 'pin' && ((ctx.pins && ctx.pins[e] || {})[d] || {}).kind !== 'work');   // 手動排、指定的不算補位
+    if (bkDays.length) add('B1', 'info', e, null, `備援 ${who} 這期排了 ${bkDays.length} 天（${bkDays.map(md).join('、')}），是其他同仁排不開時補的`);
   }
 
   if (noPrior.length) add('N0', 'info', null, null, `${noPrior.length === ctx.staff.length ? '全部同仁' : noPrior.join('、')}沒有前期出勤資料，連續上班天數與換班間隔從本期第 1 天開始算`);
