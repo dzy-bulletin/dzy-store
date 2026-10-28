@@ -6,7 +6,7 @@
 //       → 3 逐日配對（先滿足最少人數，用增廣路徑做二分圖配對）→ 4 修復（同週對調休假日）→ 4.2 備援同仁補缺人 → 5 整期檢查，沒有「擋」才回傳
 import { periodDates, addDays } from './period.js';
 import { shiftMinutes, gapMinutes } from './hours.js';
-import { checkPeriod, termAt, employed, isHoliday, allowedList, backupAt, MIN_GAP, FT_OT_MAX } from './rules.js';
+import { checkPeriod, termAt, employed, isHoliday, allowedList, backupAt, ptCapMin, MIN_GAP, FT_OT_MAX } from './rules.js';
 
 const DAY_MAX = 12 * 60, REPAIR_MAX = 200;
 const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
@@ -20,6 +20,10 @@ function allowedOf(ctx, emp, d) {
 const bkDay = (ctx, e, d) => backupAt(ctx.terms, e, d);
 /** 整期在職的日子全是備援：不進一般排休（不然會擠動別人的輪替順序） */
 const allBackup = (ctx, st, dates) => { const inP = dates.filter(d => employed(st, d)); return inP.length > 0 && inP.every(d => bkDay(ctx, st.emp_id, d)); };
+/** 排班順位（1 最優先；沒設＝最後）與優先班別（2026-10-28 Eason） */
+const staffRow = (ctx, e) => ctx.staff.find(s => s.emp_id === e) || {};
+const prioOf = (ctx, e) => { const p = staffRow(ctx, e).prio; return p == null ? Infinity : p; };
+const prefOf = (ctx, e) => staffRow(ctx, e).pref_shift || null;
 const pinOf = (ctx, e, d) => ((ctx.pins || {})[e] || {})[d] || null;
 const needOf = (ctx, d) => (ctx.demand || {})[d] || {};
 
@@ -199,6 +203,7 @@ export function assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixed
   const capLeft = (extra && extra.capLeft) || {};                    // 計時同仁這期還剩幾分鐘可排（2026-10-11 Codex 審查：原本只用平均班長估天數，會超過上限）
   const fixedShift = (extra && extra.fixedShift) || {};              // 這天已固定班的人 → 班別（不排同班的配對要一起看）
   const shiftIds = Object.keys(ctx.shifts).filter(s => ctx.shifts[s].active !== 0);
+  workers = workers.slice().sort((a, b) => prioOf(ctx, a) - prioOf(ctx, b));     // 順位前面的先挑（沒人設順位時順序不變：sort 是穩定的）
   const ok = (e, s) => {
     if (!allowedOf(ctx, e, d).includes(s)) return false;
     const sh = ctx.shifts[s];
@@ -210,7 +215,9 @@ export function assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixed
     if (nextShift[e] && gapMinutes(d, sh, addDays(d, 1), nextShift[e]) < MIN_GAP) return false;
     return true;
   };
-  const cost = (e, s, i) => (fairness[e] && fairness[e][s] || 0) * 10 + ((i + shiftIds.indexOf(s)) % shiftIds.length) * 0.01;
+  // 優先班別蓋過輪替公平：有設的人先拿，同一班兩人都想要時順位前面的先拿
+  const prefBonus = (e, s) => (prefOf(ctx, e) === s ? -100000 + Math.min(prioOf(ctx, e), 999) * 10 : 0);
+  const cost = (e, s, i) => prefBonus(e, s) + (fairness[e] && fairness[e][s] || 0) * 10 + ((i + shiftIds.indexOf(s)) % shiftIds.length) * 0.01;
   // 先滿足最少人數：每個 slot 是「某班的第 n 個最少名額」，用增廣路徑找最大配對
   const slots = [];
   for (const s of shiftIds) for (let n = 0; n < Math.max(0, ((need[s] || {}).min || 0) - (fixedCount[s] || 0)); n++) slots.push(s);
@@ -241,6 +248,16 @@ export function assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixed
     });
     assign[e] = opts[0]; count[opts[0]] = (count[opts[0]] || 0) + 1;
   });
+  // 優先班別補強：增廣路徑配對不看偏好，配完再讓順位前面的人換到他的優先班別——
+  //   跟那班裡「不偏好這班、或順位比他後面」的人對調（雙方都要合規），或那班還有名額、他原本那班換走後不會低於最少人數就直接換
+  for (const e of workers.filter(x => prefOf(ctx, x) && assign[x] && assign[x] !== prefOf(ctx, x))) {
+    const p = prefOf(ctx, e), cur = assign[e];
+    if (!ok(e, p)) continue;
+    const y = workers.find(x => x !== e && assign[x] === p && (prefOf(ctx, x) !== p || prioOf(ctx, x) > prioOf(ctx, e)) && ok(x, cur));
+    if (y) { assign[y] = cur; assign[e] = p; continue; }
+    const mx = (need[p] || {}).max;
+    if ((mx == null || (count[p] || 0) < mx) && (count[cur] || 0) > ((need[cur] || {}).min || 0)) { assign[e] = p; count[p] = (count[p] || 0) + 1; count[cur]--; }
+  }
   // 不排同班的兩人（spec 5.5 D5）：配好後若同班，找別班一位可以對調的人交換（雙方都要合規）。
   // 其中一人是手動固定的班也要算（2026-10-11 Codex 審查）：固定的不能動，只能動另一個人
   const shiftOf = (e) => assign[e] || fixedShift[e];
@@ -284,9 +301,11 @@ function buildDays(ctx, dates, fixed, plan) {
   // 計時同仁每期時數上限：先扣掉已固定的班，配班時逐天扣
   const capLeft = {};
   for (const st of ctx.staff) {
-    const t = termAt(ctx.terms, st.emp_id, dates.find(d => employed(st, d)) || dates[0]);
-    if (!t || t.kind !== 'pt' || t.target_min == null) continue;
-    capLeft[st.emp_id] = t.target_min - dates.reduce((a, d) => { const c = fixed[st.emp_id][d]; return a + (c && c.shift_id && ctx.shifts[c.shift_id] ? shiftMinutes(ctx.shifts[c.shift_id]) : 0); }, 0);
+    const first = dates.find(d => employed(st, d)) || dates[0];
+    const t = termAt(ctx.terms, st.emp_id, first);
+    const cap = ptCapMin(ctx.terms, st.emp_id, dates, first);           // 期中改目標工時：照天數比例分段，跟 P6 同一套（2026-10-28 Codex 審查）
+    if (!t || t.kind !== 'pt' || cap == null) continue;
+    capLeft[st.emp_id] = cap - dates.reduce((a, d) => { const c = fixed[st.emp_id][d]; return a + (c && c.shift_id && ctx.shifts[c.shift_id] ? shiftMinutes(ctx.shifts[c.shift_id]) : 0); }, 0);
   }
   for (const d of dates) {
     const workers = [];
@@ -538,6 +557,29 @@ function scheduleOnce(ctx, opts, guoSkip) {
   }
 
   // 備援補了哪幾天：由 rules.js 的 B1 放進提醒清單（重新整理也看得到），這裡不再另外列
+  // 7. 優先排上班（2026-10-28 Eason）：有人設了排班順位時，某天某班超過最多人數，就讓順位最後的計時同仁那天改休（沒設順位的算最後），
+  //    直到不超過；正職、指定、手動、請假的格子不動。整期重驗，不能多出「擋」或缺人。沒有任何人設順位就跳過（維持原本的排法）
+  if (ctx.staff.some(st => st.prio != null)) {
+    const offType = (e, d) => { const w = Math.floor(dates.indexOf(d) / 7); return dates.slice(w * 7, w * 7 + 7).some(x => out[e][x] && out[e][x].day_type === 'R') ? 'H' : 'R'; };
+    for (const d of dates) {
+      const need = needOf(ctx, d);
+      for (const sid in need) {
+        if (need[sid].max == null) continue;
+        const on = () => ctx.staff.filter(st => employed(st, d) && (out[st.emp_id][d] || {}).shift_id === sid);
+        const cands = on().filter(st => { const c = out[st.emp_id][d], t = termAt(ctx.terms, st.emp_id, d); return t && t.kind === 'pt' && c.day_type === 'W' && c.source === 'auto' && !pinOf(ctx, st.emp_id, d); })
+          .sort((a, b) => prioOf(ctx, b.emp_id) - prioOf(ctx, a.emp_id) || (a.emp_id < b.emp_id ? 1 : -1));
+        for (const st of cands) {
+          if (on().length <= need[sid].max) break;
+          const e = st.emp_id, before = out[e][d];
+          out[e][d] = { day_type: offType(e, d), shift_id: null, leave: null, source: 'auto' };
+          const tres = checkPeriod(merged(ctx, dates, out));
+          if (blockCount(tres) <= blockCount(res) && d1Count(tres) <= d1Count(res)) res = tres;
+          else out[e][d] = before;
+        }
+      }
+    }
+  }
+
   const blocks = res.filter(r => r.level === 'block');
   if (blocks.length) return { ok: false, days: null, problems: problems.concat(blocks.map(b => b.msg)), results: res };
   return { ok: true, days: out, problems, results: res };

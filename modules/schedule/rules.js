@@ -55,6 +55,19 @@ export const allowedList = (t, hol, d) => {
 };
 /** 這天他是不是備援（只限計時；依當天的身分條款，期中開啟／解除都照日期算） */
 export const backupAt = (terms, emp, d) => { const t = termAt(terms, emp, d); return !!(t && t.kind === 'pt' && t.backup); };
+/** 計時這期的時數上限（分鐘）：期中改目標工時時照天數比例分段（2026-10-28 Eason）——每天算「當天條款的目標 ÷ 28」加總。
+ *  期首前還沒生效的日子沿用 first 那天的條款（同一個條款時就等於原本的目標，期中到職的人不會被打折）；有一段沒設上限就回 null（不限）。 */
+export function ptCapMin(terms, emp, dates, first) {
+  const t0 = termAt(terms, emp, first || dates[0]);
+  let sum = 0, any = false;
+  for (const d of dates) {
+    const t = termAt(terms, emp, d) || t0;
+    if (!t || t.kind !== 'pt') continue;
+    if (t.target_min == null) return null;
+    sum += t.target_min / dates.length; any = true;
+  }
+  return any ? Math.round(sum) : null;
+}
 export const employed = (st, d) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date);
 
 /** 合法組合（spec 第 3 節）。回傳錯誤字串或 null */
@@ -249,7 +262,8 @@ export function checkPeriod(ctx) {
       }
       for (const d of dates) if (mins[d].work > PT_DAY_NORMAL && mins[d].work <= DAY_MAX && mine[d].day_type !== 'H') add('P4', 'warn', e, d, `${who} ${md(d)} 上班 ${hm(mins[d].work)}，超過 8 小時的部分算加班`);
       const total = dates.reduce((a, d) => a + mins[d].work, 0);
-      if (t0.target_min != null && total > t0.target_min) add('P6', 'warn', e, end, `${who} 這期排了 ${hm(total)}，超過上限 ${hm(t0.target_min)}`);
+      const cap = ptCapMin(ctx.terms, e, dates, inPeriod[0]);              // 期中改目標工時照天數比例分段（2026-10-28）
+      if (cap != null && total > cap) add('P6', 'warn', e, end, `${who} 這期排了 ${hm(total)}，超過上限 ${hm(cap)}`);
     }
 
     // 曆月加班（含期外月份）：超過 46 小時擋、超過 36 小時警告（Eason 2026-10-27）

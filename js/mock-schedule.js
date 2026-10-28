@@ -39,6 +39,11 @@ function storeOf(db, code) {
   if (!db.sched[code]) db.sched[code] = seed(code);
   return db.sched[code];
 }
+// 身分設定從 fromDate 起生效：之後有已鎖定的期就不給改（照 server/schedule.js guardTermLocked）
+function termLocked(st, fromDate) {
+  const hit = Object.keys(st.periods).sort().find((p) => st.periods[p].locked && periodDates(p)[27] >= fromDate);
+  return hit ? fail('LOCKED', `這個身分設定會影響已鎖定的 ${hit}，要先到「班表」解除鎖定才能改`) : null;
+}
 const prow = (st, p) => st.periods[p] || (st.periods[p] = { version: 0, locked: false, locked_at: null, locked_by: null, needs_recheck: false });
 function demandFor(st, dates) {
   const out = {};
@@ -198,6 +203,7 @@ export async function schedule(action, me, b, db, s, hooks) {
       const dd = Object.keys(st.dayDemand).filter((d) => (st.dayDemand[d] || {})[id]).sort().map((d) => [d, null]); if (dd.length) uses.push(`單日人數 ${dd.length} 天（${list(dd, 3)}）`);
       const pins = cells(st.pins, (c) => c.kind === 'shift' && c.shift_id === id); if (pins.length) uses.push(`指定班別 ${pins.length} 格（${list(pins, 2)}）`);
       const allow = st.staff.filter((x) => (st.terms[x.emp_id] || []).some((t) => (t.allowed_shifts || []).includes(id) || (t.allowed_shifts_hol || []).includes(id))).map((x) => [null, x.emp_id]); if (allow.length) uses.push(`同仁「只能上的班」${allow.length} 人（${list(allow, 3)}）`);
+      const pf = st.staff.filter((x) => x.pref_shift === id).map((x) => [null, x.emp_id]); if (pf.length) uses.push(`同仁「優先班別」${pf.length} 人（${list(pf, 3)}）`);
       const fx = st.staff.filter((x) => x.fixed_shift === id).map((x) => [null, x.emp_id]); if (fx.length) uses.push(`央廚固定班別 ${fx.length} 人（${list(fx, 3)}）`);
       if (action === 'shiftUses') return ok({ uses });
       if (uses.length) return fail('BAD_INPUT', `這個班別已經用在：${uses.join('；')}。用過的班別不能刪除（舊班表、LINE 班表與出勤核定都還要對照它），不用的話請取消「使用中」再按儲存。`);
@@ -215,6 +221,16 @@ export async function schedule(action, me, b, db, s, hooks) {
         const ds = x.default_station || null;
         if (ds && ds !== row.default_station && !(st.stations[ds] && st.stations[ds].active)) return fail('BAD_INPUT', '預設站別不存在或已停用');
         row.default_station = ds;
+      }
+      if (Object.prototype.hasOwnProperty.call(x, 'prio')) {
+        const pr = x.prio === null || x.prio === '' ? null : Number(x.prio);
+        if (pr !== null && !(Number.isInteger(pr) && pr >= 1 && pr <= 99)) return fail('BAD_INPUT', '排班順位要是 1～99 的整數（1 最優先），不設就留空白');
+        row.prio = pr;
+      }
+      if (Object.prototype.hasOwnProperty.call(x, 'pref_shift')) {
+        const ps = x.pref_shift || null;
+        if (ps && ps !== row.pref_shift && !(st.shifts[ps] && st.shifts[ps].active)) return fail('BAD_INPUT', '優先班別不存在或已停用');
+        row.pref_shift = ps;
       }
       Object.assign(row, { hire_date: x.hire_date || null, leave_date: x.leave_date || null, birthday: x.birthday || null, phone: x.phone || null });
       return ok({ emp_id: e });
@@ -247,10 +263,23 @@ export async function schedule(action, me, b, db, s, hooks) {
       if (!['ft', 'pt'].includes(t.kind)) return fail('BAD_INPUT', '請選正職或計時');
       if (t.backup && t.kind !== 'pt') return fail('BAD_INPUT', '備援只限計時同仁（正職每週要排滿基本天數）');
       const from = t.from_date || '2026-10-04';
+      const nt = { kind: t.kind, target_min: t.target_min == null && t.kind === 'ft' ? 9600 : t.target_min, week_min: t.week_min == null ? null : t.week_min, same_days: t.same_days ? 1 : 0,
+        allowed_shifts: (t.allowed_shifts || []).filter((x) => st.shifts[x]), allowed_shifts_hol: (t.allowed_shifts_hol || []).filter((x) => st.shifts[x]), backup: t.backup ? 1 : 0 };
+      const old = (st.terms[t.emp_id] || []).find((x) => x.from_date === from);
+      if (old && ['kind', 'target_min', 'week_min', 'same_days', 'backup'].every((k) => (old[k] ?? null) === nt[k])
+        && JSON.stringify(old.allowed_shifts || []) === JSON.stringify(nt.allowed_shifts) && JSON.stringify(old.allowed_shifts_hol || []) === JSON.stringify(nt.allowed_shifts_hol)) return ok();   // 內容沒變放行（照伺服器）
+      const lk = termLocked(st, from); if (lk) return lk;
       const list = (st.terms[t.emp_id] || []).filter((x) => x.from_date !== from);
       list.push({ from_date: from, kind: t.kind, target_min: t.target_min == null && t.kind === 'ft' ? 9600 : t.target_min, week_min: t.week_min, same_days: t.same_days ? 1 : 0, allowed_shifts: t.allowed_shifts || [],
         allowed_shifts_hol: (t.allowed_shifts_hol || []).filter((x) => st.shifts[x]), backup: t.backup ? 1 : 0 });
       st.terms[t.emp_id] = list.sort((a, x) => (a.from_date < x.from_date ? -1 : 1));
+      return ok();
+    }
+    case 'deleteTerm': {   // 照伺服器：至少留一筆；會影響已鎖定的期就擋
+      const list = st.terms[b.emp_id] || [];
+      if (list.length <= 1) return fail('BAD_INPUT', '至少要留一筆身分設定');
+      const lk = termLocked(st, String(b.from_date || '')); if (lk) return lk;
+      st.terms[b.emp_id] = list.filter((x) => x.from_date !== b.from_date);
       return ok();
     }
     case 'savePairs': {
