@@ -73,11 +73,13 @@ export function setReqBadge(n) {
   if (n > 0) { const i = document.createElement('i'); i.className = 'badge'; i.textContent = String(n); i.setAttribute('aria-label', n + ' 筆待審'); a.append(i); }
   window.dispatchEvent(new Event('dzystore-nav'));   // 嵌入管理系統時：頁頂分頁的數字跟著更新（shell.js postNav）
 }
+// 要我處理的待審申請：本人自己送的（伺服器標 self，送上層審核）不算（2026-10-29 Eason 4A）
+export const reqTodo = items => (Array.isArray(items) ? items : []).filter(it => !(it && it.self === true));
 export function refreshReqBadge() {
   if (S.admin && !S.asStore) return;
   if (S.reqAt && Date.now() - S.reqAt < 60000) return setReqBadge(S.reqCount || 0);
   const k = S.key;
-  (S.all ? callAll('mgr_req_pending') : call('mgr_req_pending')).then(r => { if (S.key === k) setReqBadge(Array.isArray(r && r.items) ? r.items.length : 0); }, () => {});
+  (S.all ? callAll('mgr_req_pending') : call('mgr_req_pending')).then(r => { if (S.key === k) setReqBadge(reqTodo(r && r.items).length); }, () => {});
 }
 
 export const brk = store => { const m = (S.all && store && S.metaBy[store]) || S.meta; return { start: m.breakStart, end: m.breakEnd }; };

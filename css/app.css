@@ -305,6 +305,25 @@ select{min-height:44px}
 .du-rq-file{display:inline-block;margin-top:8px;font-weight:700;color:var(--red)}
 .du-reqbox{margin-top:10px;background:#e6f3ea;color:#1a5a33;border-radius:8px;padding:8px 10px;font-size:13px;line-height:1.6;white-space:pre-line;overflow-wrap:anywhere}
 .du-reqbox.warn{background:#fff4d6;color:#6b4c00}
+/* 同天多張已核准申請（2026-10-29）：逐張列出、可能是舊單、依這張填／作廢 */
+.du-reqlead{font-weight:700;margin-bottom:4px}
+.du-reqrow{padding:6px 0;border-top:1px dashed rgba(107,76,0,.35)}
+.du-reqrow:first-of-type,.du-reqlead+.du-reqrow{border-top:0}
+.du-reqold{color:var(--bad);font-size:12.5px}
+.du-reqacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.du-reqacts .btn{min-height:36px;font-size:13px}
+.du-voidbox{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.du-voidreason{flex:1;min-width:180px;min-height:40px;font-size:16px;padding:6px 10px;border:1px solid var(--line);border-radius:8px}
+.du-reqnote{margin-top:6px;font-weight:700}
+/* 一天多種假別（2026-10-29） */
+.du-leavebox{display:flex;flex-direction:column}
+.du-leaverow .du-leaverm{flex:none}
+.du-addleave{align-self:flex-start;margin-top:8px}
+/* 申請審核：我自己送出的（2026-10-29） */
+.du-rq-mine{margin-top:14px;background:#f2f4f3;border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.du-rq-mine-hint{font-size:12.5px;color:#5b6763;margin-bottom:6px}
+.du-rq-self{opacity:.95}
+.du-rq-upper{font-size:12px;font-weight:700;padding:2px 9px;border-radius:20px;background:#efe9fa;color:#5a3d9a;align-self:center}
 .du-reqfill{display:block;margin-top:6px;font:inherit;font-size:13px;font-weight:700;padding:8px 12px;min-height:40px;border-radius:8px;border:1px solid #a15a00;background:#fff;color:#a15a00;cursor:pointer;white-space:normal}
 .du-fromreq{display:inline-block;margin-top:8px;font-size:11.5px;font-weight:700;color:var(--ok);background:#e6f3ea;border-radius:6px;padding:1px 8px}
 /* 打卡 QR：面板用 display:flex，⚠ 一定要配 [hidden]{display:none}，否則關掉後透明面板蓋住整頁按鈕 */

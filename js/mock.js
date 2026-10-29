@@ -555,6 +555,7 @@ function dutyAll(b, s) {
     if ((db.dutyDown || []).includes(st.code)) { out.failed.push({ store: st.code, storeName: st.name, message: '打卡系統暫時沒有回應，請稍後再試' }); out.stores.push({ store: st.code, storeName: st.name, ok: false }); continue; }
     const r = withFake(st.code, () => dutyDo(d, b.op, b.date !== undefined ? { date: b.date } : {}));
     if (r.ok) markSupport(per, st.code, b.op, r.data);
+    if (r.ok && b.op === 'mgr_req_pending' && Array.isArray(d.selfEmps) && d.selfEmps.length) r.data.items = r.data.items.map(it => (d.selfEmps.includes(String(it.emp_id)) ? { ...it, self: true } : it));
     if (!r.ok) { out.failed.push({ store: st.code, storeName: st.name, message: r.message }); out.stores.push({ store: st.code, storeName: st.name, ok: false }); continue; }
     out.stores.push({ store: st.code, storeName: st.name, ok: true, meta: { clockStore: st.code, label: st.name, breakStart: d.brk[0], breakEnd: d.brk[1] } });
     if (b.op === 'mgr_day' && out.date === undefined) out.date = r.data.date;
@@ -616,7 +617,7 @@ function reqSummary(r) {     // Requests.gs reqSummary_
 }
 const reqPublic = r => ({ id: r.id, created_at: r.created_at, emp_id: r.emp_id, name: r.name, kind: r.kind, date: r.date, leave_type: r.leave_type || '', start: r.start || '', end: r.end || '',
   hours: r.hours ?? null, miss_type: r.miss_type || '', reason: r.reason || '', has_attach: !!r.attach_id, status: r.status, decided_at: r.decided_at || '', decided_by: r.decided_by || '',
-  reject_reason: r.reject_reason || '', summary: reqSummary(r) });
+  reject_reason: r.reject_reason || '', summary: reqSummary(r), ...(r.upper ? { upper: true } : {}) });
 // 示範附件：圖片用 canvas 畫一張「示範附件」；PDF 給一小段 PDF 檔頭（只是讓下載連結出得來）
 function mockAttach(id) {
   if (/pdf/.test(id)) return { mime: 'application/pdf', data: btoa('%PDF-1.4\n% mock attachment ' + id + '\n%%EOF\n') };
@@ -629,6 +630,19 @@ function mockAttach(id) {
     const u = c.toDataURL('image/png'); if (u.indexOf('data:image/png;base64,') === 0) data = u.slice(22);
   } catch (e) {}
   return { mime: 'image/png', data };
+}
+// leave 紀錄：新格式是陣列 [{type,hours}]（一天多種假別），舊瀏覽器留的是 {type,hours}
+const leaveList = v => (Array.isArray(v) ? v : v && v.type ? [v] : []);
+function leaveOut(v) { const L = leaveList(v); return { leaves: L.map(x => ({ ...x })), leave_type: L[0] ? L[0].type : '', leave_hours: L[0] ? L[0].hours : '' }; }
+// 本人自己的申請（對照 server/proxy/duty.js selfSet）：e2e 用 d.duty.selfEmps 指定「登入者本人」的員編。待審清單與某天已核准申請標 self；核准／退回／作廢一律擋
+function markSelf(d, action, b, r) {
+  const mine = Array.isArray(d.selfEmps) ? d.selfEmps : [];
+  if (!mine.length) return r;
+  const isMine = id => mine.includes(String(id));
+  const reqEmp = id => { const x = d.reqs.find(q => String(q.id) === String(id)); return x ? x.emp_id : ''; };
+  if (['mgr_req_decide', 'mgr_req_void'].includes(action) && isMine(reqEmp(b.id))) return { deny: fail('FORBIDDEN', '這是你自己的申請，要由上層主管（區督導或總監）審核') };
+  if (action === 'mgr_req_decide_batch' && (Array.isArray(b.ids) ? b.ids : []).some(id => isMine(reqEmp(id)))) return { deny: fail('FORBIDDEN', '這是你自己的申請，要由上層主管（區督導或總監）審核') };
+  return { mine: isMine };
 }
 function dutyHas(emp, date) { const f = fakeOf(emp); return !!f && (f.segs.length > 0 || !!f.attempts); }
 function duty(action, me, s, b) {
@@ -658,7 +672,13 @@ function duty(action, me, s, b) {
   if (fault && fault.once) d.faults.splice(fi, 1);
   if (fault && fault.mode === 'timeout') return fail('TIMEOUT', '打卡系統回應太久，請稍後再試');
   if (fault && fault.mode === 'down') return fail('UPSTREAM', '打卡系統暫時沒有回應，請稍後再試');
+  const ms = markSelf(d, action, b);
+  if (ms && ms.deny) return ms.deny;
   const r = tgt ? withFake(tgt, () => dutyDo(d, action, b)) : dutyDo(d, action, b);
+  if (r.ok && ms && ms.mine) {
+    if (action === 'mgr_req_pending') r.data.items = r.data.items.map(it => (ms.mine(it.emp_id) ? { ...it, self: true } : it));
+    if (action === 'mgr_req_day') Object.keys(r.data.by_emp).forEach(e => { if (ms.mine(e)) r.data.by_emp[e] = r.data.by_emp[e].map(x => ({ ...x, self: true })); });
+  }
   if (r.ok && me.person) markSupport(PM && PM.personaOf(db, s.sub), tgt || s.code, action, r.data);
   if (r.ok) r.data.meta = { clockStore: tgt, label: tgt ? (db.accounts[tgt] || {}).name : '麻的小辛辣 新竹光復店', breakStart: d.brk[0], breakEnd: d.brk[1] };
   return r;
@@ -672,7 +692,7 @@ function dutyDo(d, action, b) {
     const employees = d.roster.filter(r => r.active).map(r => {
       const f = fakeOf(r.emp_id) || { shift: ['', ''], segs: [], ref: null };
       const out = { emp_id: r.emp_id, name: r.name, segments: f.segs.map(x => ({ ...x })), reference: f.ref, attempts: f.attempts || 0,
-        leave_type: (d.leave[date + r.emp_id] || {}).type || '', leave_hours: (d.leave[date + r.emp_id] || {}).hours ?? '', shift_in: f.shift[0], shift_out: f.shift[1],
+        ...leaveOut(d.leave[date + r.emp_id]), shift_in: f.shift[0], shift_out: f.shift[1],
         plan: (d.plans && d.plans[r.emp_id]) || null };
       const a = d.approved[date + r.emp_id]; if (a) out.approved = { ...a };
       return out;
@@ -688,16 +708,27 @@ function dutyDo(d, action, b) {
     return ok({ ym, today, items });
   }
   if (action === 'mgr_approve') {
+    // 一天多種假別（Code.gs handleMgrApprove，2026-10-26）：新前端送 leaves:[{type,hours}]；只送 leave_type 的舊呼叫端遇到「那天已有多種假別」擋 multi_leave_day
     const date = String(b.date || '');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return fail('BAD_INPUT', '日期格式不對。');
     const emp = d.roster.find(r => r.emp_id === b.emp_id); if (!emp) return fail('NOT_FOUND', '名冊裡找不到這位同仁，請重新整理。');
-    const leave = String(b.leave_type || '').trim();
-    let lh = ''; if (leave && b.leave_hours !== '' && b.leave_hours != null) { const h = Number(b.leave_hours); if (!isFinite(h) || h < 0) return fail('BAD_INPUT', '請假時數不能是負數，請修正後再送出。'); lh = Math.round(h * 100) / 100; }
-    const periods = b.periods || [], trip = leave === '出差' && lh !== '' ? lh : 0;
+    const multi = Array.isArray(b.leaves);
+    const raw = multi ? b.leaves : [{ type: b.leave_type, hours: b.leave_hours }];
+    if (raw.length > 4) return fail('BAD_INPUT', '一天最多記 4 種假別');
+    const leaves = [];
+    for (const x0 of raw) {
+      const x = x0 || {}, t = String(x.type || '').trim(); if (!t) continue;
+      if (leaves.some(y => y.type === t)) return fail('BAD_INPUT', '同一個假別選了兩次：' + t);
+      let lh = ''; if (x.hours !== '' && x.hours != null) { const h = Number(x.hours); if (!isFinite(h) || h < 0) return fail('BAD_INPUT', '請假時數不能是負數，請修正後再送出。'); lh = Math.round(h * 100) / 100; }
+      leaves.push({ type: t, hours: lh });
+    }
+    if (!multi && leaveList(d.leave[date + emp.emp_id]).length > 1) return fail('BAD_INPUT', '這天記了多種假別，請到打卡系統的值班核定頁修改');
+    const periods = b.periods || [], hasTrip = leaves.some(x => x.type === '出差');
+    const trip = leaves.reduce((a, x) => a + (x.type === '出差' && x.hours !== '' ? x.hours : 0), 0);
     let hours, status;
     if (!periods.length) {
-      if (!leave) return fail('BAD_INPUT', '上班時段格式不對，或沒有填任何時段也沒選假別。');
-      if (leave === '出差') { if (!(trip > 0)) return fail('BAD_INPUT', '整天出差請填出差時數（填幾小時就核定幾小時）。'); hours = trip; status = '出差'; }
+      if (!leaves.length) return fail('BAD_INPUT', '上班時段格式不對，或沒有填任何時段也沒選假別。');
+      if (hasTrip) { if (!(trip > 0)) return fail('BAD_INPUT', '整天出差請填出差時數（填幾小時就核定幾小時）。'); hours = trip; status = '出差'; }
       else { hours = 0; status = '全天請假'; }
     } else {
       hours = trip; periods.forEach(p => { const [a, c] = [p.start, p.end].map(t => +t.slice(0, 2) * 60 + +t.slice(3)); hours += ((c <= a ? c + 1440 : c) - a) / 60; });
@@ -706,8 +737,8 @@ function dutyDo(d, action, b) {
       status = late === '0' ? '主管認定不計遲到' : late !== '' && Number(late) > 0 ? '遲到' + Number(late) + '分(認定)' : '正常';
     }
     const rec = { periods: periods.map(p => ({ ...p })), approved_hours: hours, status_text: status, manager_name: MGR };
-    d.approved[date + emp.emp_id] = rec; d.leave[date + emp.emp_id] = { type: leave, hours: lh };
-    return ok({ date, emp_id: emp.emp_id, name: emp.name, periods, approved_hours: hours, leave_type: leave, leave_hours: lh, status_text: status, manager_name: MGR });
+    d.approved[date + emp.emp_id] = rec; d.leave[date + emp.emp_id] = leaves;
+    return ok({ date, emp_id: emp.emp_id, name: emp.name, periods, approved_hours: hours, ...leaveOut(leaves), status_text: status, manager_name: MGR });
   }
   if (action === 'payroll_leave_options') {      // 薪酬假別表＋額度＋期限事件日；e2e 可把 d.leaveOpts 換成自己的（含 blocked、window_days、events）
     return ok(clone(d.leaveOpts || { ok: true, store: 'SSLGF', ym: taipeiDay().slice(0, 7), day_hours: 8, types: MOCK_LEAVES.map((n, i) => ({ code: 'lt' + i, name: n })), quotas: {}, events: {} }));
@@ -751,6 +782,16 @@ function dutyDo(d, action, b) {
     const by_emp = {};
     d.reqs.filter(r => r.date === date && r.status === 'approved').forEach(r => { (by_emp[r.emp_id] = by_emp[r.emp_id] || []).push(reqPublic(r)); });
     return ok({ date, by_emp });
+  }
+  if (action === 'mgr_req_void') {               // Requests.gs handleMgrReqVoid_（2026-10-26）：只能作廢已核准的、理由必填
+    const reason = String(b.reason ?? '').trim().slice(0, 100);
+    if (!reason) return fail('BAD_INPUT', '作廢要寫理由');
+    const r = d.reqs.find(x => String(x.id) === String(b.id || ''));
+    if (!r) return fail('NOT_FOUND', '找不到這筆申請');
+    if (r.status !== 'approved') return fail('BAD_INPUT', r.status === 'voided' ? '這筆已經作廢了' : r.status === 'pending' ? '這筆還在審核中，請用退回' : '只有已核准的申請可以作廢');
+    if (r.upper) return fail('FORBIDDEN', '這是值班主管本人的申請，要由上層主管在申請審核處理');
+    r.status = 'voided'; r.voided_at = new Date().toISOString(); r.voided_by = MGR; r.void_reason = reason;
+    return ok({ id: String(r.id), status: 'voided' });
   }
   if (action === 'mgr_qr_token') {               // 店別代碼由伺服器依打卡對照填：示範店＝光復（'' → gk）
     const now = Date.now(), win = Math.floor(now / 30000);

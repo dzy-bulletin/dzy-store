@@ -243,3 +243,38 @@ export function otPeriods(reqs) {
   return (reqs || []).filter(r => r && r.kind === 'ot' && r.start && r.end).map(r => ({ start: r.start, end: r.end }));
 }
 export const OFF_PUNCH_HINT = '排休卻有打卡：請同仁補加班申請，核准後會自動帶入';
+
+// ---- 一天多種假別（2026-10-29，照 manager.html 2026-10-26；docs/duty-req-multi/spec.md §1.2）----
+export const MAX_LEAVE_LINES = 4;
+// mgr_day／mgr_approve 回 leaves:[{type,hours}]；舊後端只有 leave_type／leave_hours
+export function leavesOf(o) {
+  if (o && Array.isArray(o.leaves) && o.leaves.length) return o.leaves;
+  return (o && o.leave_type) ? [{ type: o.leave_type, hours: o.leave_hours }] : [];
+}
+export const leavesSuffix = list => (list || []).map(x => leaveSuffix(x.type, x.hours)).join('');
+export const leavesText = list => (list || []).map(x => x.type + (x.hours !== '' && x.hours != null ? ' ' + x.hours + ' 小時' : '')).join('、');
+// 出差時數加總（只有出差算進核定；一天最多一列出差）
+export const tripHoursOfList = list => round2((list || []).reduce((a, x) => a + tripHoursOf(x.type, x.hours), 0));
+// 同一個假別選了兩次 → 回那個假別，否則 ''
+export function dupLeaveType(list) {
+  const ts = (list || []).map(x => x.type);
+  return ts.filter((t, i) => ts.indexOf(t) !== i)[0] || '';
+}
+
+// ---- 同一天多張已核准的申請（2026-10-29，照 manager.html card.__applyReq；spec §1.1）----
+// 種類鍵：出差＝'出差'、請假＝假別名、忘打卡＝'miss'。加班不算（只顯示、不填假別欄）。
+export const reqKey = r => (r.kind === 'trip' ? '出差' : r.kind === 'leave' ? String(r.leave_type) : 'miss');
+// 回 { fillables, multi, older(r) }：multi＝同一鍵兩張、或假別種數超過 4 → 不自動填，逐張給主管選／作廢；
+// older(r)＝同一鍵（忘打卡還要同 miss_type）有較晚送出的另一張 → 這張可能是舊單
+export function reqPlan(reqs) {
+  const fillables = (reqs || []).filter(r => r.kind !== 'ot');
+  const keys = fillables.map(reqKey);
+  const multi = keys.some((k, i) => keys.indexOf(k) !== i) || keys.filter(k => k !== 'miss').length > MAX_LEAVE_LINES;
+  const older = r => r.kind !== 'ot' && fillables.some(q => q !== r && reqKey(q) === reqKey(r)
+    && (r.kind !== 'miss' || q.miss_type === r.miss_type) && !!r.created_at && !!q.created_at && String(q.created_at) > String(r.created_at));      // 缺送出時間就不判舊單（2026-10-29 Fable 審查第 7 條）
+  return { fillables, multi, older };
+}
+// 申請預填的假別列：請假→{假別,時數}、出差→{出差,時數}
+export const reqLeaveLines = list => (list || []).filter(r => r.kind === 'leave' || r.kind === 'trip')
+  .map(r => ({ type: r.kind === 'trip' ? '出差' : (r.leave_type || ''), hours: (r.hours === 0 || r.hours) ? r.hours : '' }))
+  .filter(x => x.type);

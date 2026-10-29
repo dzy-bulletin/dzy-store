@@ -13,7 +13,7 @@ function loadStores() {
 
 const COLS = [
   { k: 'approve', label: '本月沒核定', unit: '天', action: 'mgr_pending_approvals', count: r => (Array.isArray(r && r.items) ? new Set(r.items.map(x => x && x.date)).size : null) },
-  { k: 'request', label: '待審申請', unit: '筆', action: 'mgr_req_pending', count: r => (Array.isArray(r && r.items) ? r.items.length : null) },
+  { k: 'request', label: '待審申請', unit: '筆', action: 'mgr_req_pending', count: r => (Array.isArray(r && r.items) ? r.items.filter(it => !(it && it.self === true)).length : null) },
   { k: 'device', label: '待核准手機', unit: '支', action: 'mgr_pending_devices', count: r => (Array.isArray(r && r.pending) ? r.pending.length : null) },
 ];
 

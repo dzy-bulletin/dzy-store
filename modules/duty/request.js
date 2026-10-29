@@ -3,7 +3,7 @@
 // 照 ~/mala-clock-in manager.html（feature/requests-qr）的 loadPendingRequests／buildReqItem 搬，文案不改；外觀換成營運系統風格。
 // 核准申請「不會」直接寫入核定：只是讓那天的核定頁先幫主管填好，主管核定那天時確認送出才算數（見 approve.js 的 __applyReq）。
 import { confirmBox } from '../../js/ui.js';
-import { S, call, callAll, h, failBar, failedStores, setReqBadge, loadLeave, leaveFor, canWriteRow, supportTag } from './state.js';
+import { S, call, callAll, h, failBar, failedStores, setReqBadge, loadLeave, leaveFor, canWriteRow, supportTag, reqTodo } from './state.js';
 import { tsLabel, shortDate, punchEvidence, compBalanceNote, REQ_KIND_LABEL, REQ_BATCH_MAX } from './calc.js';
 
 export function renderRequest(ctx) {
@@ -15,10 +15,18 @@ export function renderRequest(ctx) {
     Promise.all([S.all ? callAll('mgr_req_pending') : call('mgr_req_pending'), loadLeave()]).then(([r]) => {
       if (!el.isConnected) return;
       box.innerHTML = '';
-      const items = Array.isArray(r.items) ? r.items : [];
+      const items = reqTodo(r.items);
+      const mine = (Array.isArray(r.items) ? r.items : []).filter(it => it && it.self === true);      // 店長本人自己送的：送上層審核中，放最下面、不算數字（2026-10-29 Eason 4A）
       setReqBadge(items.length);
       if (S.all) failedStores(box, r.failed, load);           // 全部門市：讀不到的店標出來，其他店照常審
-      if (!items.length) { box.append(h('div', 'card du-center', r.failed && r.failed.length ? '讀得到的門市目前沒有待審的申請。' : '目前沒有待審的申請。')); return; }
+      const mineCard = () => {
+        if (!mine.length) return null;
+        const c = h('div', 'du-rq-mine');
+        c.append(h('div', 'du-rq-title', '我自己送出的（' + mine.length + ' 筆）'), h('div', 'du-rq-mine-hint', '值班主管本人的申請由上層主管（區督導或總監）審核，這裡只給你看進度。'));
+        mine.forEach(it => c.append(buildMine(it)));
+        return c;
+      };
+      if (!items.length) { box.append(h('div', 'card du-center', r.failed && r.failed.length ? '讀得到的門市目前沒有待審的申請。' : '目前沒有待審的申請。')); const m = mineCard(); if (m) box.append(m); return; }
       const card = h('div', 'du-rq-list');
       const title = h('div', 'du-rq-title', '待審申請 ' + items.length + ' 筆（最舊的在上面）');
       card.append(title, buildBatchBar(card, title));
@@ -26,6 +34,7 @@ export function renderRequest(ctx) {
       if (!card.querySelector('.du-rq-pick')) { const bw = card.querySelector('.du-rq-batchwrap'); if (bw) bw.hidden = true; }      // 全是唯讀（只看）：沒有批次核准列
       box.append(card);
       syncBatch(card);
+      const m = mineCard(); if (m) box.append(m);
     }, e => { if (!el.isConnected) return; box.innerHTML = ''; const c = h('div', 'card'); box.append(c); failBar(c, '待審申請', e, load); });
   }
   load();
@@ -91,6 +100,20 @@ function buildBatchBar(card, title) {
   return wrap;
 }
 
+// 本人自己送的申請（只看）：沒有勾選、核准、退回、看附件
+function buildMine(it) {
+  const el = h('div', 'du-rq du-rq-self'); el.dataset.reqId = String(it.id); if (it.store) el.dataset.store = it.store;
+  const l1 = h('div', 'du-rq-l1'), who = h('span', 'du-rq-who');
+  who.append(h('span', 'du-rq-kind ' + (REQ_KIND_LABEL[it.kind] ? it.kind : ''), REQ_KIND_LABEL[it.kind] || it.kind), h('span', 'du-rq-name', it.name), ...(it.storeName ? [h('span', 'du-where', '打卡地點：' + it.storeName, { 'data-where': it.store })] : []));
+  l1.append(who, h('span', 'du-rq-date', shortDate(it.date)));
+  el.append(l1, h('div', 'du-rq-l2', it.summary + (it.reason ? '\n原因：' + it.reason : '') + '\n送出：' + tsLabel(it.created_at)));
+  const acts = h('div', 'du-rq-acts du-rq-acts-self');
+  const ok = h('button', 'du-rq-ok btn', '核准', { type: 'button' }), no = h('button', 'du-rq-no btn ghost', '退回', { type: 'button' });
+  ok.disabled = no.disabled = true;
+  acts.append(h('span', 'du-rq-upper', '送上層審核中'), ok, no);
+  el.append(acts);
+  return el;
+}
 // 打卡端 upper_kind（2026-10-29）：mgr＝值班主管本人；dept＝總部同仁在門市（申請照原身分）；home＝不算本店支援。舊打卡後端沒有這欄＝值班主管本人
 function upperIsDept(it) { return it.upper_kind === 'dept' || it.upper_kind === 'home'; }
 function upperLabel(it) { return upperIsDept(it) ? '部門同仁' : '值班主管本人'; }
