@@ -91,6 +91,10 @@ function buildBatchBar(card, title) {
   return wrap;
 }
 
+// 打卡端 upper_kind（2026-10-29）：mgr＝值班主管本人；dept＝總部同仁在門市（申請照原身分）；home＝不算本店支援。舊打卡後端沒有這欄＝值班主管本人
+function upperIsDept(it) { return it.upper_kind === 'dept' || it.upper_kind === 'home'; }
+function upperLabel(it) { return upperIsDept(it) ? '部門同仁' : '值班主管本人'; }
+
 function buildItem(it, card, title) {
   const el = h('div', 'du-rq'); el.dataset.reqId = String(it.id); el.__req = it; if (it.store) el.dataset.store = it.store;
   const l1 = h('div', 'du-rq-l1'), who = h('span', 'du-rq-who');
@@ -99,7 +103,7 @@ function buildItem(it, card, title) {
   pick.onchange = () => syncBatch(card);
   if (canDecide) who.append(pick);
   const sup = supportTag(it);      // 支援（原單位）
-  who.append(h('span', 'du-rq-kind ' + (REQ_KIND_LABEL[it.kind] ? it.kind : ''), REQ_KIND_LABEL[it.kind] || it.kind), h('span', 'du-rq-name', it.name), ...(sup ? [sup] : []), ...(it.upper === true && canDecide ? [h('span', 'du-rq-kind upper', '值班主管本人')] : []), ...(it.storeName ? [h('span', 'du-where', '打卡地點：' + it.storeName, { 'data-where': it.store })] : []));
+  who.append(h('span', 'du-rq-kind ' + (REQ_KIND_LABEL[it.kind] ? it.kind : ''), REQ_KIND_LABEL[it.kind] || it.kind), h('span', 'du-rq-name', it.name), ...(sup ? [sup] : []), ...(it.upper === true && canDecide ? [h('span', 'du-rq-kind upper', upperLabel(it))] : []), ...(it.storeName ? [h('span', 'du-where', '打卡地點：' + it.storeName, { 'data-where': it.store })] : []));
   l1.append(who, h('span', 'du-rq-date', shortDate(it.date)));
   el.append(l1, h('div', 'du-rq-l2', it.summary + (it.reason ? '\n原因：' + it.reason : '') + compBalanceNote(leaveFor(it.store), it) + '\n送出：' + tsLabel(it.created_at)));
   const ev = punchEvidence(it);
@@ -107,7 +111,7 @@ function buildItem(it, card, title) {
 
   const acts = h('div', 'du-rq-acts');
   const ok = h('button', 'du-rq-ok btn', '核准', { type: 'button' }), no = h('button', 'du-rq-no btn ghost', '退回', { type: 'button' });
-  if (canDecide) acts.append(ok, no); else acts.append(h('span', 'du-ro', it.upper === true ? '送上層審核中' : '唯讀'));
+  if (canDecide) acts.append(ok, no); else acts.append(h('span', 'du-ro', it.upper === true ? (upperIsDept(it) ? '部門主管審核中' : '送上層審核中') : '唯讀'));
   if (it.attach_id && canDecide) {
     const at = h('button', 'du-rq-att btn ghost', '看附件', { type: 'button' });
     at.onclick = async () => {
