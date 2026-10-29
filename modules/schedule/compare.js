@@ -27,7 +27,8 @@ export function comparePlan(plan, segments, opts) {
   if (firstIn !== null && s !== null && e > 1440 && firstIn < s && firstIn < e - 1440) firstIn += 1440;   // 跨夜班凌晨才到：打卡時間換到隔天，才算得出晚到（2026-10-11 Codex 審查）
   const lastOutRaw = toMin((segs.slice().reverse().find((x) => x.out) || {}).out);
   if (firstIn !== null && s !== null && firstIn - s > THRESHOLD_MIN) flags.push(`晚到 ${firstIn - s} 分`);
-  if (lastOutRaw !== null && e !== null) {
+  const stillIn = segs.some((x) => x.in && !x.out);   // 還沒打下班卡＝當作還在、不算早退（同分段班 compareSegs；2026-10-29 光復：19:56 回來上班卻被拿 19:27 比成早退 243 分）
+  if (lastOutRaw !== null && e !== null && !stillIn) {
     const out = lastOutRaw < s ? lastOutRaw + 1440 : lastOutRaw;
     if (e - out > THRESHOLD_MIN) flags.push(`早退 ${e - out} 分`);
   }
