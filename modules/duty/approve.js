@@ -193,13 +193,14 @@ function buildCard(emp, date) {
   const readOnly = !canWriteRow('hours', emp.emp_id, emp.store);      // 不在核定工時名單（只看）：不出現送出核定，欄位不可改
   const card = h('div', 'du-card'); card.dataset.empId = rowKey(emp); if (emp.store) card.dataset.store = emp.store;
   card.__segments = emp.segments || [];
+  const pv = C.planPrefill(emp, emp.plan, br);                        // 那天的班表優先，沒排班才用個人預設時間（2026-10-29 Eason 選 A）
+  const offDay = pv.mode === 'off';
 
   // ---- 頭部（收合時看得到：姓名、班別、打卡摘要、精簡徽章）----
   const nameEl = h('div', 'du-name', emp.name);
   const sup = supportTag(emp); if (sup) nameEl.append(sup);      // 支援（原單位）：別單位來這家店支援的同仁
   if (emp.store) nameEl.append(h('span', 'du-where', '打卡地點：' + emp.storeName, { 'data-where': emp.store }));      // 全部門市：這個人在哪一家店打的卡（同一人同一天在多家打卡會依店分列）
-  if (emp.shift_in && emp.shift_out)
-    nameEl.append(h('span', 'du-shift', emp.shift_in + '–' + emp.shift_out + (C.shiftCoversBreak(br, emp.shift_in, emp.shift_out) ? '・休' + C.breakHoursText(br) + 'h' : '')));
+  if (pv.text) nameEl.append(h('span', 'du-shift' + (pv.mode === 'off' ? ' off' : ''), pv.text, { 'data-mode': pv.mode }));
   const punchEl = h('div', 'du-punch');
   if (emp.segments && emp.segments.length) {
     const ref = (emp.reference === null || emp.reference === undefined) ? '參考 —' : '參考 ' + emp.reference + ' 小時';   // 忘刷卡整天 reference=null，不可印成 "null"
@@ -236,16 +237,11 @@ function buildCard(emp, date) {
   body.append(badge);
 
   // ---- 時段預設值（manager.html:1031–1062）：已核定→帶既有；已核定但沒時段（整天請假／出差）→空白（不可再帶預設，重送會多算）；
-  //      有預設班別→帶入（碰到休息帶就預先拆成兩段，不做隱形扣除）；都沒有→空白。刻意不從當天打卡時間推算。
-  let initial;
-  if (emp.approved && emp.approved.periods && emp.approved.periods.length) initial = emp.approved.periods;
-  else if (emp.approved) initial = [null];
-  else if (emp.shift_in && emp.shift_out)
-    initial = C.shiftCoversBreak(br, emp.shift_in, emp.shift_out)
-      ? [{ start: emp.shift_in, end: br.start }, { start: br.end, end: emp.shift_out }] : [{ start: emp.shift_in, end: emp.shift_out }];
-  else initial = [null];
+  //      班表上班→帶班表（分段班照段）；班表休假→空白；沒排班→個人預設班別；碰到休息帶就預先拆成兩段，不做隱形扣除。刻意不從當天打卡時間推算。（C.planPrefill）
   const periodRows = h('div', 'du-periods');
-  initial.forEach(p => periodRows.append(periodRow(p, refresh)));
+  pv.initial.forEach(p => periodRows.append(periodRow(p, refresh)));
+  const offHint = pv.offPunch ? h('div', 'du-offhint', C.OFF_PUNCH_HINT) : null;      // 排休卻有打卡、沒有已核准的加班申請（申請到了由 __applyReq 收掉）
+  if (offHint) body.append(offHint);
   const totalBox = h('div', 'du-total'); const breakToggle = h('button', 'du-breaktoggle', '', { type: 'button' }); breakToggle.hidden = true;
   body.append(periodRows, totalBox, breakToggle);
 
@@ -382,13 +378,21 @@ function buildCard(emp, date) {
   card.__setExpanded = setExpanded;
 
   // ---- 已核准的申請（2026-10-09，照 manager.html __applyReq）：還沒核定就幫主管預填；已核定過不覆蓋，改給一顆「依申請重新填」。
-  //      預填只是畫面上的值，主管按送出核定才算數（核准申請本身不寫入核定）。加班只顯示、不預填。
+  //      預填只是畫面上的值，主管按送出核定才算數（核准申請本身不寫入核定）。加班在上班日只顯示、不預填；
+  //      班表排休那天（2026-10-29）加班申請的時段就是當天工時 → 依加班申請預填、標「來自加班申請」，並收掉補申請提示。
   card.__applyReq = reqs => {
     if (!reqs || !reqs.length || card.__reqApplied) return;
     card.__reqApplied = true;
+    const otP = offDay ? C.otPeriods(reqs) : [];
+    if (offDay && offHint && otP.length) offHint.remove();      // 加班申請沒填時段＝帶不進來，提示留著（2026-10-29 Fable 審查）
     const rbox = h('div', 'du-reqbox' + (emp.approved ? ' warn' : ''), reqs.map(r => '✓ 已核准的申請：' + r.summary + '（' + r.decided_by + ' 核准）').join('\n'));
     let tag = null;
     function fill() {
+      if (otP.length) {
+        periodRows.textContent = '';
+        otP.forEach(p => periodRows.append(periodRow(p, refresh)));
+        if (!tag) { tag = h('span', 'du-fromreq', '來自加班申請'); periodRows.parentNode.insertBefore(tag, periodRows); }
+      }
       reqs.forEach(r => {
         if (r.kind === 'leave') {
           if (r.leave_type && ![...leaveSel.options].some(o => o.value === r.leave_type)) { const o = h('option', null, r.leave_type); o.value = r.leave_type; leaveSel.append(o); }
@@ -413,7 +417,7 @@ function buildCard(emp, date) {
       });
       refresh();
     }
-    const fillable = reqs.some(r => r.kind !== 'ot');
+    const fillable = otP.length > 0 || reqs.some(r => r.kind !== 'ot');
     if (fillable && emp.approved) {
       const b = h('button', 'du-reqfill', '這天已核定過，依申請重新填', { type: 'button' });
       if (readOnly) b.hidden = true;

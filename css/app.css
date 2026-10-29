@@ -218,6 +218,8 @@ select{min-height:44px}
 .du-hmain{flex:1;min-width:0}
 .du-name{font-weight:900;font-size:15.5px;overflow-wrap:anywhere}
 .du-shift{font-weight:500;font-size:12px;color:var(--muted);margin-left:8px}
+.du-shift.off{color:#a14a12;background:#fdf1e6;border-radius:6px;padding:0 6px}
+.du-offhint{margin-top:10px;background:#fff6e5;border-left:4px solid #e0a020;padding:8px 10px;font-size:12.5px;border-radius:0 7px 7px 0}
 .du-punch{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
 .du-mini{flex:none;font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;background:#eef1f4;color:#556}
 .du-mini.pending{background:#fff4d6;color:#8a6100}

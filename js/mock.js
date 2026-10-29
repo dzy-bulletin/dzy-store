@@ -500,7 +500,20 @@ const DUTY_FAKE_D = {
   E02: { shift: ['09:00', '12:00'], segs: [{ in: '09:12', out: '12:00', cross: false }], ref: 2.8 },
   E03: { shift: ['', ''], segs: [], ref: null },
   E04: { shift: ['', ''], segs: [], ref: null, attempts: 2 },
+  // 班表連動示範（2026-10-29）：E05 分段班、E06 排休卻有打卡（沒有加班申請→提示）、E07 排休有打卡＋已核准加班申請（→依申請預填）
+  E05: { shift: ['10:00', '19:00'], segs: [{ in: '10:58', out: '14:31', cross: false }, { in: '16:57', out: '21:32', cross: false }], ref: 8.13 },
+  E06: { shift: ['09:00', '18:00'], segs: [{ in: '13:04', out: '17:01', cross: false }], ref: 3.95 },
+  E07: { shift: ['09:00', '18:00'], segs: [{ in: '12:58', out: '17:03', cross: false }], ref: 4.08 },
 };
+// 示範店那天的班表（對照 server/schedule.js dutyPlans → mgr_day 每人的 plan）：每天一樣；E02、E04 沒排班＝退回個人預設時間
+const DEMO_PLANS = () => ({
+  E01: { work: true, day_type: 'W', shift_id: 'S1', shift_name: '早班', segs: [{ start: '08:00', end: '17:00' }], station: null },
+  E03: { work: false, day_type: 'R', leave: null },
+  E05: { work: true, day_type: 'W', shift_id: 'S2', shift_name: '二段班', segs: [{ start: '11:00', end: '14:30' }, { start: '17:00', end: '21:30' }], station: null },
+  E06: { work: false, day_type: 'H', leave: null },
+  E07: { work: false, day_type: 'H', leave: null },
+});
+const DEMO_PLAN_STAFF = [['E05', '同仁戊'], ['E06', '同仁己'], ['E07', '同仁庚']];
 let curFake = null;     // 第二家以後的店（全部門市）用自己的打卡假資料，dutyDo 執行期間暫時指定
 const fakeOf = emp => (curFake || (E2E().duty || {}).fake || DUTY_FAKE_D)[emp];
 // 全部門市的示範：第二家（TEST2）有自己的名冊、打卡、申請，王小明（E01）同一天也在這家打卡；申請編號 R1 刻意和 TEST1 相同，驗證合併頁不會用編號混淆
@@ -553,7 +566,7 @@ function dutyAll(b, s) {
 }
 function dutyDb() {
   const E = E2E().duty;
-  if (!db.duty && E) db.duty = { brk: [...E.brk], faults: [], calls: {}, approved: {}, leave: {}, roster: clone(E.roster), devices: clone(E.devices), notices: clone(E.notices), binds: clone(E.binds || []), reqs: clone(E.reqs || []) };
+  if (!db.duty && E) db.duty = { brk: [...E.brk], faults: [], calls: {}, approved: {}, leave: {}, roster: clone(E.roster), devices: clone(E.devices), notices: clone(E.notices), binds: clone(E.binds || []), reqs: clone(E.reqs || []), plans: clone(E.plans || {}) };
   if (!db.duty) db.duty = {
     brk: ['12:00', '13:00'], faults: [], calls: {}, approved: {}, leave: {},
     roster: [{ emp_id: 'E01', name: '王小明', active: true, created_by: '', removed_at: '', removed_by: '' }, { emp_id: 'E02', name: '李小華', active: true, created_by: '', removed_at: '', removed_by: '' },
@@ -565,6 +578,11 @@ function dutyDb() {
     binds: [{ ts: '2026-10-08T09:02:00+08:00', emp_id: 'E01', name: '王小明', uid: 'U-mock-1', type: 'bind_name' }],
   };
   if (!db.duty.reqs) db.duty.reqs = defaultReqs();     // 舊瀏覽器留的假資料沒有申請：補上示範申請（不必整包重建）
+  if (!db.duty.plans) {                                 // 班表連動示範（新建與舊瀏覽器都補）：三位示範同仁、排休那天已核准的加班申請
+    db.duty.plans = DEMO_PLANS();
+    DEMO_PLAN_STAFF.forEach(([id, name]) => { if (!db.duty.roster.some(r => r.emp_id === id)) db.duty.roster.push({ emp_id: id, name, active: true, created_by: '', removed_at: '', removed_by: '' }); });
+    if (!db.duty.reqs.some(r => r.id === 'R5')) db.duty.reqs.push(planOtReq());
+  }
   return db.duty;
 }
 // 加班請假／忘打卡申請的示範資料（對照 ~/mala-clock-in apps-script/Requests.gs）：請假附圖片、加班附 PDF、忘打卡的打卡被擋且定位誤差很大
@@ -578,6 +596,10 @@ function defaultReqs() {
     // 出差單（2026-10-09）：leave_type＝出差、reason＝'地點：…；事由：…'
     { id: 'R4', created_at: at(-1, '21:05'), emp_id: 'E02', name: '李小華', kind: 'trip', date: taipeiDay(-1), leave_type: '出差', start: '', end: '', hours: 8, miss_type: '', reason: '地點：台中央廚；事由：支援月初盤點', attach_id: '', status: 'pending' },
   ];
+}
+function planOtReq() {      // 排休那天的加班申請（已核准）：核定頁依申請時段預填、標「來自加班申請」
+  const at = (n, hm) => taipeiDay(n) + 'T' + hm + ':00+08:00';
+  return { id: 'R5', created_at: at(-1, '18:00'), emp_id: 'E07', name: '同仁庚', kind: 'ot', date: taipeiDay(), leave_type: '', start: '13:00', end: '17:00', hours: 4, miss_type: '', reason: '休假日支援備料', attach_id: '', status: 'approved', decided_at: at(-1, '20:00'), decided_by: '門市營運系統' };
 }
 function reqSummary(r) {     // Requests.gs reqSummary_
   const md = parseInt(r.date.slice(5, 7), 10) + '/' + parseInt(r.date.slice(8, 10), 10);
@@ -650,7 +672,8 @@ function dutyDo(d, action, b) {
     const employees = d.roster.filter(r => r.active).map(r => {
       const f = fakeOf(r.emp_id) || { shift: ['', ''], segs: [], ref: null };
       const out = { emp_id: r.emp_id, name: r.name, segments: f.segs.map(x => ({ ...x })), reference: f.ref, attempts: f.attempts || 0,
-        leave_type: (d.leave[date + r.emp_id] || {}).type || '', leave_hours: (d.leave[date + r.emp_id] || {}).hours ?? '', shift_in: f.shift[0], shift_out: f.shift[1] };
+        leave_type: (d.leave[date + r.emp_id] || {}).type || '', leave_hours: (d.leave[date + r.emp_id] || {}).hours ?? '', shift_in: f.shift[0], shift_out: f.shift[1],
+        plan: (d.plans && d.plans[r.emp_id]) || null };
       const a = d.approved[date + r.emp_id]; if (a) out.approved = { ...a };
       return out;
     }).sort((x, y) => (dutyHas(y.emp_id) ? 1 : 0) - (dutyHas(x.emp_id) ? 1 : 0));

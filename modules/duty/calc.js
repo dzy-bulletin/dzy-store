@@ -206,3 +206,40 @@ export function compBalanceNote(opts, it) {
   if (!q || !q.comp) return '';
   return '\n補休餘額：' + (q.allowed ? q.balance_h + ' 小時' + (Number(it.hours) > q.balance_h ? '（不夠）' : '') : '計時同仁沒有補休');
 }
+
+// ---- 核定工時的上下班時間跟班表連動（2026-10-29，docs/duty-shift-from-schedule/requirements.md）----
+// 伺服器在 mgr_day 每人加 plan：{work:true, segs:[{start,end}], shift_name, station} 上班／{work:false, day_type, leave} 休假／null 或沒有＝那天沒排班（退回個人預設 shift_in–shift_out）。
+const PLAN_OFF_TEXT = { R: '例假', H: '排休' };
+const PLAN_LEAVE_TEXT = { '國': '國定', '特': '排特休', '補': '排補休' };
+export function planOffText(plan) {
+  if (!plan || plan.work) return '';
+  return (plan.day_type === 'L' ? PLAN_LEAVE_TEXT[plan.leave] : PLAN_OFF_TEXT[plan.day_type]) || '排休';
+}
+const planSegsOk = plan => !!plan && plan.work === true && Array.isArray(plan.segs) && plan.segs.length > 0 && plan.segs.every(s => s && s.start && s.end);
+/** 員工卡的班別文字與預填時段。回 { mode, text, initial, offPunch }：
+ *  mode＝'plan'（班表上班）／'off'（班表休假）／'default'（沒排班，用個人預設時間）／'none'（都沒有）；
+ *  text＝姓名旁的小字（null＝不顯示）；initial＝預填時段（[null]＝一列空白）；offPunch＝排休卻有打卡、還沒核定（提示補加班申請；有已核准加班申請時由畫面收掉）。
+ *  已核定過：時段一律帶原核定（不變）。休息帶照舊：只有「一段」完整蓋過休息帶才拆兩段（目前只有央廚）。 */
+export function planPrefill(emp, plan, br) {
+  const approved = emp && emp.approved;
+  const keep = approved ? (approved.periods && approved.periods.length ? approved.periods : [null]) : null;
+  const one = (a, b) => (shiftCoversBreak(br, a, b) ? [{ start: a, end: br.start }, { start: br.end, end: b }] : [{ start: a, end: b }]);
+  const brTag = (a, b) => (shiftCoversBreak(br, a, b) ? '・休' + breakHoursText(br) + 'h' : '');
+  if (planSegsOk(plan)) {
+    const segs = plan.segs.map(s => ({ start: s.start, end: s.end }));
+    const text = '班表 ' + segs.map(s => s.start + '–' + s.end).join('／') + (segs.length === 1 ? brTag(segs[0].start, segs[0].end) : '');
+    return { mode: 'plan', text, initial: keep || (segs.length === 1 ? one(segs[0].start, segs[0].end) : segs), offPunch: false };
+  }
+  if (plan && plan.work === false) {
+    return { mode: 'off', text: planOffText(plan), initial: keep || [null], offPunch: !approved && !!(emp.segments && emp.segments.length) };
+  }
+  if (emp && emp.shift_in && emp.shift_out) {
+    return { mode: 'default', text: '預設 ' + emp.shift_in + '–' + emp.shift_out + brTag(emp.shift_in, emp.shift_out), initial: keep || one(emp.shift_in, emp.shift_out), offPunch: false };
+  }
+  return { mode: 'none', text: null, initial: keep || [null], offPunch: false };
+}
+/** 排休那天已核准的加班申請 → 預填時段（每筆有起訖時間的加班一段）；上班日不用（加班只顯示，維持現狀） */
+export function otPeriods(reqs) {
+  return (reqs || []).filter(r => r && r.kind === 'ot' && r.start && r.end).map(r => ({ start: r.start, end: r.end }));
+}
+export const OFF_PUNCH_HINT = '排休卻有打卡：請同仁補加班申請，核准後會自動帶入';
