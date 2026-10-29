@@ -40,8 +40,10 @@ function storeOf(db, code) {
   return db.sched[code];
 }
 // 身分設定從 fromDate 起生效：之後有已鎖定的期就不給改（照 server/schedule.js guardTermLocked）
-function termLocked(st, fromDate) {
-  const hit = Object.keys(st.periods).sort().find((p) => st.periods[p].locked && periodDates(p)[27] >= fromDate);
+function termLocked(st, fromDate, emp) {              // 影響範圍只到這人下一筆身分設定的前一天（照伺服器）
+  const next = emp ? (st.terms[emp] || []).map((x) => x.from_date).filter((f) => f > fromDate).sort()[0] : null;
+  const end = next ? addDays(next, -1) : '9999-12-31';
+  const hit = Object.keys(st.periods).sort().find((p) => { const ds = periodDates(p); return st.periods[p].locked && ds[27] >= fromDate && ds[0] <= end; });
   return hit ? fail('LOCKED', `這個身分設定會影響已鎖定的 ${hit}，要先到「班表」解除鎖定才能改`) : null;
 }
 const prow = (st, p) => st.periods[p] || (st.periods[p] = { version: 0, locked: false, locked_at: null, locked_by: null, needs_recheck: false });
@@ -269,7 +271,7 @@ export async function schedule(action, me, b, db, s, hooks) {
       const norm = (x) => ({ kind: x.kind, target_min: x.target_min ?? null, week_min: x.week_min ?? null, same_days: x.same_days ? 1 : 0, backup: x.backup ? 1 : 0 });   // 舊資料／示範種子少欄位：先正規化再比（Codex 審查）
       if (old && ['kind', 'target_min', 'week_min', 'same_days', 'backup'].every((k) => norm(old)[k] === norm(nt)[k])
         && JSON.stringify(old.allowed_shifts || []) === JSON.stringify(nt.allowed_shifts) && JSON.stringify(old.allowed_shifts_hol || []) === JSON.stringify(nt.allowed_shifts_hol)) return ok();   // 內容沒變放行（照伺服器）
-      const lk = termLocked(st, from); if (lk) return lk;
+      const lk = termLocked(st, from, t.emp_id); if (lk) return lk;
       const list = (st.terms[t.emp_id] || []).filter((x) => x.from_date !== from);
       list.push({ from_date: from, kind: t.kind, target_min: t.target_min == null && t.kind === 'ft' ? 9600 : t.target_min, week_min: t.week_min, same_days: t.same_days ? 1 : 0, allowed_shifts: t.allowed_shifts || [],
         allowed_shifts_hol: (t.allowed_shifts_hol || []).filter((x) => st.shifts[x]), backup: t.backup ? 1 : 0 });
@@ -280,7 +282,7 @@ export async function schedule(action, me, b, db, s, hooks) {
       const list = st.terms[b.emp_id] || [];
       if (list.length <= 1) return fail('BAD_INPUT', '至少要留一筆身分設定');
       if (b.from_date === list.map((x) => x.from_date).sort()[0]) return fail('BAD_INPUT', '最早那一筆身分設定不能刪（刪了之後那段日子就沒有身分、排不了班）；要改內容請直接修改它');
-      const lk = termLocked(st, String(b.from_date || '')); if (lk) return lk;
+      const lk = termLocked(st, String(b.from_date || ''), b.emp_id); if (lk) return lk;
       st.terms[b.emp_id] = list.filter((x) => x.from_date !== b.from_date);
       return ok();
     }

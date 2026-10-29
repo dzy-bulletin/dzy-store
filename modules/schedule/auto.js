@@ -242,10 +242,20 @@ export function assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixed
   rest.forEach((e, i) => {
     const opts = shiftIds.filter(s => ok(e, s));
     if (!opts.length) { unassigned.push(e); return; }
-    opts.sort((a, b) => {
-      const room = (s) => { const mx = (need[s] || {}).max; return mx == null ? 99 : mx - (count[s] || 0); };
-      return (room(b) > 0) - (room(a) > 0) || cost(e, a, i) - cost(e, b, i) || room(b) - room(a);
-    });
+    const room = (s) => { const mx = (need[s] || {}).max; return mx == null ? 99 : mx - (count[s] || 0); };
+    opts.sort((a, b) => (room(b) > 0) - (room(a) > 0) || cost(e, a, i) - cost(e, b, i) || room(b) - room(a));
+    if (room(opts[0]) <= 0 && allowedOf(ctx, e, d).length < shiftIds.length) {   // 只對「有班別限制」的人：沒限制的人超過名額本來就沒有更好的排法，不去動別人
+      // 他能上的班都滿了：先試著把那班裡「還有別班可去」的人換到有名額的班，空出位置給他，免得超過最多人數
+      //（例：只能上早班的人被擠進已滿的早班；2026-10-29 Codex 審查，改動前就有的問題）
+      for (const sft of opts) {
+        const y = workers.slice().reverse().find(x => x !== e && assign[x] === sft && (pinOf(ctx, x, d) || {}).kind !== 'shift' && shiftIds.some(t => t !== sft && room(t) > 0 && ok(x, t)));   // 換走順位最後的人（Fable 審查）
+        if (!y) continue;
+        const t = shiftIds.find(t2 => t2 !== sft && room(t2) > 0 && ok(y, t2));
+        assign[y] = t; count[t] = (count[t] || 0) + 1;
+        assign[e] = sft;                                              // sft 的人數不變（y 走、e 來）
+        return;
+      }
+    }
     assign[e] = opts[0]; count[opts[0]] = (count[opts[0]] || 0) + 1;
   });
   // 優先班別補強：增廣路徑配對不看偏好，配完再讓順位前面的人換到他的優先班別——
@@ -262,6 +272,10 @@ export function assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixed
   // 其中一人是手動固定的班也要算（2026-10-11 Codex 審查）：固定的不能動，只能動另一個人
   const shiftOf = (e) => assign[e] || fixedShift[e];
   const conflicts = [];
+  // 多組配對互相牽動（修好 A-C 可能又把 A 搬回 B 那班）：最多掃 3 輪，最後一輪還衝突的才回報（2026-10-29 Codex 審查）
+  for (let pass = 0; pass < 3; pass++) {
+  conflicts.length = 0;
+  let moved = false;
   for (const [a, b] of (ctx.pairs || [])) {
     if (!shiftOf(a) || !shiftOf(b) || shiftOf(a) !== shiftOf(b)) continue;
     const pin = (e) => (pinOf(ctx, e, d) || {}).kind === 'shift' || !assign[e];
@@ -275,12 +289,21 @@ export function assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixed
     };
     const moveAlone = (x) => {                                        // 對方是固定班：先試著把這個人直接換到別的班
       if (pin(x)) return false;
-      const s2 = shiftIds.find(s => s !== shiftOf(x) && ok(x, s));
-      if (s2) { assign[x] = s2; return true; }
+      const src = shiftOf(x);
+      if ((count[src] || 0) - 1 < ((need[src] || {}).min || 0)) return false;   // 搬走後原班不能低於最少人數（2026-10-29 Codex 審查）
+      const over = (sh, n) => { const mx = (need[sh] || {}).max; return mx == null ? 0 : Math.max(0, n - mx); };
+      // 搬過去後「全部超額人數」不能變多（原班本來就超額時，搬走一個換過去不算變差；Fable 審查：只看新班會不會超額太嚴）
+      const s2 = shiftIds.find(s => s !== src && ok(x, s) && over(src, (count[src] || 0) - 1) + over(s, (count[s] || 0) + 1) <= over(src, count[src] || 0) + over(s, count[s] || 0));
+      if (s2) { assign[x] = s2; count[src]--; count[s2] = (count[s2] || 0) + 1; return true; }
       return false;
     };
-    if (!(tryMove(b) || tryMove(a) || moveAlone(b) || moveAlone(a))) conflicts.push([a, b]);
+    if (tryMove(b) || tryMove(a) || moveAlone(b) || moveAlone(a)) moved = true; else conflicts.push([a, b]);
   }
+  if (!moved) break;
+  }
+  // 最後再純檢查一次：最後一輪的搬動可能讓別組變成同班，要照實回報（Fable 審查）
+  conflicts.length = 0;
+  for (const [a, b] of (ctx.pairs || [])) if (shiftOf(a) && shiftOf(b) && shiftOf(a) === shiftOf(b)) conflicts.push([a, b]);
   return { assign, unassigned, conflicts };
 }
 
@@ -446,9 +469,12 @@ function scheduleOnce(ctx, opts, guoSkip) {
     const used = {};
     backups.forEach(st => { used[st.emp_id] = dates.filter(d => bkDay(ctx, st.emp_id, d) && plan[st.emp_id][d] === 'work').length; });
     const tried = new Set();
+    const weekFills = [0, 0, 0, 0];                                     // 每週已叫備援幾次：先補叫得少的那週，不讓時數上限在期初就用光（2026-10-29 Fable 審查）
     for (let guard = 0; guard < REPAIR_MAX; guard++) {
-      const sh = res.find(r => r.code === 'D1' && !tried.has(r.date));
-      if (!sh) break;
+      const cands = res.filter(r => r.code === 'D1' && !tried.has(r.date));
+      if (!cands.length) break;
+      const wkOf = (dd) => Math.floor(dates.indexOf(dd) / 7);
+      const sh = cands.slice().sort((x, y) => weekFills[wkOf(x.date)] - weekFills[wkOf(y.date)] || (x.date < y.date ? -1 : 1))[0];
       const d = sh.date;
       const need = needOf(ctx, d);
       const lacking = Object.keys(need).filter(sid => ctx.staff.filter(x => (out[x.emp_id][d] || {}).shift_id === sid).length < need[sid].min);
@@ -462,7 +488,7 @@ function scheduleOnce(ctx, opts, guoSkip) {
         const tres = checkPeriod(merged(ctx, dates, trial.out));
         // 整期缺的人數要真的變少：只把缺口從這天搬到別天（例如時數上限被前面吃光，後面原本的班排不進去）不算（Fable 複驗）
         if (blockCount(tres) <= blockCount(res) && d1Count(tres) <= d1Count(res) && missing(trial.out, d) < missing(out, d) && missAll(trial.out) < missAll(out) && otWarn(tres, e) <= otWarn(res, e) && (trial.out[e][d] || {}).shift_id) {
-          out = trial.out; problems = trial.problems; res = tres; used[e]++; done = true; break;
+          out = trial.out; problems = trial.problems; res = tres; used[e]++; weekFills[Math.floor(dates.indexOf(d) / 7)]++; done = true; break;
         }
         plan[e][d] = 'off';
       }
