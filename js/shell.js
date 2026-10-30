@@ -71,7 +71,7 @@ function frame(s, inner, nav, opts) {
     // 登入／強制改密碼：最上方深色頂條（照貨單辨識系統）＋置中白卡
     app.innerHTML = `<header class="hdr"><div class="logos"></div><span class="ttl" id="sysName">${esc(UI.systemName)}</span></header><section class="login-view">${inner}</section>`;
   } else {
-    const embedBar = EMBED && s.person ? `<div class="embed-who"><span id="embedWho">${esc(s.person.name + '・' + s.name)}</span>${onlyStores(s.stores).length > 1 ? '<a href="#/switch" id="embedSwitch">換店</a>' : ''}</div>` : '';
+    const embedBar = EMBED && s.person ? `<div class="embed-who"><span id="embedWho">${esc(s.person.name + '・' + s.name)}</span>${onlyStores(s.stores).length > 1 ? '<a href="#/switch" id="embedSwitch">換店</a>' : ''}${ONLY === 'duty' ? '<a href="duty-guide.html" id="embedGuide" target="_blank" rel="noopener">📖 操作手冊</a>' : ''}</div>` : '';   // 考勤管理放給店長的圖解手冊（2026-10-30 Eason）
     app.innerHTML = `<div class="app">${sidebarHtml(s, opts.cur)}<div class="main-wrap"><div class="topbar"><h1 class="page-title" id="pageTitle">${esc(opts.title || '')}</h1>${opts.sub ? `<div class="sub">${esc(opts.sub)}</div>` : ''}${embedBar}</div>${nav || ''}<main>${inner}</main></div></div>`;
   }
   applyTheme(s ? s.brand : null, UI.logoUrl);
