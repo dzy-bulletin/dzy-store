@@ -312,6 +312,8 @@ select{min-height:44px}
 .du-reqold{color:var(--bad);font-size:12.5px}
 .du-reqacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
 .du-reqacts .btn{min-height:36px;font-size:13px}
+.du-proofmark{margin-left:4px;font-size:13px}
+.du-reqproof{font-size:12px;color:var(--muted,#7a716a);margin-top:2px}
 .du-voidbox{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 .du-voidreason{flex:1;min-width:180px;min-height:40px;font-size:16px;padding:6px 10px;border:1px solid var(--line);border-radius:8px}
 .du-reqnote{margin-top:6px;font-weight:700}

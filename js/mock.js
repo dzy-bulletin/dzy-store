@@ -780,7 +780,7 @@ function dutyDo(d, action, b) {
     const date = String(b.date || '');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return fail('BAD_INPUT', '日期格式不對。');
     const by_emp = {};
-    d.reqs.filter(r => r.date === date && r.status === 'approved').forEach(r => { (by_emp[r.emp_id] = by_emp[r.emp_id] || []).push(reqPublic(r)); });
+    d.reqs.filter(r => r.date === date && r.status === 'approved').forEach(r => { const o = reqPublic(r); o.attach_id = r.attach_id || ''; (by_emp[r.emp_id] = by_emp[r.emp_id] || []).push(o); });   // attach_id：核定工時看證明（2026-10-30）
     return ok({ date, by_emp });
   }
   if (action === 'mgr_req_void') {               // Requests.gs handleMgrReqVoid_（2026-10-26）：只能作廢已核准的、理由必填
@@ -799,7 +799,10 @@ function dutyDo(d, action, b) {
   }
   if (action === 'line_hub_attach_get') {
     const id = String(b.attach_id || '');
-    if (!id || !d.reqs.some(r => r.attach_id === id)) return fail('NOT_FOUND', '找不到這筆資料，請重新整理。');
+    // 帶 date＝核定工時看那天已核准申請的證明；沒帶＝申請審核的待審清單（照 LineHub.gs handleLineHubAttachGet_，2026-10-30）
+    const date = b.date === undefined ? '' : String(b.date);
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return fail('BAD_INPUT', '日期格式不對');
+    if (!id || !d.reqs.some(r => r.attach_id === id && (date ? r.date === date && r.status === 'approved' : r.status === 'pending'))) return fail('NOT_FOUND', '找不到這筆資料，請重新整理。');
     return ok(mockAttach(id));
   }
   if (action === 'mgr_pending_devices') return ok({ pending: d.devices.map(x => ({ ...x })) });

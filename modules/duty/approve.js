@@ -444,6 +444,8 @@ function buildCard(emp, date) {
         fb.onclick = () => { fill([r]); setNote('已依「' + r.summary + '」填好，其他申請沒有填進去，確認後按送出核定。'); };
         acts.append(fb);
       }
+      if (r.attach_id) acts.append(proofButton(r, row));
+      else if (r.has_attach) row.append(h('div', 'du-reqproof', '📎 有附證明（打卡系統還沒更新，暫時打不開）'));
       if (canVoid) {
         const vb = h('button', 'btn sm ghost du-reqvoid', '作廢', { type: 'button' });
         // 伺服器有給 void_ok（個人登入）就照它；沒有（門市登入、舊伺服器）就保守：值班主管本人與自己的單停用（2026-10-29 Fable 審查第 1 條）
@@ -455,6 +457,29 @@ function buildCard(emp, date) {
       rbox.append(row);
     });
     rbox.append(note);
+    if (reqs.some(r => r.attach_id || r.has_attach) && !nameEl.querySelector('.du-proofmark')) nameEl.append(h('span', 'du-proofmark', '📎', { title: '這天有附證明的申請', 'aria-label': '有附證明' }));
+    // 看證明（2026-10-30）：帶 date，營運系統與打卡端都用那天已核准的申請核對（不是待審清單）
+    function proofButton(r, row) {
+      const b = h('button', 'btn sm ghost du-reqatt', '📎 看證明', { type: 'button' });
+      b.onclick = async () => {
+        b.disabled = true; b.textContent = '載入中…';
+        try {
+          const res = await call('line_hub_attach_get', { attach_id: r.attach_id, date, store: emp.store });
+          const mime = String(res.mime || ''), data = String(res.data || '');
+          if (!data) throw new Error('empty');
+          b.remove();
+          if (/^image\/(png|jpe?g|gif|webp|heic|heif)$/i.test(mime)) {
+            const img = h('img', 'du-rq-img', null, { alt: (emp.name || '') + ' 的申請證明' }); img.src = 'data:' + mime + ';base64,' + data; row.append(img);
+          } else {
+            const KNOWN = { 'application/pdf': ['pdf', 'PDF'] };
+            const k = KNOWN[mime.toLowerCase()];
+            const a = h('a', 'du-rq-file', k ? `下載證明（${k[1]}）` : '下載證明（格式無法預覽，下載後用對應的程式開）', { download: 'attachment.' + (k ? k[0] : 'bin') });
+            a.href = 'data:' + (k ? mime : 'application/octet-stream') + ';base64,' + data; row.append(a);
+          }
+        } catch (e) { b.disabled = false; b.textContent = '證明讀不到，再試一次'; }
+      };
+      return b;
+    }
     function askVoid(r, vb, row) {                  // 作廢理由（必填，同仁在 LINE「我的申請」看得到）：就地開輸入框，不用 prompt（嵌入頁的 prompt 不一定能跳）
       if (row.querySelector('.du-voidreason')) return;
       const inp = h('input', 'du-voidreason', null, { type: 'text', maxlength: '100', placeholder: '作廢理由（必填，同仁在 LINE 看得到）', 'aria-label': '作廢理由' });
