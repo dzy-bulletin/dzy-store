@@ -6,8 +6,8 @@ import { call, calHtml, monthDates, resultsHtml, issueMap, cellOptions, cellOfVa
 import { weekday } from './period.js';
 import { canEdit } from './state.js';
 
-export const H = { key: null, month: null, data: null, loading: null, who: null, emp: null, sel: null, msg: '', err: '' };
-export function resetSelf(key) { Object.assign(H, { key, month: null, data: null, loading: null, who: null, emp: null, sel: null, msg: '', err: '' }); }
+export const H = { key: null, month: null, data: null, loading: null, who: null, emp: null, sel: null, shEdit: null, msg: '', err: '' };
+export function resetSelf(key) { Object.assign(H, { key, month: null, data: null, loading: null, who: null, emp: null, sel: null, shEdit: null, msg: '', err: '' }); }
 
 async function load() {
   if (!H.month) H.month = defaultSelfMonth();
@@ -47,6 +47,45 @@ function shell(ctx, draw) {
   });
 }
 
+// ---------------------------------------------------------------- 總部班別卡（新增、修改）
+// 誰能用：能排整個總部的人（canEdit＝人資主管、管理員，放在「部屬核准」）＋總部總監 shiftAdmin（2026-10-30 Eason：hm、odir 都能新增、修改，放在「我的班表」；沒有我的班表才放部屬核准）。
+// 總部班別是共用的一份清單；刪除只在門市排班的「班別與設定」頁（用過就不能刪），這裡不提供。伺服器 schedule.js mod() 對 shiftAdmin 只放行 saveShift。
+const shiftAdminOf = (ses) => !!(ses && ses.person && ses.shiftAdmin);
+const shiftsInApprove = (ses) => canEdit(ses) || (shiftAdminOf(ses) && !ses.schedSelfOn);
+const shiftsInSelf = (ses) => shiftAdminOf(ses) && !canEdit(ses) && !!ses.schedSelfOn;
+function shiftCardHtml(D) {
+  const ed = H.shEdit ? D.shifts.find((s) => s.id === H.shEdit) : null;
+  if (H.shEdit && !ed) H.shEdit = null;
+  const desc = (s) => `${esc(s.name)} ${esc(timeText(s))}（${s.segs ? '分段班' : `休息 ${s.break_min} 分`}）`;
+  const list = D.shifts.length ? `<div class="sc-dlist" id="hqShList">${D.shifts.map((s) => `<div class="row hq-shrow"><span class="grow">${desc(s)}</span><button type="button" class="hq-shEdit btn sm ghost" data-id="${esc(s.id)}">修改</button></div>`).join('')}</div>`
+    : '<p class="hint">還沒有班別，同仁沒有班可以選。</p>';
+  const v = ed || { name: '', start: '09:00', end: '18:00', break_min: 60 };
+  const segLock = ed && ed.segs ? ' disabled' : '';      // 分段班的時段在門市排班「班別與設定」頁改，這裡只改名稱
+  return `<div class="card" id="hqShifts"><h2>總部班別</h2>${list}
+      ${ed ? `<p class="hint mt" id="hqShEditing">修改「${esc(ed.name)}」${ed.segs ? '（分段班：這裡只能改名稱）' : ''}；已經用在已鎖定班表的班別不能改時間，請新增一個班別。</p>` : '<p class="hint mt">總部班別是大家共用的一份清單，新增、修改都會留紀錄。</p>'}
+      <div class="row"><input id="hqShName" placeholder="班別名稱" maxlength="12" aria-label="班別名稱" style="width:110px" value="${esc(v.name)}"><input id="hqShStart" type="time" value="${esc(v.start)}" aria-label="上班時間"${segLock}><input id="hqShEnd" type="time" value="${esc(v.end)}" aria-label="下班時間"${segLock}>
+      <input id="hqShBrk" type="number" min="0" max="600" value="${Number(v.break_min) || 0}" aria-label="休息分鐘" style="width:70px"${segLock}>${ed ? '<button type="button" class="btn sm" id="hqShSave">儲存修改</button><button type="button" class="btn sm ghost" id="hqShCancel">取消</button>' : '<button type="button" class="btn sm" id="hqShAdd">新增班別</button>'}</div></div>`;
+}
+function bindShiftCard(ctx, el, D) {
+  const q = (s) => el.querySelector(s);
+  if (!q('#hqShifts')) return;
+  const done = async (okMsg) => { H.shEdit = null; try { await reload(); say(okMsg); } catch (e) { say(e.message, true); } ctx.rerender(); };
+  const form = () => ({ name: q('#hqShName').value.trim(), start: q('#hqShStart').value, end: q('#hqShEnd').value, break_min: Number(q('#hqShBrk').value) || 0 });
+  el.querySelectorAll('button.hq-shEdit').forEach((b) => { b.onclick = () => { H.shEdit = b.dataset.id; say(''); ctx.rerender(); }; });
+  if (q('#hqShCancel')) q('#hqShCancel').onclick = () => { H.shEdit = null; say(''); ctx.rerender(); };
+  if (q('#hqShAdd')) q('#hqShAdd').onclick = () => busy(q('#hqShAdd'), async () => {
+    try { await call('saveShift', { shift: form() }); await done('已新增班別'); } catch (e) { say(e.message, true); ctx.rerender(); }
+  });
+  if (q('#hqShSave')) q('#hqShSave').onclick = () => busy(q('#hqShSave'), async () => {
+    const cur = D.shifts.find((s) => s.id === H.shEdit);
+    if (!cur) { H.shEdit = null; return ctx.rerender(); }
+    // 只送畫面上改得到的欄位，顏色、排序原樣送回（不送會被清成預設）；分段班照原本的分段（伺服器由分段推算上下班）
+    const f = form();
+    const shift = Object.assign({ id: cur.id, color: cur.color || '', sort: cur.sort || 0, active: true }, cur.segs ? { name: f.name, start: cur.start, end: cur.end, break_min: cur.break_min, segs: cur.segs } : f);
+    try { await call('saveShift', { shift }); await done(`已修改班別「${f.name}」`); } catch (e) { say(e.message, true); ctx.rerender(); }
+  });
+}
+
 // ---------------------------------------------------------------- 我的班表
 export function renderSelf(ctx) {
   const key = ctx.session.token || ctx.session.code;
@@ -58,7 +97,12 @@ function drawSelf(ctx) {
   const el = ctx.el, D = H.data;
   const emp = H.emp && D.me.includes(H.emp) ? H.emp : D.me[0];      // 一人有多個總部員編：上方可切換（H.emp）
   const row = D.staff.find((s) => s.emp_id === emp);
-  if (!row) { el.innerHTML = '<div class="card"><p class="hint" style="margin:0" id="hqNoMe">你在這家店還沒有打卡員編，請洽總部。</p></div>'; return; }
+  if (!row) {
+    el.innerHTML = '<div class="card"><p class="hint" style="margin:0" id="hqNoMe">你在這家店還沒有打卡員編，請洽總部。</p></div>'
+      + (shiftsInSelf(ctx.session) ? `<div class="card"><div id="hqMsg" class="${H.err ? 'err' : 'okmsg'}" role="status">${esc(H.err || H.msg || '')}</div></div>` + shiftCardHtml(D) : '');
+    bindShiftCard(ctx, el, D);
+    return;
+  }
   const shifts = D.shifts, shiftMap = Object.fromEntries(shifts.map((s) => [s.id, s]));
   const cells = D.cells[emp] || {};
   const st = row.status;
@@ -76,7 +120,8 @@ function drawSelf(ctx) {
   const empPick = D.me.length > 1 ? `<div class="row mt"><label class="sc-chk" for="hqEmpSel">員編</label><select id="hqEmpSel" aria-label="要看哪個員編的班表">${D.me.map((x) => `<option value="${esc(x)}" ${x === emp ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div>` : '';
   el.innerHTML = head(D, `${row.name}・${emp}`, `${empPick}<div class="sc-state mt">${stTag}${pend}</div>${acts}${hint}${why}`)
     + resultsHtml(D.results, emp)
-    + `<div class="card hq-calcard">${calHtml(H.month, cells, shiftMap, D.holidays, { editable, sel: H.sel, issue: issueMap(D.results, emp) })}</div>`;
+    + `<div class="card hq-calcard">${calHtml(H.month, cells, shiftMap, D.holidays, { editable, sel: H.sel, issue: issueMap(D.results, emp) })}</div>`
+    + (shiftsInSelf(ctx.session) ? shiftCardHtml(D) : '');
 
   let editor = '';
   if (H.sel && editable) {
@@ -89,6 +134,7 @@ function drawSelf(ctx) {
   }
   const q = (s) => el.querySelector(s);
   bindMonth(ctx, el);
+  bindShiftCard(ctx, el, D);
   if (q('#hqEmpSel')) q('#hqEmpSel').onchange = () => { H.emp = q('#hqEmpSel').value; H.sel = null; say(''); ctx.rerender(); };
   const refresh = async (okMsg) => { try { await reload(); if (okMsg) say(okMsg); } catch (e) { say(e.message, true); } ctx.rerender(); };
   const save = async (cellsIn, okMsg) => {
@@ -136,10 +182,7 @@ function drawApprove(ctx) {
     return `<button type="button" class="sc-drow hq-emp${H.who === s.emp_id ? ' sel' : ''}" data-emp="${esc(s.emp_id)}"><span class="sc-dn">${esc(s.name)}</span><span class="sc-dv">${tag}${s.pendingDays ? `<small>${s.pendingDays} 天變更等核准</small>` : ''}</span></button>`;
   }).join('') : '<p class="hint" style="margin:0" id="hqNoSubs">沒有需要你核准的部屬。</p>';
   const ses = ctx.session;
-  const shiftCard = canEdit(ses) ? `<div class="card" id="hqShifts"><h2>總部班別</h2>
-      <p class="hint">${D.shifts.length ? D.shifts.map((s) => `${esc(s.name)} ${esc(timeText(s))}（${s.segs ? '分段班' : `休息 ${s.break_min} 分`}）`).join('；') : '還沒有班別，同仁沒有班可以選。'}</p>
-      <div class="row"><input id="hqShName" placeholder="班別名稱" maxlength="12" aria-label="班別名稱" style="width:110px"><input id="hqShStart" type="time" value="09:00" aria-label="上班時間"><input id="hqShEnd" type="time" value="18:00" aria-label="下班時間">
-      <input id="hqShBrk" type="number" min="0" max="600" value="60" aria-label="休息分鐘" style="width:70px"><button type="button" class="btn sm" id="hqShAdd">新增班別</button></div></div>` : '';
+  const shiftCard = shiftsInApprove(ses) ? shiftCardHtml(D) : '';
   el.innerHTML = head(D, `${subs.length} 位部屬・${waiting} 位等你核准`, '')
     + `<div class="card"><h2>部屬</h2><div class="sc-dlist" id="hqSubs">${list}</div></div>` + shiftCard;
 
@@ -168,10 +211,5 @@ function drawApprove(ctx) {
     try { await call('selfReject', { month: H.month, emp_id: who.emp_id, version: who.version, reason }); await refresh(`已退回 ${who.name} 的班表`); }
     catch (e) { say(e.message, true); if (e.code === 'CONFLICT') { try { await reload(); } catch (e2) { /* 留原畫面 */ } } ctx.rerender(); }
   });
-  if (q('#hqShAdd')) q('#hqShAdd').onclick = () => busy(q('#hqShAdd'), async () => {
-    try {
-      await call('saveShift', { shift: { name: q('#hqShName').value.trim(), start: q('#hqShStart').value, end: q('#hqShEnd').value, break_min: Number(q('#hqShBrk').value) || 0 } });
-      await refresh('已新增班別');
-    } catch (e) { say(e.message, true); ctx.rerender(); }
-  });
+  bindShiftCard(ctx, el, D);
 }

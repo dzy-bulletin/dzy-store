@@ -211,7 +211,8 @@ function route(method, p, q, b, token) {
     if (m[1] === 'loss') return lossMock(m[2], mx, b, db);
     if (m[1] === 'board') return boardMock(m[2], mx, b, db);
     if (m[1] === 'schedule' && !per && me.role === 'store' && !['load', 'dayPlan', 'annual'].includes(m[2])) return fail('FORBIDDEN', '排班請用管理系統個人帳號：人資部門 → 排班管理');   // 門市帳號（共用店號）不能排班，同 server/schedule.js mod()
-    if (m[1] === 'schedule' && per && !pa.scheduleAdmin && !['load', 'dayPlan', 'annual'].includes(m[2]) && !/^(self|fixed)[A-Z]/.test(m[2])) return fail('FORBIDDEN', '只有本店店長、人資主管或管理員可以排班，你只能查看');   // 同 server/schedule.js mod()
+    if (m[1] === 'schedule' && per && !pa.scheduleAdmin && !['load', 'dayPlan', 'annual'].includes(m[2]) && !/^(self|fixed)[A-Z]/.test(m[2]) && !(pa.shiftAdmin && m[2] === 'saveShift')) return fail('FORBIDDEN', '只有本店店長、人資主管或管理員可以排班，你只能查看');   // 同 server/schedule.js mod()（總部總監 shiftAdmin 只多放行 saveShift）
+    if (m[1] === 'schedule' && per && !pa.scheduleAdmin && me.mode === 'self' && ['load', 'annual'].includes(m[2])) return fail('FORBIDDEN', '總部的班表請到「我的班表」查看');   // 同 server/schedule.js mod()：總部整店班表只給能排班的人
     if (m[1] === 'schedule') return import('./mock-schedule.js').then(x => x.schedule(m[2], mx, b, db, s, { pa, addEmployee: name => dutyDo(dutyDb(), 'mgr_add_employee', { name }) }));   // 用到才載入（排班計算檔案多，放在開頁就載會拉長每一頁的載入時間，WebKit 換頁時更容易打斷其他假資料的讀取）
     return fail('NOT_FOUND', '還在搬移中，暫時請用原本的系統');
   }

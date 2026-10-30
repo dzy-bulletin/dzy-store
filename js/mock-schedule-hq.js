@@ -285,8 +285,8 @@ export function hqAction(action, me, b, db, hol, pa) {
     if (month === nextMonth(cur) && Number(today.slice(8, 10)) < 20) return fail('BAD_INPUT', '下個月的班表 20 號起才能填');
     return null;
   };
-  if (action === 'selfLoad') {
-    if (!mine.length && !canApprove) return fail('FORBIDDEN', '你沒有這家店的排班權限');
+  if (action === 'selfLoad') {      // 班別同 server selfLoad：多帶 color、sort（班別卡修改時原樣送回）
+    if (!mine.length && !canApprove && !pa.shiftAdmin) return fail('FORBIDDEN', '你沒有這家店的排班權限');      // 同 server：總部總監沒有員編也能讀班別清單
     const ids = new Set(mine);
     if (pa.approveAll) st.staff.forEach((s) => ids.add(s.emp_id)); else (pa.approveIds || []).forEach((e) => ids.add(e));
     const rows = st.staff.filter((s) => ids.has(s.emp_id)).sort((a, c) => (mine.includes(c.emp_id) ? 1 : 0) - (mine.includes(a.emp_id) ? 1 : 0));
@@ -301,7 +301,7 @@ export function hqAction(action, me, b, db, hol, pa) {
       for (const d of dates) { const c = base[d]; if (!c && !pend[d]) continue; const o = c ? toCell(c) : { t: '' }; if (pend[d]) o.pending = toCell(pend[d]); out[d] = o; }
       cells[s.emp_id] = out;
     }
-    return ok({ month, mode: 'self', me: mine, canApprove, shifts: shiftList(), holidays: Object.fromEntries(Object.entries(Object.assign({}, (hol.gov && hol.gov.off) || {}, hol.days)).filter(([k]) => k.slice(0, 7) === month)),
+    return ok({ month, mode: 'self', me: mine, canApprove, shifts: Object.values(st.shifts).filter((s) => s.active).map((s) => ({ id: s.id, name: s.name, start: s.start, end: s.end, break_min: s.break_min, color: s.color || '', sort: s.sort || 0, ...(s.segs ? { segs: s.segs } : {}) })), holidays: Object.fromEntries(Object.entries(Object.assign({}, (hol.gov && hol.gov.off) || {}, hol.days)).filter(([k]) => k.slice(0, 7) === month)),
       staff, cells, results: results(st, rows.map((s) => s.emp_id), month, hol), mode_from: st.modeFrom });
   }
   const own = () => (typeof b.emp_id === 'string' && mine.includes(b.emp_id) ? null : fail('FORBIDDEN', '只能改自己的班表'));
