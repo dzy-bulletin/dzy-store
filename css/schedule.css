@@ -20,6 +20,7 @@ button.sc-ckgo{background:none;border:0;padding:0;font:inherit;font-weight:700;c
 .sc-ckguide{white-space:nowrap;font-weight:700}
 .sc-acts .grow{flex:1}
 .sc-chk{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);margin-right:10px}
+.sc-chk.sc-off{color:#a8a29a;text-decoration:line-through;text-decoration-color:#d8d2c8}
 .sc-seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .sc-seg button{border:0;background:#fff;padding:6px 14px;font:inherit;font-size:13px;cursor:pointer;color:var(--muted)}
 .sc-seg button.on{background:var(--black);color:#fff}

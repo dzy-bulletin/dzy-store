@@ -15,6 +15,11 @@ export function renderStaff(ctx) {
   const asOf = D.dates[0];
   const noClock = D.meta.clockAlias === null;
   const noDuty = !noClock && D.meta.dutyOn === false;          // 有打卡但沒開出勤核定：不同步名冊、不能帶入實際出勤、不能新增（要先開出勤核定）
+  // 班別在「班別與設定」停用後，同仁身分裡勾過的仍然有效（限班照算）：照樣列出、灰字標「已停用」，才看得到也取消得掉（2026-10-31 Eason）
+  const pick = (ids) => D.shifts.filter((s) => s.active || ids.includes(s.id));
+  const chk = (cls, s, ids) => `<label class="sc-chk${s.active ? '' : ' sc-off'}"><input type="checkbox" class="${cls}" value="${esc(s.id)}" ${ids.includes(s.id) ? 'checked' : ''}> ${esc(s.name)}${s.active ? '' : '（已停用）'}</label>`;
+  const deadNote = (ids) => (ids.length && !ids.some((id) => (D.shifts.find((s) => s.id === id) || {}).active)
+    ? '<p class="err sc-deadal">勾的班都已停用，自動排班排不到他：請改勾使用中的班，或全部取消勾選</p>' : '');
   const card = (st) => {
     // 期中才報到的人，身分通常從報到日起算：要用報到日去找，不然期首那天找不到、卡片誤標「還沒設正職或計時」（2026-10-27 林秀縈：10/12 報到、身分 10/12 起，看 T00＝10/4 起時被誤標）
     const eff = termAt(D.terms, st.emp_id, st.hire_date && st.hire_date > asOf ? st.hire_date : asOf) || {};
@@ -43,8 +48,8 @@ export function renderStaff(ctx) {
       </div>
       <label class="sc-chk"><input type="checkbox" class="f-same" ${t.same_days ? 'checked' : ''}> 計時但每週上班天數跟正職一樣（特休給完整天數）</label>
       <label class="sc-chk f-bkbox"${t.kind === 'pt' ? '' : ' hidden'}><input type="checkbox" class="f-bk" ${t.kind === 'pt' && t.backup ? 'checked' : ''}> 備援：其他同仁都排不開才排他（只限計時；自動排班先不排他，哪天缺人才叫他補）</label>
-      <div class="fld mt"><label>平日只能上的班（都不勾＝每班都能上）</label><div class="row">${shifts.map((s) => `<label class="sc-chk"><input type="checkbox" class="f-al" value="${esc(s.id)}" ${allowed.includes(s.id) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('')}</div></div>
-      <div class="fld mt"><label>假日只能上的班（六日、國定假日、補假；都不勾＝跟平日一樣）</label><div class="row">${shifts.map((s) => `<label class="sc-chk"><input type="checkbox" class="f-alh" value="${esc(s.id)}" ${allowedHol.includes(s.id) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('')}</div></div>
+      <div class="fld mt"><label>平日只能上的班（都不勾＝每班都能上）</label><div class="row">${pick(allowed).map((s) => chk('f-al', s, allowed)).join('')}</div>${deadNote(allowed)}</div>
+      <div class="fld mt"><label>假日只能上的班（六日、國定假日、補假；都不勾＝跟平日一樣）</label><div class="row">${pick(allowedHol).map((s) => chk('f-alh', s, allowedHol)).join('')}</div>${deadNote(allowedHol)}</div>
       ${stations.length ? `<div class="fld mt"><label>預設站別（新排的上班日自動帶入，班表上可以再改）</label><select class="f-dst"><option value="">不設</option>${
         stations.filter((x) => x.active || x.id === st.default_station).map((x) => `<option value="${esc(x.id)}" ${x.id === st.default_station ? 'selected' : ''}>${esc(x.name)}${x.active ? '' : '（已停用）'}</option>`).join('')}</select></div>` : ''}
       <div class="grid2 mt">

@@ -1,7 +1,7 @@
 // 排班前檢查清單（docs/autoschedule/checklist-requirements.md，Eason 2026-10-27）：
 // 班別、同仁身分是必要（沒設好擋自動排班），每天每班人數是建議（黃字），工作站／指定／營業額選填。
 // D＝load 回傳；純函式，畫面（board.js）與測試共用。
-import { termAt, employed } from './rules.js';
+import { termAt, employed, isRedDay } from './rules.js';
 
 const NAME_MAX = 5;
 // ids：只算這些班別／站別（停用的不算）
@@ -19,6 +19,19 @@ export function setupChecklist(D) {
   items.push({ key: 'terms', label: '同仁身分', level: 'must', ok: inPeriod.length > 0 && !missing.length,
     text: !inPeriod.length ? '同仁身分：這一期還沒有在職的同仁，請先到「同仁」確認名單'
       : missing.length ? `同仁身分：${missing.length} 人還沒設正職或計時：${names}` : `同仁身分：${inPeriod.length} 人都設好`, tab: 'staff' });
+
+  // 能上的班全部被停用（班別與設定取消「使用中」，同仁身分裡的限班還留著）：自動排班完全排不到這個人。紅字提醒、不擋自動排班（2026-10-31 Eason）
+  const active = new Set((D.shifts || []).filter((s) => s.active).map((s) => s.id));
+  const dead = (ids) => (ids || []).length > 0 && !ids.some((id) => active.has(id));
+  const stuck = active.size ? inPeriod.filter((st) => dates.some((d) => {
+    const t = employed(st, d) && termAt(D.terms || {}, st.emp_id, d);
+    if (!t) return false;
+    return (t.allowed_shifts_hol || []).length && isRedDay(D.holidays, d) ? dead(t.allowed_shifts_hol) : dead(t.allowed_shifts);
+  })) : [];
+  if (stuck.length) {
+    const sn = stuck.slice(0, NAME_MAX).map((st) => st.name).join('、') + (stuck.length > NAME_MAX ? ` 等 ${stuck.length} 人` : '');
+    items.push({ key: 'allowed', label: '同仁能上的班', level: 'must', noBlock: true, ok: false, text: `同仁能上的班：${stuck.length} 人勾的班都已停用，排不到他：${sn}`, tab: 'staff' });
+  }
 
   const demandOk = anyMin(D.demandTpl, new Set((D.shifts || []).filter((s) => s.active).map((s) => s.id)));
   items.push({ key: 'demand', label: '每天每班要幾個人', level: 'rec', ok: demandOk,
@@ -40,7 +53,7 @@ export function setupChecklist(D) {
 
   return {
     items,
-    blockers: items.filter((i) => i.level === 'must' && !i.ok).map((i) => i.label),
+    blockers: items.filter((i) => i.level === 'must' && !i.ok && !i.noBlock).map((i) => i.label),
     allDone: items.every((i) => i.level === 'opt' || i.ok),
   };
 }
