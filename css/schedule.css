@@ -127,7 +127,7 @@ button.sc-ckgo{background:none;border:0;padding:0;font:inherit;font-weight:700;c
   .sc-editor{bottom:8px}
   .sc-editor select{min-width:0;flex:1}
 }
-.sc-printtitle{display:none}
+.sc-printtitle,.sc-printrev{display:none}
 /* 央廚班表一期跨兩個月：每月 1 號那欄左邊粗線＋「12月」小標（2026-10-27 Eason 選 3A） */
 .sc-grid th.mb,.sc-grid td.mb{border-left:3px solid #1F4E8C}
 .sc-grid .sc-mlab{display:block;font-size:10px;font-weight:900;color:#1F4E8C;line-height:1.1}
@@ -165,6 +165,7 @@ button.hq-day{cursor:pointer}
   body{background:#fff}
   #sidebar,header.hdr,.topbar,nav.tabs,.banner,.demo-bar,.sc-period,.sc-state,.sc-acts,#scPw,.sc-months,#scMsg,.sc-sum,.sc-editor,.sc-check,.note{display:none!important}
   .sc-printtitle{display:block;font-size:16px;font-weight:700;margin:0 0 8px}
+  .sc-printrev{display:block;font-size:11px;margin:-4px 0 8px} .sc-printrev span{display:block}
   .card{box-shadow:none;border:0;padding:0;margin:0}
   .main-wrap,.app{display:block;margin:0;padding:0}
   .scroll{overflow:visible}

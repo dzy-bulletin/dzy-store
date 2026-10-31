@@ -107,6 +107,8 @@ export function renderBoard(ctx) {
   const monthsHtml = (D.months || []).map((m) => `<div class="sc-month"><label for="scRev-${m.ym}">${+m.ym.slice(5)} 月預估營業額</label>
       <input type="number" inputmode="numeric" min="0" id="scRev-${m.ym}" class="sc-mrev" data-ym="${m.ym}" value="${m.revenue == null ? '' : m.revenue}"> 元
       <span class="hint">每工時營業額 <b class="${ratioCls(m.ratio)}">${m.ratio == null ? '—' : m.ratio.toLocaleString() + ' 元'}</b>（整月排班 ${hm(m.minutes)} 小時${target ? `，目標 ${target.toLocaleString()} 元` : ''}）</span></div>`).join('');
+  // 匯出 PDF 時印在標題下方（2026-11-01 Eason：畫面上的營業額區塊列印時藏起來，數字改印在這一行；整月工時是日曆月，不是這一期）
+  const printRev = (D.months || []).length ? `<div class="sc-printrev">${D.months.map((m) => `<span>${+m.ym.slice(5)} 月預估營業額 ${m.revenue == null ? '未填' : m.revenue.toLocaleString() + ' 元'}｜每工時營業額 ${m.ratio == null ? '—' : m.ratio.toLocaleString() + ' 元'}｜整月排班 ${hm(m.minutes)} 小時${target ? `｜目標 ${target.toLocaleString()} 元` : ''}</span>`).join('')}</div>` : '';
 
   // 排班前檢查清單（Eason 2026-10-27）：只給能排班的人、未鎖定的期；班別、同仁身分沒設好擋自動排班；全部設好收成一行
   const ck = setupChecklist(D);
@@ -122,7 +124,7 @@ export function renderBoard(ctx) {
   }
 
   const head = `<div class="card sc-head">
-    <div class="sc-printtitle">${esc((ctx.session && ctx.session.name) || '')} 班表　${esc(D.period)}　${md(D.dates[0])}–${md(periodEnd(D.period))}</div>
+    <div class="sc-printtitle">${esc((ctx.session && ctx.session.name) || '')} 班表　${esc(D.period)}　${md(D.dates[0])}–${md(periodEnd(D.period))}</div>${printRev}
     <div class="sc-period"><button type="button" class="btn ghost sm" id="scPrev" aria-label="上一期">‹</button>
       <div><b>${esc(D.period)}</b><span class="sc-range">${md(D.dates[0])}（日）– ${md(periodEnd(D.period))}（六）</span></div>
       <button type="button" class="btn ghost sm" id="scNext" aria-label="下一期">›</button></div>
