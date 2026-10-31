@@ -3,7 +3,7 @@ import { esc, busy, confirmBox } from '../../js/ui.js';
 import { timeText, segsOf, shiftMinutes } from './hours.js';
 import { api } from '../../js/api.js';
 import { S, canEdit, loadAnnual, load, mutate, movePeriod, WD, md, hm, DAY_LABEL, LEAVE_LABEL, call } from './state.js';
-import { weekday, periodEnd } from './period.js';
+import { weekday, periodEnd, todayTaipei } from './period.js';
 import { termAt, LEAVES } from './rules.js';
 import { stHidden, setStHidden, stToggleHtml } from './stview.js';
 import { setupChecklist } from './checklist.js';
@@ -75,7 +75,9 @@ export function renderBoard(ctx) {
   const hoursOf = (st) => D.dates.reduce((a, d) => { const c = (D.days[st.emp_id] || {})[d], s = c && c.shift_id && shifts[c.shift_id]; return a + (s && inJobOn(st, d) ? shiftMinutes(s) : 0); }, 0);
   // 名字下方的剩餘特休：薪資系統的餘額（S.annual，另外抓；計時或拿不到就不顯示）
   loadAnnual(ctx.rerender);
-  const annualTxt = (st) => { const a = S.annual && S.annual[st.emp_id]; return a == null ? '' : `<small class="sc-al">特休剩 ${a} 天</small>`; };
+  // 剩餘特休是薪資系統的數字，要等那天過了、考勤核定才扣；班表上今天起已排的特休另外標出來（2026-10-31 Eason：排了 1 天怎麼還是 7 天）
+  const annualPlanned = (st) => D.dates.filter((d) => d >= todayTaipei() && inJobOn(st, d) && ((D.days[st.emp_id] || {})[d] || {}).day_type === 'L' && D.days[st.emp_id][d].leave === '特').length;
+  const annualTxt = (st) => { const a = S.annual && S.annual[st.emp_id]; if (a == null) return ''; const n = annualPlanned(st); return `<small class="sc-al">特休剩 ${a} 天${n ? `（本期排 ${n} 天）` : ''}</small>`; };
 
   const ratioCls = (r) => (r == null || !target ? '' : r < target ? ' low' : ' good');
   // 當天總人數（Eason 2026-10-11：不分班別，只看當天幾個人上班）；需要人數＝各班最少人數加總
