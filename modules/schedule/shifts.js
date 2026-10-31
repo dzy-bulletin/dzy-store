@@ -22,7 +22,7 @@ export function renderShifts(ctx) {
       <div class="fld"><label class="s-l1">上班</label><input type="time" class="s-start" value="${esc(s ? seg1(s).start : '10:00')}"></div>
       <div class="fld"><label class="s-l2">下班（早於上班＝隔天下班）</label><input type="time" class="s-end" value="${esc(s ? seg1(s).end : '19:00')}"></div>
       <div class="fld"><label class="s-l3">休息（分鐘）</label><input type="number" min="0" max="600" class="s-break" value="${s ? seg1(s).break_min || 0 : 60}"></div>
-      <div class="fld"><label>顏色</label><input type="color" class="s-color" value="${esc((s && s.color) || '#FFF4CC')}"></div>
+      <input type="hidden" class="s-color" value="${esc((s && s.color) || '#FFF4CC')}">
       <div class="fld"><label>排序</label><input type="number" min="0" max="999" class="s-sort" value="${s ? s.sort : 0}"></div></div>
     <div class="sc-segs">${s && s.segs ? s.segs.slice(1).map((x, i) => segRow(x, i + 1)).join('') : ''}</div>
     <div class="row"><button type="button" class="btn sm ghost s-addseg">＋加一段（二段班／三段班）</button>${s ? '' : '<span class="hint">中間會離開的班：例 10:00–14:00 下班、17:00–21:00 再上，就填兩段。</span>'}</div>
@@ -82,7 +82,8 @@ export function renderShifts(ctx) {
       const extra = segsIn();
       const shift = { id: c.dataset.id || null, name: f('.s-name').value, start: f('.s-start').value, end: f('.s-end').value, break_min: Number(f('.s-break').value) || 0,
         ...(extra.length ? { segs: [first(), ...extra] } : {}),
-        color: f('.s-color').value, sort: Number(f('.s-sort').value) || 0, active: f('.s-active') ? f('.s-active').checked : true };
+        color: f('.s-color').value,   // 班別顏色班表不再用（2026-10-12），畫面欄位拿掉、照原值送回（2026-10-31 Eason）
+        sort: Number(f('.s-sort').value) || 0, active: f('.s-active') ? f('.s-active').checked : true };
       try {
         const r = await call('saveShift', { shift });
         staleFixed(); await load(); ctx.rerender();

@@ -419,6 +419,28 @@ export function autoSchedule(ctx, opts) {
 
 function scheduleOnce(ctx, opts, guoSkip) {
   const keepManual = !opts || opts.keepManual !== false;
+  // 手動排的例假／休息日（沒有班）：保留「這天休」，但「例」還是「休」交給系統依每週重新標（2026-10-31 光復范家嘉：
+  //  一週的休假全是手動選的「休息日」→ 原本整格固定、系統補不出例假，整期擋「這週沒有例假」）。做法＝當成指定休假排，結果再標回手動
+  const manualOff = {};
+  if (keepManual) {
+    const pins = {};
+    for (const st of ctx.staff) {
+      const e = st.emp_id;
+      pins[e] = Object.assign({}, (ctx.pins || {})[e] || {});
+      for (const [d, c] of Object.entries(ctx.days[e] || {})) {
+        if (c && c.source === 'manual' && (c.day_type === 'R' || c.day_type === 'H') && !c.shift_id && !pins[e][d] && employed(st, d)) { pins[e][d] = { kind: 'off' }; (manualOff[e] = manualOff[e] || {})[d] = true; }
+      }
+    }
+    const days = {};
+    for (const e of Object.keys(ctx.days || {})) { days[e] = Object.assign({}, ctx.days[e]); for (const d of Object.keys(manualOff[e] || {})) delete days[e][d]; }
+    ctx = Object.assign({}, ctx, { pins, days });
+  }
+  const r = scheduleCore(ctx, opts, guoSkip, keepManual);
+  if (r.days) for (const e of Object.keys(manualOff)) for (const d of Object.keys(manualOff[e])) if (r.days[e] && r.days[e][d] && !r.days[e][d].shift_id && (r.days[e][d].day_type === 'R' || r.days[e][d].day_type === 'H')) r.days[e][d].source = 'manual';
+  return r;
+}
+
+function scheduleCore(ctx, opts, guoSkip, keepManual) {
   const inp = inputProblems(ctx);
   if (inp.length) return { ok: false, days: null, problems: inp, results: [] };
   const dates = periodDates(ctx.period);

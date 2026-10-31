@@ -126,7 +126,7 @@ export function renderStaff(ctx) {
       try {
         const newTerm = f('.f-term') && f('.f-term').value === '__new';
         if (newTerm && !f('.f-from').value) { say(f('.f-msg'), '新增一筆身分設定：請填「身分從哪天開始」', true); f('.f-from').focus(); return; }
-        await call('saveStaff', { staff: { emp_id: emp, hire_date: f('.f-hire').value || null, leave_date: f('.f-leave').value || null, birthday: f('.f-bday').value || null, phone: f('.f-phone').value || null, ...(f('.f-dst') ? { default_station: f('.f-dst').value || null } : {}),
+        const savedR = await call('saveStaff', { staff: { emp_id: emp, hire_date: f('.f-hire').value || null, leave_date: f('.f-leave').value || null, birthday: f('.f-bday').value || null, phone: f('.f-phone').value || null, ...(f('.f-dst') ? { default_station: f('.f-dst').value || null } : {}),
           prio: f('.f-prio').value === '' ? null : Number(f('.f-prio').value), pref_shift: f('.f-pref').value || null } });
         const kind = f('.f-kind').value;
         // 既有那筆：開始日不能在這裡改（改了等於新增一筆、舊的還在，Codex 審查），一律存回選到的那筆
@@ -137,7 +137,8 @@ export function renderStaff(ctx) {
         } catch (e) { throw new Error(`排班順位、報到日等已存；身分設定沒存：${e.message}`); }   // 兩段存檔不是一次完成，講清楚哪些已存（Codex 審查）
         // 沒選身分：其他欄位照存，但要講清楚身分還沒存（2026-10-27 林秀縈：紅標還在、又沒提示，看起來像存失敗）
         if (kind) { S.termSel = S.termSel || {}; S.termSel[emp] = fromDate || undefined; }
-        S.staffSaved = { emp, bad: !kind, text: kind ? '✓ 已儲存' : '報到日、生日等資料已存。身分還沒設定：請在「身分」選正職或計時再按一次儲存，才排得進班表（開始日期可空白＝一直都是）。' };
+        const filledTxt = savedR && savedR.station_filled ? `，${savedR.station_filled} 個還沒選站的上班日已帶入預設站別` : '';   // 換預設站別時伺服器一起帶入（2026-10-31）
+        S.staffSaved = { emp, bad: !kind, text: kind ? '✓ 已儲存' + filledTxt : '報到日、生日等資料已存。身分還沒設定：請在「身分」選正職或計時再按一次儲存，才排得進班表（開始日期可空白＝一直都是）。' };
         await load(); ctx.rerender();
       } catch (e) { say(f('.f-msg'), e.message, true); }
     });

@@ -76,7 +76,7 @@ function drawFixed(ctx) {
     if (hideSt || !c || c.t === 'L' || !c.s) return '';
     const x = c.w && stMap[c.w];
     if (x) return `<small class="sc-sn${x.active ? '' : ' off'}" data-station="${esc(x.id)}"${x.color ? ` style="color:${esc(x.color)}"` : ''}>${esc(x.name)}</small>`;
-    return stActive.length ? '<small class="sc-sn none">未選站</small>' : '';
+    return '';   // 沒選站＝空白（2026-10-31 Eason：只顯示有指定的工作站；沒選站仍列在提醒清單 T1）
   };
   const stCount = (d, id) => D.staff.filter((st) => { const c = (D.cells[st.emp_id] || {})[d]; return c && c.s && c.w === id; }).length;
   const byCell = {};

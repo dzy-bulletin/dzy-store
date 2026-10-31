@@ -217,11 +217,22 @@ export async function schedule(action, me, b, db, s, hooks) {
       let e = x.emp_id;
       if (!e) { if (!x.name || !String(x.name).trim()) return fail('BAD_INPUT', '姓名不能空白'); e = 'local-' + String(st.staff.filter((y) => y.emp_id.startsWith('local-')).length + 1).padStart(6, '0'); st.staff.push({ emp_id: e, name: String(x.name).trim(), hire_date: null, leave_date: null, birthday: null, phone: null, sort: st.staff.length }); }
       const row = st.staff.find((y) => y.emp_id === e); if (!row) return fail('BAD_INPUT', '找不到這位同仁');
+      let filled = 0;
       if (x.phone && !/^[0-9+\-\s]{6,20}$/.test(x.phone)) return fail('BAD_INPUT', '手機格式不對');
       if (x.hire_date && x.leave_date && x.leave_date < x.hire_date) return fail('BAD_INPUT', '離職日期不能早於報到日期');
       if (Object.prototype.hasOwnProperty.call(x, 'default_station')) {
         const ds = x.default_station || null;
         if (ds && ds !== row.default_station && !(st.stations[ds] && st.stations[ds].active)) return fail('BAD_INPUT', '預設站別不存在或已停用');
+        // 照 server saveStaff：換了預設站別 → 今天起、未鎖定期別裡這人沒選站的上班日一起帶入（2026-10-31 Eason）
+        if (ds && ds !== row.default_station) {
+          const t = todayTaipei(), byP = {};
+          for (const [d, c] of Object.entries(st.days[e] || {})) {
+            const p = periodOf(d);
+            if (d >= t && c.shift_id && !c.station_id && p && !prow(st, p).locked) { c.station_id = ds; (byP[p] = byP[p] || []).push(d); }
+          }
+          for (const [p, list] of Object.entries(byP)) { prow(st, p).version++; st.log.push({ period: p, who: me.code, action: 'station_default', detail: `${row.name} ${list.length} 個沒選站的上班日帶入 ${st.stations[ds].name}` }); }
+          filled = Object.values(byP).reduce((a, x) => a + x.length, 0);
+        }
         row.default_station = ds;
       }
       if (Object.prototype.hasOwnProperty.call(x, 'prio')) {
@@ -235,7 +246,7 @@ export async function schedule(action, me, b, db, s, hooks) {
         row.pref_shift = ps;
       }
       Object.assign(row, { hire_date: x.hire_date || null, leave_date: x.leave_date || null, birthday: x.birthday || null, phone: x.phone || null });
-      return ok({ emp_id: e });
+      return ok({ emp_id: e, station_filled: filled });
     }
     case 'addHire': {   // 照 server/schedule.js addHire：先檢查欄位與同名 → 有打卡的店代建打卡帳號（假出勤核定名冊）→ 寫排班資料
       const h = b.hire || {};

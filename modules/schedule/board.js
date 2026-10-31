@@ -47,7 +47,7 @@ export function renderBoard(ctx) {
     if (hideSt || !c || !c.shift_id) return '';
     const x = c.station_id && stMap[c.station_id];
     if (x) return `<small class="sc-sn${x.active ? '' : ' off'}" data-station="${esc(x.id)}"${x.color ? ` style="color:${esc(x.color)}"` : ''}>${esc(x.name)}</small>`;
-    return stActive.length ? '<small class="sc-sn none">未選站</small>' : '';
+    return '';   // 沒選站＝空白（2026-10-31 Eason：只顯示有指定的工作站；沒選站仍列在提醒清單 T1）
   };
   const narrow = window.matchMedia && window.matchMedia('(max-width: 760px)').matches;
   const view = S.view || (narrow ? 'day' : 'grid');
@@ -85,6 +85,8 @@ export function renderBoard(ctx) {
   const inJobOn = (st, d) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date);
   const stCount = (d, id) => staff.filter((st) => inJobOn(st, d) && ((D.days[st.emp_id] || {})[d] || {}).station_id === id && ((D.days[st.emp_id] || {})[d] || {}).shift_id).length;
   const stNeed = (d, id) => ((D.stationNeed || {})[d] || {})[id] || 0;
+  // 統計列只列有設最少人數的站（這期任一天有設）；沒設的站（例：收班）只在格子上顯示站名，不另列一排人數（2026-10-31 Eason）
+  const stCntShow = stShow.filter((x) => D.dates.some((d) => stNeed(d, x.id) > 0));
   const dayNeed = (d) => Object.values(D.demand[d] || {}).reduce((a, x) => a + (x.min || 0), 0);
   // 當天人數只顯示早／晚（2026-10-31 Eason）：照上班時間分、不看班名——早＝15:00 以前開始，晚＝18:00 以後才結束（含跨夜）；二段班、整天班兩邊都算
   const isEarly = (s) => segsOf(s)[0].start < '15:00';
@@ -169,7 +171,7 @@ export function renderBoard(ctx) {
       return `<td class="sc-nt${isWe(d) ? ' we' : ''}${t ? ' has' : ''}${S.noteSel === d ? ' sel' : ''}" data-note="${d}" data-kind="${k}" title="${esc(t || (canLock ? '點一下寫' + label : ''))}">${t ? `<div class="sc-ntx">${esc(t)}</div>` : canLock ? '<span class="sc-ntadd" aria-hidden="true">＋</span>' : ''}</td>`;
     }).join('')}<td class="sc-off"></td><td class="sc-hr"></td></tr>`).join('');
     // 各站人數：每個使用中的站一列，不足最少人數的紅字「1/2」
-    const stRows = stShow.map((x) => `<tr class="sc-stcnt" data-station="${esc(x.id)}"><th scope="row">${esc(x.name)}</th>${D.dates.map((d) => {
+    const stRows = stCntShow.map((x) => `<tr class="sc-stcnt" data-station="${esc(x.id)}"><th scope="row">${esc(x.name)}</th>${D.dates.map((d) => {
       const n = stCount(d, x.id), need = stNeed(d, x.id);
       return `<td class="${need && n < need ? 'short' : ''}${isWe(d) ? ' we' : ''}" title="${esc(x.name)}${need ? `至少要 ${need} 人` : '沒有設人數'}">${n}${need ? '/' + need : ''}</td>`;
     }).join('')}<td class="sc-off"></td><td class="sc-hr"></td></tr>`).join('');
@@ -193,7 +195,7 @@ export function renderBoard(ctx) {
     }).join('');
     const n = dayTotal(d), nd = dayNeed(d), el = dayEL(d);
     const cnt = `<span class="tag ${nd && n < nd ? 'bad' : ''}" id="scDayCount">早 ${el.e} 人｜晚 ${el.l} 人</span>`
-      + stShow.map((x) => { const k = stCount(d, x.id), nn = stNeed(d, x.id); return `<span class="tag sc-dst ${nn && k < nn ? 'bad' : ''}" data-station="${esc(x.id)}">${esc(x.name)} ${k}${nn ? '/' + nn : ''}</span>`; }).join('');
+      + stCntShow.map((x) => { const k = stCount(d, x.id), nn = stNeed(d, x.id); return `<span class="tag sc-dst ${nn && k < nn ? 'bad' : ''}" data-station="${esc(x.id)}">${esc(x.name)} ${k}${nn ? '/' + nn : ''}</span>`; }).join('');
     body = `<div class="card"><div class="sc-days">${chips}</div>
       <h2 class="mt">${md(d)}（${WD[weekday(d)]}）${hol ? `<span class="tag">${esc(hol)}</span>` : ''}</h2>
       <div class="row">${cnt}</div>

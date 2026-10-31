@@ -167,7 +167,7 @@ button.hq-day{cursor:pointer}
   .sc-grid .sc-off,.sc-grid .sc-offh,.sc-grid .sc-hr,.sc-grid .sc-hrh{position:static!important}
   .sc-ntadd{display:none}
   .sc-c,.sc-cnt td,.sc-stcnt td,.sc-nt,.sc-off,.sc-hr,.sc-grid thead th.we{-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  /* 站別小標要印出來；「未選站」黃標列印時不印底色，只留文字 */
+  /* 站別小標要印出來 */
   .sc-sn{font-size:8px}
   .sc-sn.none{background:none!important;color:#555}
   /* 央廚班表：說明文字、訊息、提醒清單不印；換月粗線要印 */
