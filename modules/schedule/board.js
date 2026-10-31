@@ -4,7 +4,7 @@ import { timeText, segsOf, shiftMinutes, shiftCode } from './hours.js';
 import { api } from '../../js/api.js';
 import { S, canEdit, loadAnnual, load, mutate, movePeriod, WD, md, hm, DAY_LABEL, LEAVE_LABEL, call } from './state.js';
 import { weekday, periodEnd, todayTaipei } from './period.js';
-import { termAt, LEAVES } from './rules.js';
+import { termAt, LEAVES, NOTE_COLORS } from './rules.js';
 import { stHidden, setStHidden, stToggleHtml } from './stview.js';
 import { setupChecklist } from './checklist.js';
 import { getSession } from '../../js/auth.js';
@@ -83,6 +83,9 @@ export function renderBoard(ctx) {
   // 當天總人數（Eason 2026-10-11：不分班別，只看當天幾個人上班）；需要人數＝各班最少人數加總
   const dayTotal = (d) => staff.filter((st) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date) && ((D.days[st.emp_id] || {})[d] || {}).shift_id).length;
   const inJobOn = (st, d) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date);
+  // 當天排定總工時（2026-11-01 Eason：當天人數下方一列）：在職、有排班的人照班別扣掉休息後的工時加總，跟右邊「排班時數」同一套算法
+  const dayMin = (d) => staff.reduce((a, st) => { const c = (D.days[st.emp_id] || {})[d], s = c && c.shift_id && shifts[c.shift_id]; return a + (s && inJobOn(st, d) ? shiftMinutes(s) : 0); }, 0);
+  const hrTxt = (min) => +(min / 60).toFixed(2);
   const stCount = (d, id) => staff.filter((st) => inJobOn(st, d) && ((D.days[st.emp_id] || {})[d] || {}).station_id === id && ((D.days[st.emp_id] || {})[d] || {}).shift_id).length;
   const stNeed = (d, id) => ((D.stationNeed || {})[d] || {})[id] || 0;
   // 統計列只列有設最少人數的站（這期任一天有設）；沒設的站（例：收班）只在格子上顯示站名，不另列一排人數（2026-10-31 Eason）
@@ -95,6 +98,11 @@ export function renderBoard(ctx) {
   // 每天的午餐／晚餐備註（全店共用，Eason 2026-10-26）：放在日期下方、同仁上方；鎖定後也能改，存了自動重送 LINE
   const NOTE_KINDS = [['lunch', '午餐備註'], ['dinner', '晚餐備註']];
   const noteOf = (d, k) => ((D.notes || {})[d] || {})[k] || '';
+  const noteColor = (d, k) => { const c = noteOf(d, k + '_color'); return NOTE_COLORS[c] ? c : ''; };
+  const noteStyle = (c) => (c ? ` style="color:${NOTE_COLORS[c][1]}"` : '');
+  // 字體顏色選擇：預設＋固定色票（Eason 2026-11-01）
+  const colorPick = (k, cur) => `<div class="sc-ncol" role="group" aria-label="字體顏色" data-k="${k}" data-c="${cur}">${[['', ['預設', '']]].concat(Object.entries(NOTE_COLORS)).map(([c, [name, hex]]) =>
+    `<button type="button" class="sc-ncsw${c === cur ? ' on' : ''}" data-c="${c}" aria-pressed="${c === cur}" title="${name}"${hex ? ` style="color:${hex}"` : ''}>${name}</button>`).join('')}</div>`;
   // 預估營業額以月為單位：本期碰到的每個月一格
   const monthsHtml = (D.months || []).map((m) => `<div class="sc-month"><label for="scRev-${m.ym}">${+m.ym.slice(5)} 月預估營業額</label>
       <input type="number" inputmode="numeric" min="0" id="scRev-${m.ym}" class="sc-mrev" data-ym="${m.ym}" value="${m.revenue == null ? '' : m.revenue}"> 元
@@ -165,10 +173,12 @@ export function renderBoard(ctx) {
     const cnt = `<tr class="sc-cnt"><th scope="row">當天人數</th>${D.dates.map((d) => {
       const n = dayTotal(d), need = dayNeed(d), el = dayEL(d);
       return `<td class="${need && n < need ? 'short' : ''}${isWe(d) ? ' we' : ''}" title="共 ${n} 人上班${need ? `，至少要 ${need} 人` : ''}">早 ${el.e}<br>晚 ${el.l}</td>`;
-    }).join('')}<td class="sc-off"></td><td class="sc-hr"></td></tr>`;
+    }).join('')}<td class="sc-off"></td><td class="sc-hr"></td></tr>`
+      + `<tr class="sc-dhr"><th scope="row">當天工時</th>${D.dates.map((d) => `<td class="${isWe(d) ? 'we' : ''}" title="當天排定總工時（扣掉休息）">${hrTxt(dayMin(d))}</td>`).join('')}`
+      + `<td class="sc-off"></td><td class="sc-hr" title="這期全店排定總工時"><b>${hrTxt(D.dates.reduce((a, d) => a + dayMin(d), 0))}</b></td></tr>`;
     const noteRows = NOTE_KINDS.map(([k, label]) => `<tr class="sc-noterow"><th scope="row">${label}</th>${D.dates.map((d) => {
       const t = noteOf(d, k);
-      return `<td class="sc-nt${isWe(d) ? ' we' : ''}${t ? ' has' : ''}${S.noteSel === d ? ' sel' : ''}" data-note="${d}" data-kind="${k}" title="${esc(t || (canLock ? '點一下寫' + label : ''))}">${t ? `<div class="sc-ntx">${esc(t)}</div>` : canLock ? '<span class="sc-ntadd" aria-hidden="true">＋</span>' : ''}</td>`;
+      return `<td class="sc-nt${isWe(d) ? ' we' : ''}${t ? ' has' : ''}${S.noteSel === d ? ' sel' : ''}" data-note="${d}" data-kind="${k}" title="${esc(t || (canLock ? '點一下寫' + label : ''))}">${t ? `<div class="sc-ntx"${noteStyle(noteColor(d, k))}>${esc(t)}</div>` : canLock ? '<span class="sc-ntadd" aria-hidden="true">＋</span>' : ''}</td>`;
     }).join('')}<td class="sc-off"></td><td class="sc-hr"></td></tr>`).join('');
     // 各站人數：每個使用中的站一列，不足最少人數的紅字「1/2」
     const stRows = stCntShow.map((x) => `<tr class="sc-stcnt" data-station="${esc(x.id)}"><th scope="row">${esc(x.name)}</th>${D.dates.map((d) => {
@@ -194,12 +204,12 @@ export function renderBoard(ctx) {
         ${iss.length ? `<span class="sc-dmsg">${esc(iss.map((i) => i.msg).join('；'))}</span>` : ''}</button>`;
     }).join('');
     const n = dayTotal(d), nd = dayNeed(d), el = dayEL(d);
-    const cnt = `<span class="tag ${nd && n < nd ? 'bad' : ''}" id="scDayCount">早 ${el.e} 人｜晚 ${el.l} 人</span>`
+    const cnt = `<span class="tag ${nd && n < nd ? 'bad' : ''}" id="scDayCount">早 ${el.e} 人｜晚 ${el.l} 人</span><span class="tag" id="scDayHours">總工時 ${hrTxt(dayMin(d))} 小時</span>`
       + stCntShow.map((x) => { const k = stCount(d, x.id), nn = stNeed(d, x.id); return `<span class="tag sc-dst ${nn && k < nn ? 'bad' : ''}" data-station="${esc(x.id)}">${esc(x.name)} ${k}${nn ? '/' + nn : ''}</span>`; }).join('');
     body = `<div class="card"><div class="sc-days">${chips}</div>
       <h2 class="mt">${md(d)}（${WD[weekday(d)]}）${hol ? `<span class="tag">${esc(hol)}</span>` : ''}</h2>
       <div class="row">${cnt}</div>
-      <div class="sc-dnotes mt" id="scDayNotes">${NOTE_KINDS.map(([k, label]) => `<div class="sc-dnote${noteOf(d, k) ? ' has' : ''}"><b>${label}</b><span id="scDayNote-${k}">${noteOf(d, k) ? esc(noteOf(d, k)) : '（沒有）'}</span></div>`).join('')}
+      <div class="sc-dnotes mt" id="scDayNotes">${NOTE_KINDS.map(([k, label]) => `<div class="sc-dnote${noteOf(d, k) ? ' has' : ''}"><b>${label}</b><span id="scDayNote-${k}"${noteStyle(noteColor(d, k))}>${noteOf(d, k) ? esc(noteOf(d, k)) : '（沒有）'}</span></div>`).join('')}
         ${canLock ? `<button type="button" class="btn ghost sm" id="scDayNoteEdit" data-note="${d}">寫備註</button>` : ''}</div>
       ${(byDay[d] || []).map((x) => `<div class="note warn mt">${esc(x.msg)}</div>`).join('')}
       <div class="sc-dlist mt">${list}</div></div>`;
@@ -243,7 +253,7 @@ export function renderBoard(ctx) {
   if (S.noteSel && D.dates.includes(S.noteSel) && canLock) {
     const d = S.noteSel;
     noteEditor = `<div class="card sc-editor" id="scNoteEditor"><b>${md(d)}（${WD[weekday(d)]}）備註</b>
-      ${NOTE_KINDS.map(([k, label]) => `<label class="sc-nlabel" for="scNote-${k}">${label}</label><input type="text" id="scNote-${k}" maxlength="60" placeholder="例：${k === 'lunch' ? '12:00 有 30 人團體訂位' : '提早 30 分鐘盤點'}" value="${esc(noteOf(d, k))}">`).join('')}
+      ${NOTE_KINDS.map(([k, label]) => `<label class="sc-nlabel" for="scNote-${k}">${label}</label><input type="text" id="scNote-${k}" maxlength="60" placeholder="例：${k === 'lunch' ? '12:00 有 30 人團體訂位' : '提早 30 分鐘盤點'}" value="${esc(noteOf(d, k))}"${noteStyle(noteColor(d, k))}>${colorPick(k, noteColor(d, k))}`).join('')}
       ${locked && D.meta.clockAlias !== null && D.period !== 'T00' ? '<div class="hint mt">這一期已鎖定，存了會自動重送到 LINE，同仁看得到新的備註。</div>' : ''}
       <div class="row mt"><button type="button" class="btn" id="scNoteOk">儲存</button><button type="button" class="btn ghost" id="scNoteX">取消</button></div></div>`;
   }
@@ -286,10 +296,17 @@ export function renderBoard(ctx) {
   const openNote = (d) => { if (!canLock) { say('你只能查看班表，備註請找本店店長', true); return rerender(); } S.noteSel = d; S.sel = null; rerender(); const f = q('#scNote-lunch'); if (f) f.focus(); };
   el.querySelectorAll('.sc-nt[data-note], #scDayNoteEdit').forEach((b) => { b.onclick = () => openNote(b.dataset.note); });
   if (q('#scNoteX')) q('#scNoteX').onclick = () => { S.noteSel = null; rerender(); };
+  el.querySelectorAll('.sc-ncol .sc-ncsw').forEach((b) => { b.onclick = () => {   // 選色只改畫面，按儲存才存
+    const g = b.closest('.sc-ncol'), c = b.dataset.c;
+    g.dataset.c = c;
+    g.querySelectorAll('.sc-ncsw').forEach((x) => { const on = x === b; x.classList.toggle('on', on); x.setAttribute('aria-pressed', String(on)); });
+    const inp = q('#scNote-' + g.dataset.k); if (inp) inp.style.color = c ? NOTE_COLORS[c][1] : '';
+  }; });
   if (q('#scNoteOk')) q('#scNoteOk').onclick = () => busy(q('#scNoteOk'), async () => {
     const d = S.noteSel;
     try {
-      const r = await call('saveNotes', { period: S.period, notes: { [d]: { lunch: q('#scNote-lunch').value, dinner: q('#scNote-dinner').value } } });
+      const col = (k) => q(`.sc-ncol[data-k="${k}"]`).dataset.c;
+      const r = await call('saveNotes', { period: S.period, notes: { [d]: { lunch: q('#scNote-lunch').value, dinner: q('#scNote-dinner').value, lunch_color: col('lunch'), dinner_color: col('dinner') } } });
       await load(); S.noteSel = null; say(r.resend ? '已存備註，正在重送到 LINE' : '已存備註');
     } catch (e) { say(e.message, true); }
     rerender();

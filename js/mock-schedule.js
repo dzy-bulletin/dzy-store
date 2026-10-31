@@ -1,6 +1,6 @@
 // 自動排班假後端（示範模式 ?mode=mock 與 e2e 用）。動作名稱、回傳形狀、版本與鎖定規則照 server/schedule.js；
 // 檢查與自動排班直接用同一份 rules.js／auto.js。e2e 可用 window.__E2E_DATA.schedule = { pubFail: true } 模擬送 LINE 失敗。
-import { checkPeriod, comboError, minutesOf } from '../modules/schedule/rules.js';
+import { checkPeriod, comboError, minutesOf, NOTE_COLORS } from '../modules/schedule/rules.js';
 import { autoSchedule } from '../modules/schedule/auto.js';
 import { periodDates, periodOf, todayTaipei, addDays, weekday, parseLabel, shiftPeriod } from '../modules/schedule/period.js';
 import { shiftMinutes, breakOk, normSegs } from '../modules/schedule/hours.js';
@@ -154,7 +154,11 @@ export async function schedule(action, me, b, db, s, hooks) {
         const n = b.notes[d] || {}, lunch = String(n.lunch || '').trim(), dinner = String(n.dinner || '').trim();
         if (lunch.length > 60) return fail('BAD_INPUT', '午餐備註太長');
         if (dinner.length > 60) return fail('BAD_INPUT', '晚餐備註太長');
-        if (!lunch && !dinner) delete st.notes[d]; else st.notes[d] = { lunch, dinner };
+        const old = st.notes[d] || {};
+        const colorOf = (k) => { if (!(k in n)) return old[k] || ''; const v = n[k] == null ? '' : String(n[k]); return v; };
+        const lc = lunch ? colorOf('lunch_color') : '', dc = dinner ? colorOf('dinner_color') : '';
+        if ((lc && !NOTE_COLORS[lc]) || (dc && !NOTE_COLORS[dc])) return fail('BAD_INPUT', '備註顏色不對');
+        if (!lunch && !dinner) delete st.notes[d]; else st.notes[d] = Object.assign({ lunch, dinner }, lc ? { lunch_color: lc } : {}, dc ? { dinner_color: dc } : {});
       }
       const resend = !!prow(st, period).locked && clockAlias !== null && period !== 'T00';
       if (resend) pubSet('publish');

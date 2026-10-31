@@ -24,6 +24,8 @@ const FT_DAY_NORMAL = 10 * H, PT_DAY_NORMAL = 8 * H, DAY_MAX = 12 * H;
 const PERIOD_NORMAL = 160 * H, WEEK_NORMAL = 40 * H;
 export const MONTH_OT = 46 * H, MONTH_OT_WARN = 36 * H;   // 每月加班：超過 46 擋、超過 36 警告（Eason 2026-10-27，取代 10-11 的「46 只提醒」）
 const PT_OT_RUN = 6;                         // 計時連上第 6 天＝休息日加班，提醒（Eason 2026-10-27；第 7 天由 P3 擋）
+// 備註字體顏色（2026-11-01 Eason）：代號 → 色碼；沒選＝預設黑字。伺服器只收這幾個代號
+export const NOTE_COLORS = { red: ['紅', '#d32f2f'], blue: ['藍', '#1565c0'], green: ['綠', '#2e7d32'], orange: ['橘', '#e65100'], purple: ['紫', '#6a1b9a'] };
 export const MIN_GAP = 11 * H;                // 換班間隔（§34）：Eason 2026-10-11 改 12 小時、2026-10-31 改回 11 小時，自動排班與檢查共用這一個值
 const LEAVE_MIN = 8 * H;                     // 請假、國定假日放假一天算 8 小時（F7）
 /** 假別（sch_days.leave 存第一欄代號）：指定休假、班表格子共用；國定假日假「國」另外處理（2026-10-31 Eason：指定休假要能先選假別） */

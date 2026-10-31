@@ -70,6 +70,7 @@ button.sc-ckgo{background:none;border:0;padding:0;font:inherit;font-weight:700;c
 .sc-off b{display:block;font-size:13px} .sc-off small{display:block;font-size:10px;color:var(--muted);white-space:nowrap}
 .sc-rev{width:64px;border:1px solid var(--line);border-radius:4px;padding:3px;font:inherit;font-size:11px;text-align:right}
 .sc-ratio.low,.low{color:#b26a00;font-weight:700} .sc-ratio.good,.good{color:var(--ok)}
+.sc-dhr td{font-size:11px;color:var(--muted)} .sc-dhr td.we{background:var(--sc-we)}
 .sc-cnt td{font-size:11px;color:var(--muted)} .sc-cnt td.we{background:var(--sc-we)} .sc-cnt td.short{color:var(--bad);font-weight:700;background:#fdf0ee}
 .sc-stcnt td{font-size:11px;color:var(--muted)} .sc-stcnt td.we{background:var(--sc-we)} .sc-stcnt td.short{color:var(--bad);font-weight:700;background:#fdf0ee}
 .sc-sn{display:block;font-size:10px;font-weight:600;line-height:1.2;color:var(--muted)} .sc-sn.off{opacity:.55} .sc-sn.none{display:block;color:#8a6100;background:#fff0b3;border-radius:3px;margin:0 3px;font-weight:700}
@@ -87,6 +88,11 @@ button.sc-ckgo{background:none;border:0;padding:0;font:inherit;font-weight:700;c
 .sc-dnotes{display:grid;gap:4px;font-size:14px} .sc-dnote{display:flex;gap:8px} .sc-dnote b{flex:none;color:var(--muted);font-weight:600} .sc-dnote:not(.has) span{color:var(--muted)}
 .sc-dnotes .btn{justify-self:start}
 .sc-nlabel{display:block;font-size:13px;color:var(--muted);margin-top:8px}
+.sc-ncol{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.sc-ncsw{min-width:44px;min-height:32px;padding:2px 10px;border:1px solid var(--line);border-radius:16px;background:var(--card);font-weight:700;font-size:13px;cursor:pointer}
+.sc-ncsw.on{border-width:2px;border-color:currentColor;box-shadow:0 0 0 2px rgba(0,0,0,.06)}
+.sc-ncsw[data-c=""]{color:inherit}
+.sc-ntx{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 #scNoteEditor input{width:100%;max-width:420px;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px}
 .sc-days{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}
 .sc-daychip{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 8px;font:inherit;font-size:13px;min-width:52px;cursor:pointer}
@@ -174,7 +180,7 @@ button.hq-day{cursor:pointer}
   .sc-c.pin::after{display:none}
   .sc-grid .sc-off,.sc-grid .sc-offh,.sc-grid .sc-hr,.sc-grid .sc-hrh{position:static!important}
   .sc-ntadd{display:none}
-  .sc-c,.sc-cnt td,.sc-stcnt td,.sc-nt,.sc-off,.sc-hr,.sc-grid thead th.we{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .sc-c,.sc-cnt td,.sc-dhr td,.sc-stcnt td,.sc-nt,.sc-off,.sc-hr,.sc-grid thead th.we{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   /* 站別小標要印出來 */
   .sc-sn{font-size:8px}
   .sc-sn.none{background:none!important;color:#555}
