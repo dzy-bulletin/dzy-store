@@ -1,6 +1,6 @@
 // 自動排班「班表」分頁：整期格子（桌機）／單日清單（手機）、營業額與工時比、每班人數、檢查結果、自動排班、鎖定與發布。
 import { esc, busy, confirmBox } from '../../js/ui.js';
-import { timeText, segsOf, shiftMinutes } from './hours.js';
+import { timeText, segsOf, shiftMinutes, shiftCode } from './hours.js';
 import { api } from '../../js/api.js';
 import { S, canEdit, loadAnnual, load, mutate, movePeriod, WD, md, hm, DAY_LABEL, LEAVE_LABEL, call } from './state.js';
 import { weekday, periodEnd, todayTaipei } from './period.js';
@@ -13,7 +13,7 @@ const PUB_TEXT = { pending: '等待送到 LINE', sent: '已發布到 LINE', fail
 
 function cellText(c, shifts) {
   if (!c) return { t: '', cls: 'empty' };
-  if (c.shift_id) { const s = shifts[c.shift_id]; return { t: s ? s.name : c.shift_id, cls: 'work' + (c.day_type === 'H' ? ' ot' : ''), ot: c.day_type === 'H' }; }
+  if (c.shift_id) { const s = shifts[c.shift_id]; return { t: s ? shiftCode(s.name) : c.shift_id, cls: 'work' + (c.day_type === 'H' ? ' ot' : ''), ot: c.day_type === 'H' }; }
   if (c.day_type === 'L') return { t: LEAVE_LABEL[c.leave] || '假', cls: 'leave' };
   if (c.day_type === 'W') return { t: '?', cls: 'empty' };
   return { t: DAY_LABEL[c.day_type] || '', cls: c.day_type === 'R' ? 'rest' : 'off' };
@@ -178,7 +178,7 @@ export function renderBoard(ctx) {
     // 班表最下方列班別與時間（2026-10-31 Eason）：使用中的班＋這期有排到的停用班
     const usedSh = new Set(); for (const st of staff) for (const d of D.dates) { const c = (D.days[st.emp_id] || {})[d]; if (c && c.shift_id) usedSh.add(c.shift_id); }
     const legendSh = D.shifts.filter((s) => s.active || usedSh.has(s.id));
-    const legend = legendSh.length ? `<div class="sc-legend" id="scLegend">${legendSh.map((s) => `<span><b>${esc(s.name)}</b>：${esc(timeText(s))}</span>`).join('')}</div>` : '';
+    const legend = legendSh.length ? `<div class="sc-legend" id="scLegend">${legendSh.map((s) => `<span><b>${esc(shiftCode(s.name))}</b>：${esc(timeText(s))}</span>`).join('')}</div>` : '';
     body = `<div class="card sc-gridcard"><div class="scroll"><table class="sc-grid">
       <thead><tr><th class="sc-name">同仁</th>${th}<th class="sc-offh">休假<small>天數</small></th><th class="sc-hrh">排班<small>時數</small></th></tr></thead>
       <tbody>${noteRows}${rows}${cnt}${stRows}</tbody></table></div>${legend}</div>`;
@@ -219,16 +219,16 @@ export function renderBoard(ctx) {
       <button type="button" class="btn" id="scStationOk">儲存站別</button>${locked ? '<button type="button" class="btn ghost" id="scCellX">取消</button>' : ''}</div>` : '';
     if (locked) {
       const sh = c.shift_id ? shifts[c.shift_id] : null;
-      editor = `<div class="card sc-editor" id="scEditor">${head2}<span class="hint">　${esc(sh ? `${sh.name} ${timeText(sh)}` : '')}　已鎖定，只能改工作站（改完會自動重送 LINE）</span>${stRow || '<div class="row mt"><button type="button" class="btn ghost" id="scCellX">取消</button></div>'}</div>`;
+      editor = `<div class="card sc-editor" id="scEditor">${head2}<span class="hint">　${esc(sh ? `${shiftCode(sh.name)} ${timeText(sh)}` : '')}　已鎖定，只能改工作站（改完會自動重送 LINE）</span>${stRow || '<div class="row mt"><button type="button" class="btn ghost" id="scCellX">取消</button></div>'}</div>`;
     } else {
       const cur = c.shift_id ? 'S:' + c.shift_id + (c.day_type === 'H' ? ':H' : '') : c.day_type === 'L' ? 'L:' + c.leave : c.day_type || '';
       // 國定假日假：國定假日當天都可選；正職在有國定假日的期別可移到別天（Eason 2026-10-12）
       const isFt = (termAt(D.terms, S.sel.emp, S.sel.date) || {}).kind === 'ft';
       const guoOk = !!D.holidays.days[S.sel.date] || (isFt && D.dates.some((d) => D.holidays.days[d]));
-      const otOpts = activeShifts.map((s) => `<option value="S:${esc(s.id)}:H">${esc(s.name)}（休息日出勤）</option>`).join('');
+      const otOpts = activeShifts.map((s) => `<option value="S:${esc(s.id)}:H">${esc(shiftCode(s.name))}（休息日出勤）</option>`).join('');
       // 休息日加班只能改回休息日或換一個休息日出勤的班（伺服器同樣擋，Eason 2026-10-11）
       const opts = c.day_type === 'H' && c.shift_id ? otOpts + '<option value="H">休息日</option>'
-        : activeShifts.map((s) => `<option value="S:${esc(s.id)}">${esc(s.name)} ${esc(timeText(s))}</option>`).join('') + otOpts
+        : activeShifts.map((s) => `<option value="S:${esc(s.id)}">${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('') + otOpts
         + '<option value="R">例假</option><option value="H">休息日</option>' + LEAVES.map(([k, l]) => `<option value="L:${k}">${l}</option>`).join('')
         + (guoOk ? '<option value="L:國">國定假日假</option>' : '') + '<option value="CLEAR">清空</option>';
       editor = `<div class="card sc-editor" id="scEditor">${head2}

@@ -65,3 +65,10 @@ export function gapMinutes(date1, s1, date2, s2) {
   const [start2] = bounds(date2, s2, date1);
   return start2 - end1;
 }
+
+// 畫面只顯示班別代碼：「A班」「F1班」→「A」「F1」；「早班」這類不是代碼的名稱照原樣（班別設定頁仍顯示完整名稱）
+export function shiftCode(name) {
+  const s = String(name == null ? '' : name).trim();
+  const m = /^([A-Za-z0-9Ａ-Ｚａ-ｚ０-９]+)\s*班$/.exec(s);
+  return m ? m[1] : s;
+}

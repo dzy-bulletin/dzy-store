@@ -1,7 +1,7 @@
 // 總部自填排班：「我的班表」（同仁每天自己選班、送出）與「部屬核准」（主管看部屬月曆、核准或退回）。
 // 規格 docs/schedule-hq/spec.md §3、§5、§10.1。資料一律整包重讀（selfLoad 回來的就是最新的狀態、版本與檢查結果），畫面不自己拼。
 import { esc, busy } from '../../js/ui.js';
-import { timeText } from './hours.js';
+import { timeText, shiftCode } from './hours.js';
 import { call, calHtml, monthDates, resultsHtml, issueMap, cellOptions, cellOfValue, valueOfCell, mLabel, md, nextMonth, prevMonth, curMonth, defaultSelfMonth, STATUS_TEXT, WD } from './hq.js';
 import { weekday } from './period.js';
 import { canEdit } from './state.js';
@@ -56,7 +56,7 @@ const shiftsInSelf = (ses) => shiftAdminOf(ses) && !canEdit(ses) && !!ses.schedS
 function shiftCardHtml(D) {
   const ed = H.shEdit ? D.shifts.find((s) => s.id === H.shEdit) : null;
   if (H.shEdit && !ed) H.shEdit = null;
-  const desc = (s) => `${esc(s.name)} ${esc(timeText(s))}（${s.segs ? '分段班' : `休息 ${s.break_min} 分`}）`;
+  const desc = (s) => `${esc(shiftCode(s.name))} ${esc(timeText(s))}（${s.segs ? '分段班' : `休息 ${s.break_min} 分`}）`;
   const list = D.shifts.length ? `<div class="sc-dlist" id="hqShList">${D.shifts.map((s) => `<div class="row hq-shrow"><span class="grow">${desc(s)}</span><button type="button" class="hq-shEdit btn sm ghost" data-id="${esc(s.id)}">修改</button></div>`).join('')}</div>`
     : '<p class="hint">還沒有班別，同仁沒有班可以選。</p>';
   const v = ed || { name: '', start: '09:00', end: '18:00', break_min: 60 };
@@ -114,7 +114,7 @@ function drawSelf(ctx) {
   const acts = `<div class="row sc-acts">
     ${st === 'draft' || st === 'rejected' ? '<button type="button" class="btn" id="hqSubmit">送出給主管核准</button>' : ''}
     ${st === 'submitted' ? '<button type="button" class="btn ghost" id="hqWithdraw">撤回（改完再送）</button>' : ''}
-    ${st === 'draft' || st === 'rejected' ? `<span class="grow"></span><label class="sc-chk" for="hqFillShift">快速填入空白的天：平日</label><select id="hqFillShift" aria-label="平日上哪個班">${shifts.map((s) => `<option value="${esc(s.id)}">${esc(s.name)} ${esc(timeText(s))}</option>`).join('')}</select><button type="button" class="btn ghost" id="hqFill">填入（週六休息日、週日例假）</button>` : ''}
+    ${st === 'draft' || st === 'rejected' ? `<span class="grow"></span><label class="sc-chk" for="hqFillShift">快速填入空白的天：平日</label><select id="hqFillShift" aria-label="平日上哪個班">${shifts.map((s) => `<option value="${esc(s.id)}">${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('')}</select><button type="button" class="btn ghost" id="hqFill">填入（週六休息日、週日例假）</button>` : ''}
   </div>`;
   const hint = st === 'submitted' ? '<p class="hint mt">已送出，主管核准前不能修改；要改請先撤回。</p>' : st === 'approved' ? '<p class="hint mt">已核准。之後再改的日子會標「待核准」，主管核准後才生效。</p>' : '<p class="hint mt">點日期選班別或休假；每週至少 1 天例假＋1 天休息日，填完整個月才能送出。</p>';
   const empPick = D.me.length > 1 ? `<div class="row mt"><label class="sc-chk" for="hqEmpSel">員編</label><select id="hqEmpSel" aria-label="要看哪個員編的班表">${D.me.map((x) => `<option value="${esc(x)}" ${x === emp ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div>` : '';

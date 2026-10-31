@@ -7,6 +7,7 @@ import { clockLink } from '../duty/calc.js';
 import { S, call, load } from './state.js';
 import { termAt } from './rules.js';
 import { leaveOf } from './calc.js';
+import { shiftCode } from './hours.js';
 
 export function renderStaff(ctx) {
   const el = ctx.el, D = S.data;
@@ -94,8 +95,8 @@ export function renderStaff(ctx) {
     </div>
     <label class="sc-chk"><input type="checkbox" id="hiSame"> 計時但每週上班天數跟正職一樣（特休給完整天數）</label>
     <label class="sc-chk" id="hiBkBox" hidden><input type="checkbox" id="hiBk"> 備援：其他同仁都排不開才排他（只限計時）</label>
-    <div class="fld mt"><label>平日只能上的班（都不勾＝每班都能上）</label><div class="row">${shifts.map((s) => `<label class="sc-chk"><input type="checkbox" class="hi-al" value="${esc(s.id)}"> ${esc(s.name)}</label>`).join('')}</div></div>
-    <div class="fld mt"><label>假日只能上的班（六日、國定假日、補假；都不勾＝跟平日一樣）</label><div class="row">${shifts.map((s) => `<label class="sc-chk"><input type="checkbox" class="hi-alh" value="${esc(s.id)}"> ${esc(s.name)}</label>`).join('')}</div></div>
+    <div class="fld mt"><label>平日只能上的班（都不勾＝每班都能上）</label><div class="row">${shifts.map((s) => `<label class="sc-chk"><input type="checkbox" class="hi-al" value="${esc(s.id)}"> ${esc(shiftCode(s.name))}</label>`).join('')}</div></div>
+    <div class="fld mt"><label>假日只能上的班（六日、國定假日、補假；都不勾＝跟平日一樣）</label><div class="row">${shifts.map((s) => `<label class="sc-chk"><input type="checkbox" class="hi-alh" value="${esc(s.id)}"> ${esc(shiftCode(s.name))}</label>`).join('')}</div></div>
     <div class="row mt"><button type="button" class="btn" id="hiAdd">新增同仁</button></div>
     <div id="hiMsg" class="okmsg" role="status"></div></details></div>
   ${onJob.map(card).join('')}

@@ -3,6 +3,7 @@ import { esc, busy } from '../../js/ui.js';
 import { S, mutate, call, load, WD, md } from './state.js';
 import { weekday } from './period.js';
 import { LEAVES } from './rules.js';
+import { shiftCode } from './hours.js';
 // 指定日期格：月份放在 span，窄螢幕（≤360）除了第一格與每月 1 號都只顯示日（12/27 → 27），不然 7 欄塞不下（2026-10-26 手機巡檢）
 const pinDate = (d) => { const t = md(d), k = t.indexOf('/'); return k < 0 ? t : `<span class="m">${t.slice(0, k + 1)}</span>${t.slice(k + 1)}`; };
 
@@ -37,7 +38,7 @@ export function renderNeeds(ctx) {
   <div class="card"><h2>每天各班要幾個人</h2>
     <p class="hint">設定一次，每一期都會照這個排。最少人數排不滿會出現「缺人」警告；最多人數空白＝不限。</p>
     ${shifts.length ? `<div class="scroll"><table class="sc-tbl"><thead><tr><th>班別</th>${KINDS.map(([, l]) => `<th>${l}最少</th><th>${l}最多</th>`).join('')}</tr></thead><tbody>
-    ${shifts.map((s) => `<tr><th scope="row">${esc(s.name)}</th>${KINDS.map(([k]) => `<td><input type="number" min="0" max="99" class="sc-n" data-k="${k}" data-s="${esc(s.id)}" data-f="min" value="${tplV(k, s.id, 'min')}" aria-label="${esc(s.name)} 最少"></td><td><input type="number" min="0" max="99" class="sc-n" data-k="${k}" data-s="${esc(s.id)}" data-f="max" value="${tplV(k, s.id, 'max')}" aria-label="${esc(s.name)} 最多"></td>`).join('')}</tr>`).join('')}
+    ${shifts.map((s) => `<tr><th scope="row">${esc(shiftCode(s.name))}</th>${KINDS.map(([k]) => `<td><input type="number" min="0" max="99" class="sc-n" data-k="${k}" data-s="${esc(s.id)}" data-f="min" value="${tplV(k, s.id, 'min')}" aria-label="${esc(s.name)} 最少"></td><td><input type="number" min="0" max="99" class="sc-n" data-k="${k}" data-s="${esc(s.id)}" data-f="max" value="${tplV(k, s.id, 'max')}" aria-label="${esc(s.name)} 最多"></td>`).join('')}</tr>`).join('')}
     </tbody></table></div>
     <div class="row mt"><button type="button" class="btn" id="ndTplSave">儲存人數範本</button></div>` : '<p class="hint">請先到「班別與設定」新增班別。</p>'}
     <div id="ndTplMsg" class="okmsg" role="status">${esc(tplMsg)}</div></div>
@@ -45,7 +46,7 @@ export function renderNeeds(ctx) {
   <div class="card"><h2>個別日期另外設人數</h2>
     <p class="hint">國定假日、活動日要多排或少排人時用。只影響 ${esc(D.period)} 這一期。</p>
     <div class="row"><select id="ndDay" aria-label="日期">${D.dates.map((d) => `<option value="${d}" ${d === S.needDay ? 'selected' : ''}>${md(d)}（${WD[weekday(d)]}）${D.demandOverrides[d] ? '・已另設' : ''}${D.holidays.days[d] ? '・' + esc(D.holidays.days[d]) : ''}</option>`).join('')}</select></div>
-    ${shifts.map((s) => `<div class="row mt"><span class="sc-lbl">${esc(s.name)}</span><input type="number" min="0" max="99" class="sc-dn" data-s="${esc(s.id)}" data-f="min" value="${dayV(s.id, 'min')}" aria-label="${esc(s.name)} 最少"> 到 <input type="number" min="0" max="99" class="sc-dn" data-s="${esc(s.id)}" data-f="max" value="${dayV(s.id, 'max')}" aria-label="${esc(s.name)} 最多"> 人</div>`).join('')}
+    ${shifts.map((s) => `<div class="row mt"><span class="sc-lbl">${esc(shiftCode(s.name))}</span><input type="number" min="0" max="99" class="sc-dn" data-s="${esc(s.id)}" data-f="min" value="${dayV(s.id, 'min')}" aria-label="${esc(s.name)} 最少"> 到 <input type="number" min="0" max="99" class="sc-dn" data-s="${esc(s.id)}" data-f="max" value="${dayV(s.id, 'max')}" aria-label="${esc(s.name)} 最多"> 人</div>`).join('')}
     <div class="row mt"><button type="button" class="btn" id="ndDaySave" ${locked ? 'disabled' : ''}>儲存這一天</button><button type="button" class="btn ghost" id="ndDayClear" ${locked || !ov ? 'disabled' : ''}>改回範本</button></div>
     <div id="ndDayMsg" class="okmsg" role="status"></div></div>
 

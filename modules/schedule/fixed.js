@@ -2,7 +2,7 @@
 // 規格 docs/schedule-hq/spec.md §4、§5、§10.1：平日＝固定班別、週六休息日、週日例假、國定假日／補假（平日）＝國定假日假；手改的格子重新產生時不會被蓋掉；
 // 廠長改格子立即生效，系統約 1 分鐘內合併重送 LINE。2026-10-27 Eason 改「央廚用 T01」：畫面跟門市排班一樣 ‹ T01 › 一期 28 天，跨月那欄標月份。
 import { esc, busy } from '../../js/ui.js';
-import { timeText } from './hours.js';
+import { timeText, shiftCode } from './hours.js';
 import { call, cellInfo, cellOptions, cellOfValue, valueOfCell, md, resultsHtml, WD } from './hq.js';
 import { weekday, periodOf, periodNo, periodStart, periodEnd, periodDates, shiftPeriod, parseLabel, label, todayTaipei } from './period.js';
 import { stHidden, setStHidden, stToggleHtml } from './stview.js';
@@ -89,7 +89,7 @@ function drawFixed(ctx) {
       const cls = `sc-c ${x.cls}${[0, 6].includes(weekday(d)) || D.holidays[d] ? ' we' : ''}${lv ? ' i-' + lv : ''}${sel ? ' sel' : ''}${c && c.src === 'manual' ? ' man' : ''}${mb(d, i)}`;
       return `<td class="${cls}" data-emp="${esc(st.emp_id)}" data-date="${d}">${esc(x.t)}${stTag(c)}</td>`;
     }).join('');
-    return `<tr><th class="sc-name" scope="row">${esc(st.name)}${st.fixed_shift ? `<small class="sc-al">${esc((shiftMap[st.fixed_shift] || {}).name || st.fixed_shift)}</small>` : '<small class="sc-al">未設固定班別</small>'}</th>${tds}</tr>`;
+    return `<tr><th class="sc-name" scope="row">${esc(st.name)}${st.fixed_shift ? `<small class="sc-al">${esc(shiftCode((shiftMap[st.fixed_shift] || {}).name) || st.fixed_shift)}</small>` : '<small class="sc-al">未設固定班別</small>'}</th>${tds}</tr>`;
   }).join('');
   // 各站人數：每個使用中的站一列（有設最少人數才顯示「1/2」，不足紅字）
   const stRows = (hideSt ? [] : stActive).map((x) => `<tr class="sc-stcnt" data-station="${esc(x.id)}"><th scope="row">${esc(x.name)}</th>${dates.map((d, i) => {
@@ -146,7 +146,7 @@ function drawFixedStaff(ctx) {
     stList.filter((x) => x.active || x.id === st.default_station).map((x) => `<option value="${esc(x.id)}" ${st.default_station === x.id ? 'selected' : ''}>${esc(x.name)}${x.active ? '' : '（已停用）'}</option>`).join('')}</select>`;
   const rows = D.staff.map((st) => `<div class="sc-drow fx-row"><span class="sc-dn">${esc(st.name)}<small class="sc-al">${esc(st.emp_id)}</small></span>
       <span class="sc-dv"><select class="fx-shift" data-emp="${esc(st.emp_id)}" aria-label="${esc(st.name)} 平日上哪個班" ${D.canEdit ? '' : 'disabled'}>
-        <option value="">未設定（平日不排班）</option>${D.shifts.map((s) => `<option value="${esc(s.id)}" ${st.fixed_shift === s.id ? 'selected' : ''}>${esc(s.name)} ${esc(timeText(s))}</option>`).join('')}</select>${showSt ? ' ' + stSel(st) : ''}</span></div>`).join('');
+        <option value="">未設定（平日不排班）</option>${D.shifts.map((s) => `<option value="${esc(s.id)}" ${st.fixed_shift === s.id ? 'selected' : ''}>${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('')}</select>${showSt ? ' ' + stSel(st) : ''}</span></div>`).join('');
   const lack = D.staff.filter((st) => !st.fixed_shift).length;
   const warn = lack ? `<p class="hint mt err" id="fxLack">${lack} 位同仁還沒設固定班別，他們的平日班表是空白的</p>` : '';
   el.innerHTML = head(D, '固定班別', `${warn}<p class="hint mt">每個人平日上的班。設定或更改後，系統會自動重產他從明天起的平日班表（手改的格子與請假不會被蓋掉），並送到 LINE。</p>`, false)
