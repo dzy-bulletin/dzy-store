@@ -34,6 +34,7 @@ export function movePeriod(k) {
 export async function load() {
   if (!S.period) S.period = defaultPeriod();
   S.data = await call('load', { period: S.period });
+  if (S.data && S.data.shifts) S.data.shifts.sort(byShiftName);   // 班別一律照名稱 A、B、C 排（C、C2、C3、D、D1…；2026-10-31 Eason：下方說明、下拉選單都照這個順序）
   return S.data;
 }
 /** 帶版本的修改：成功後重讀；別人剛改過（CONFLICT）時也重讀並提示 */
@@ -56,4 +57,5 @@ export const WD = ['日', '一', '二', '三', '四', '五', '六'];
 export const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
 export const hm = (min) => { const h = Math.floor(min / 60), r = min % 60; return r ? `${h}:${String(r).padStart(2, '0')}` : String(h); };
 export const DAY_LABEL = { R: '例', H: '休' };
+export const byShiftName = (a, b) => String(a.name || '').replace(/班$/, '').localeCompare(String(b.name || '').replace(/班$/, ''), 'en', { numeric: true }) || String(a.id).localeCompare(String(b.id));
 export const LEAVE_LABEL = Object.assign(Object.fromEntries(LEAVES), { '國': '國定' });

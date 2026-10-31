@@ -4,6 +4,7 @@ import { checkPeriod, comboError, minutesOf } from '../modules/schedule/rules.js
 import { autoSchedule } from '../modules/schedule/auto.js';
 import { periodDates, periodOf, todayTaipei, addDays, weekday, parseLabel, shiftPeriod } from '../modules/schedule/period.js';
 import { shiftMinutes, breakOk, normSegs } from '../modules/schedule/hours.js';
+import { whileLeaving } from './leaving.js';
 import { hqAction, seedHq, putDay, stationNeedFor, publishPeriod, hasActiveDay } from './mock-schedule-hq.js';
 
 const E2E = () => (typeof window !== 'undefined' && window.__E2E_DATA) || {};
@@ -11,7 +12,7 @@ const ok = (data) => ({ ok: true, data: data === undefined ? {} : data });
 const fail = (error, message) => ({ ok: false, error, message });
 let HOL = null;
 async function holidays() {
-  if (!HOL) HOL = await fetch(new URL('../modules/schedule/holidays.json', import.meta.url)).then((r) => r.json());
+  if (!HOL) HOL = await whileLeaving(fetch(new URL('../modules/schedule/holidays.json', import.meta.url)).then((r) => r.json()));
   return HOL;
 }
 

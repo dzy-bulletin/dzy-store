@@ -1,7 +1,8 @@
 // 庫存盤點的假後端（?mode=mock）。規則與 server/inventory.js 一致（初始化、overwrote、歷史節流、importLegacy、首頁偏低數）。
 // 資料放在 mock.js 的 db.inv（跟著 localStorage 一起存，重整還在）。
 // e2e 可在載入前設定 window.__E2E_DATA = { inventory: { 門市代號: <舊版匯出形狀的資料> } }，那家店第一次用時就以它初始化，取代預設的 154 項。
-const DEFAULTS = await (await fetch(new URL('./mock-inventory-defaults.json', import.meta.url))).json();
+import { whileLeaving } from './leaving.js';
+const DEFAULTS = await whileLeaving(fetch(new URL('./mock-inventory-defaults.json', import.meta.url)).then((r) => r.json()));
 const ok = data => ({ ok: true, data: data === undefined ? {} : data });
 const fail = (error, message) => ({ ok: false, error, message });
 const bad = m => fail('BAD_INPUT', m);

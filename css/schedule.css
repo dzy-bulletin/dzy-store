@@ -33,6 +33,9 @@ button.sc-ckgo{background:none;border:0;padding:0;font:inherit;font-weight:700;c
 .sc-gridcard{padding:10px}
 .sc-grid{border-collapse:separate;border-spacing:0;font-size:12px;font-variant-numeric:tabular-nums}
 .sc-grid th,.sc-grid td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:0;text-align:center;min-width:44px;height:34px}
+/* 日期欄一律同寬（2026-10-31 Eason：不要因為有沒有備註、站名長短變成大小格）；姓名、休假天數、排班時數欄另外設寬度 */
+.sc-grid tr > :not(.sc-name):not([scope=row]):not(.sc-off):not(.sc-offh):not(.sc-hr):not(.sc-hrh){width:58px;min-width:58px;max-width:58px;box-sizing:border-box}
+.sc-grid .sc-sn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px}
 .sc-grid thead th{position:sticky;top:0;background:var(--card);font-weight:700;padding:4px 2px;z-index:1}
 .sc-grid thead th small{display:block;font-weight:400;color:var(--muted)}
 /* 班表配色（Eason 2026-10-12）：班別不分色、一律白底深字；例／休紅字；指定休假暖黃底；六日與國定假日整欄淡紅；生日淡綠。
@@ -78,7 +81,7 @@ button.sc-ckgo{background:none;border:0;padding:0;font:inherit;font-weight:700;c
 .sc-nt{cursor:pointer;font-size:10px;line-height:1.25;color:var(--black);vertical-align:top;padding:2px 2px!important;text-align:left!important;background:#fff}
 .sc-nt.has{background:#fffaf0} .sc-nt.we{background:var(--sc-we)} .sc-nt.sel{outline:3px solid var(--black);outline-offset:-3px}
 
-.sc-ntx{width:44px;margin:0 auto;max-height:3.75em;overflow:hidden;word-break:break-all;white-space:normal}
+.sc-ntx{width:52px;margin:0 auto;max-height:3.75em;overflow:hidden;word-break:break-all;white-space:normal}
 .sc-ntadd{display:block;text-align:center;color:#c9c2bb;font-size:13px}
 .sc-nt:hover .sc-ntadd{color:var(--black)}
 .sc-dnotes{display:grid;gap:4px;font-size:14px} .sc-dnote{display:flex;gap:8px} .sc-dnote b{flex:none;color:var(--muted);font-weight:600} .sc-dnote:not(.has) span{color:var(--muted)}
@@ -162,6 +165,11 @@ button.hq-day{cursor:pointer}
   .sc-grid{font-size:10px;width:100%}
   .sc-grid th,.sc-grid td{min-width:0;height:26px;padding:0 1px;position:static!important}
   .sc-grid .sc-name{min-width:0;padding:0 3px}
+  /* 列印：整張撐滿 A4 寬、每一天平均分（固定欄寬配置，不看內容長短；2026-10-31 Eason） */
+  .sc-grid{table-layout:fixed}
+  .sc-grid thead .sc-name{width:72px} .sc-grid .sc-offh,.sc-grid .sc-hrh{width:40px;min-width:0;max-width:none}
+  .sc-grid tr > :not(.sc-name):not([scope=row]):not(.sc-off):not(.sc-offh):not(.sc-hr):not(.sc-hrh){width:auto;min-width:0;max-width:none}
+  .sc-ntx{width:auto}
   .sc-c.i-block,.sc-c.i-warn,.sc-c.sel{outline:0}
   .sc-c.pin::after{display:none}
   .sc-grid .sc-off,.sc-grid .sc-offh,.sc-grid .sc-hr,.sc-grid .sc-hrh{position:static!important}

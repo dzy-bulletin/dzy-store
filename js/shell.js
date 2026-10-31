@@ -11,6 +11,7 @@ const ONLY_LABEL = { duty: '出勤核定', schedule: '排班' };
 const onlyStores = list => (ONLY === 'duty' ? (list || []).filter(x => x.duty !== false) : (list || []));
 const attLinkAttr = () => (EMBED ? 'target="_top"' : 'target="_blank" rel="noopener"');
 import { api } from './api.js';
+import { whileLeaving } from './leaving.js';
 import { initAuth, getSession, setSession, clearSession, rememberedCode, login, logout, changePassword, toSession, ssoRedeem, ssoSelect, ssoSwitch, adoptResult, schedPart, pickSchedStore, rememberSchedStore } from './auth.js';
 import { MODULES, ADMIN_TABS } from './registry.js';
 import { esc, busy, setMsg, applyUi } from './ui.js';
@@ -264,15 +265,19 @@ function refreshSidebar(s) {
 async function viewModule(s, id, tab, tok) {
   const reg = MODULES.find(m => m.id === id);
   if (!reg || !(s.features || []).includes(id) || (cardOf(id) && !cardOf(id).visible)) return go('#/');
-  const mod = (await reg.load()).default;
+  const mod = (await whileLeaving(reg.load())).default;
   if (tok !== renderToken) return;
   const tabs = mod.tabsFor ? mod.tabsFor(s) : mod.tabs;   // 依角色不同分頁（出勤核定：管理者多「各店總覽」）
   const cur = tabs.some(t => t.id === tab) ? tab : tabs[0].id;
-  if (cur !== tab) return history.replaceState(null, '', `#/${id}/${cur}`), render();
+  // 補上預設分頁前先確認網址還在這個系統：模組載入期間使用者（或 e2e）已點去別的系統、hashchange 還沒觸發時，
+  //  不能用 replaceState 把網址改回來，不然新點的系統永遠出不來（2026-10-31 e2e 叫貨看板逾時）
+  if (cur !== tab) { if (route().page !== id) return; return history.replaceState(null, '', `#/${id}/${cur}`), render(); }
   const locked = mod.locked && mod.locked();
   const main = frame(s, `${bannerHtml()}<div id="modBody"></div>`, locked || tabs.length < 2 ? '' : tabsHtml(id, tabs, cur), { cur: id, title: labelOf(reg) });
   const ctx = { el: main.querySelector('#modBody'), tab: cur, session: s, api, rerender: render };
-  if (locked) mod.renderGate(ctx); else mod.render(ctx);
+  const keep = KEEP; KEEP = null;
+  const p = locked ? mod.renderGate(ctx) : mod.render(ctx);
+  if (keep) Promise.resolve(p).then(() => { if (tok === renderToken) restoreScroll(keep); }, () => {});
 }
 
 // ---------- 後台 ----------
@@ -453,6 +458,8 @@ async function refreshMe() {
   } catch (e) { /* 登入失效 api 已處理；連不上就先沿用舊的 */ }
 }
 
+let lastRouteKey = '', KEEP = null;
+const restoreScroll = (k) => { if (!k) return; document.querySelectorAll('.scroll').forEach((e, i) => { if (k.x[i]) e.scrollLeft = k.x[i]; }); window.scrollTo(0, k.y); };
 export async function render() {
   const tok = ++renderToken;
   let s = getSession();
@@ -460,7 +467,11 @@ export async function render() {
   if (!s) return EMBED ? viewEmbedWait() : viewLogin();
   if (s.mustChangePassword) return viewPassword(s);
   const r = route();
-  window.scrollTo(0, 0);
+  // 同一個畫面重畫（存檔後、資料補抓後）：保留上下與表格左右捲動位置，不跳回最上面；換頁才回到頂端（2026-10-31 Eason）
+  const rk = r.page + '/' + r.tab;
+  KEEP = rk === lastRouteKey ? { y: window.scrollY, x: [...document.querySelectorAll('.scroll')].map(e => e.scrollLeft) } : null;
+  lastRouteKey = rk;
+  if (!KEEP) window.scrollTo(0, 0);
   if (r.page === 'switch') return s.person ? viewSwitch(s) : go('#/');
   if (ONLY) {                               // ?only=duty／schedule：只有該功能（含換店）；首頁與其他功能都不顯示
     if (!(s.features || []).includes(ONLY)) {

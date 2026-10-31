@@ -1,4 +1,5 @@
 import { API_BASE, MOCK } from './config.js';
+import { whileLeaving } from './leaving.js';
 
 let hooks = { getToken: () => null, onAuth: () => {}, onMust: () => {} };
 export function setHooks(h) { hooks = { ...hooks, ...h }; }
@@ -10,7 +11,7 @@ export async function api(method, path, body, tokenOverride) {
   let res;
   try {
     if (MOCK) {
-      const { handle } = await import('./mock.js');
+      const { handle } = await whileLeaving(import('./mock.js'));
       res = await handle(method, path, body, token);
     } else {
       const r = await fetch(API_BASE + path, {
@@ -46,7 +47,7 @@ export async function apiUpload(path, formData) {
   let res;
   try {
     if (MOCK) {
-      const { handle } = await import('./mock.js');
+      const { handle } = await whileLeaving(import('./mock.js'));
       res = await handle('POST', path, formData, token);
     } else {
       const r = await fetch(API_BASE + path, { method: 'POST', headers: token ? { Authorization: 'Bearer ' + token } : {}, body: formData });
@@ -65,7 +66,7 @@ export async function apiBlob(path) {
   const token = hooks.getToken();
   const netErr = () => { const err = new Error('連不上伺服器，請確認網路後再試'); err.code = 'NETWORK'; return err; };
   if (MOCK) {
-    const { handleBlob } = await import('./mock.js');
+    const { handleBlob } = await whileLeaving(import('./mock.js'));
     const res = await handleBlob(path, token);
     if (res instanceof Blob) return res;
     return settle(res, path, token);

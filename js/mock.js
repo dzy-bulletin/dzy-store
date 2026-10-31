@@ -2,6 +2,7 @@
 // 方便重整後仍在；清掉該 key 即回到初始。
 // ⚠ 以下密碼只是測試用，不是真密碼：
 //   TEST1 / store-test-1234（門市 mala，出勤核定密碼 1234；duty 為空字串＝預設 0000，第一次要改）   TEST2 / store-test-1234（門市 mzt，功能全開）   ADMIN / admin-test-1234（管理者 hq）
+import { whileLeaving } from './leaving.js';
 import { lossMock, lossAlias } from './mock-loss.js';
 import { transferMock, transferHome, TRANSFER_NODES, DEFAULT_TRANSFER_ALIAS } from './mock-transfer.js';   // 門市調撥假後端（獨立檔）
 import { LEAVE_TYPES as MOCK_LEAVES } from '../modules/duty/calc.js';   // 假別名稱沿用內建清單，假後端的「薪酬假別表」預設就是這些
@@ -101,7 +102,7 @@ const needPerson = (path, token) => {
 };
 // 假的管理系統發入場券（示範模式的「用管理系統帳號登入」鍵與 e2e 用）；mockPersona＝這個瀏覽器扮演誰（localStorage dzystore_mockwho，預設陳小明店長）
 export async function mintTicket(sub) {
-  const P = await import('./mock-person.js'); db = null; load();
+  const P = await whileLeaving(import('./mock-person.js')); db = null; load();
   if (!db.personas) Object.assign(db, P.seed());
   const t = P.mint(db, sub); save(); return t;
 }
@@ -110,7 +111,7 @@ export const mockPersona = () => { try { return localStorage.getItem('dzystore_m
 export async function handle(method, path, body, token) {
   await new Promise(r => setTimeout(r, 60));
   const pth = path.split('?')[0];
-  if (needPerson(pth, token)) { if (!PMP) PMP = import('./mock-person.js'); PM = await PMP; } else PM = null;       // 先載入再讀資料庫，避免載入期間別的請求改掉 db
+  if (needPerson(pth, token)) { if (!PMP) PMP = whileLeaving(import('./mock-person.js')); PM = await PMP; } else PM = null;       // 先載入再讀資料庫，避免載入期間別的請求改掉 db
   db = null; load(); body = body || {};
   if (PM && !db.personas) Object.assign(db, PM.seed());
   curActor = null;
@@ -213,7 +214,7 @@ function route(method, p, q, b, token) {
     if (m[1] === 'schedule' && !per && me.role === 'store' && !['load', 'dayPlan', 'annual'].includes(m[2])) return fail('FORBIDDEN', '排班請用管理系統個人帳號：人資部門 → 排班管理');   // 門市帳號（共用店號）不能排班，同 server/schedule.js mod()
     if (m[1] === 'schedule' && per && !pa.scheduleAdmin && !['load', 'dayPlan', 'annual'].includes(m[2]) && !/^(self|fixed)[A-Z]/.test(m[2]) && !(pa.shiftAdmin && m[2] === 'saveShift')) return fail('FORBIDDEN', '只有本店店長、人資主管或管理員可以排班，你只能查看');   // 同 server/schedule.js mod()（總部總監 shiftAdmin 只多放行 saveShift）
     if (m[1] === 'schedule' && per && !pa.scheduleAdmin && me.mode === 'self' && ['load', 'annual'].includes(m[2])) return fail('FORBIDDEN', '總部的班表請到「我的班表」查看');   // 同 server/schedule.js mod()：總部整店班表只給能排班的人
-    if (m[1] === 'schedule') return import('./mock-schedule.js').then(x => x.schedule(m[2], mx, b, db, s, { pa, addEmployee: name => dutyDo(dutyDb(), 'mgr_add_employee', { name }) }));   // 用到才載入（排班計算檔案多，放在開頁就載會拉長每一頁的載入時間，WebKit 換頁時更容易打斷其他假資料的讀取）
+    if (m[1] === 'schedule') return whileLeaving(import('./mock-schedule.js')).then(x => x.schedule(m[2], mx, b, db, s, { pa, addEmployee: name => dutyDo(dutyDb(), 'mgr_add_employee', { name }) }));   // 用到才載入（排班計算檔案多，放在開頁就載會拉長每一頁的載入時間，WebKit 換頁時更容易打斷其他假資料的讀取）
     return fail('NOT_FOUND', '還在搬移中，暫時請用原本的系統');
   }
   if (p.startsWith('/admin/')) {
