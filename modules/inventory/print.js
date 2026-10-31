@@ -1,5 +1,5 @@
 // 列印與匯出（照正本 1212–1391 行）：異常摘要列、食材／包材／全店三張小計、庫存彙整（攤車＋現場合併）、未盤點品項；
-// 「列印 PDF」用瀏覽器列印（另存成 PDF）、「匯出 Excel」是帶 BOM 的 CSV、「匯出資料」是舊版相容的 JSON。另有「完成盤點」把這一輪存進歷史。
+// 「列印 PDF」用瀏覽器列印（另存成 PDF）、「匯出 Excel」是帶 BOM 的 CSV、「匯出資料」是舊版相容的 JSON。另有「完成盤點」把這一輪存進歷史並鎖定（店長解鎖前不能改）。
 import { esc } from '../../js/ui.js';
 import { api } from '../../js/api.js';
 import { S, flushStrict, track } from './state.js';
@@ -33,8 +33,8 @@ export function renderPrint(ctx) {
     <div class="inv-subs"><div class="inv-subc food"><span>食材總金額</span><b id="invFood">${fmt(sm.food)}</b></div><div class="inv-subc pack"><span>包材總金額</span><b id="invPack">${fmt(sm.pack)}</b></div>
       <div class="inv-subc total"><span>全店總庫存金額</span><b id="invGrandSum">${fmt(sm.grand)}</b><small>食材＋包材合計</small></div></div>
     <div class="inv-noprint"><div class="inv-actions"><button class="btn" id="invPrintBtn" type="button">🖨️ 列印 PDF</button><button class="btn ghost" id="invCsvBtn" type="button">📊 匯出 Excel</button>
-      <button class="btn ghost" id="invJsonBtn" type="button">📤 匯出資料（JSON）</button><button class="btn ghost" id="invFinishBtn" type="button">✅ 完成盤點</button></div>
-      <div class="hint" id="invFinishMsg" role="status">${S.lastFinish ? '上次完成盤點：' + new Date(S.lastFinish).toLocaleString('zh-TW', { hour12: false }) : '還沒有完成過盤點。盤完按「完成盤點」，這一輪的數字會存進「歷史」。'}</div></div>
+      <button class="btn ghost" id="invJsonBtn" type="button">📤 匯出資料（JSON）</button><button class="btn ghost" id="invFinishBtn" type="button"${S.lock || !S.canLock ? ' disabled' : ''}>${S.lock ? '🔒 已鎖定' : '✅ 完成盤點'}</button></div>
+      <div class="hint" id="invFinishMsg" role="status">${S.lastFinish ? '上次完成盤點：' + new Date(S.lastFinish).toLocaleString('zh-TW', { hour12: false }) : '還沒有完成過盤點。盤完按「完成盤點」，這一輪的數字會存進「歷史」並鎖定。'}${!S.lock && !S.canLock ? '<br>完成盤點會鎖定盤點，只有店長可以按。' : ''}</div></div>
     ${bar}<section class="card inv-sumcard"><h2>📋 庫存彙整（攤車＋現場）<span class="inv-sumtotal" id="invSumTotal">${fmt(sm.total)}</span></h2>${rows || '<div class="inv-empty">尚無資料</div>'}</section>${miss}`;
 
   el.querySelector('#invPrintBtn').onclick = async () => {                       // 1343–1357 doPrint
@@ -62,7 +62,9 @@ export function renderPrint(ctx) {
     try {
       await flushStrict();
       const r = await track('finish', () => api('POST', '/m/inventory/finish', {}));
-      S.lastFinish = r.at; msg.textContent = '已完成盤點，這一輪已存進「歷史」（' + new Date(r.at).toLocaleTimeString('zh-TW', { hour12: false }) + '）'; msg.className = 'hint ok';
+      S.lastFinish = r.at; S.lock = r.lock || { at: r.at, by: '' };
+      ctx.rerender();                                                              // 重畫：上方出現鎖定列、按鈕變「已鎖定」
+      return;
     } catch (er) { msg.textContent = '完成盤點失敗：' + er.message; msg.className = 'hint warn'; }
     b.disabled = false;
   };

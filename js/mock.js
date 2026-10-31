@@ -154,7 +154,7 @@ function route(method, p, q, b, token) {
   const per = s.sub && PM ? PM.personaOf(db, s.sub) : null;
   const pa = per ? PM.access(db, per, s.code, eff) : null;
   if (s.sub && (!per || per.active === false || !pa.features.length)) { delete db.sessions[token]; return fail('AUTH', '帳號已停用或沒有這家店的權限'); }
-  const mx = per ? { ...me, features: pa.features, storeOff: [], must: false, person: { sub: per.sub, name: per.name }, canVoid: pa.canVoid, scheduleAdmin: pa.scheduleAdmin } : me;
+  const mx = per ? { ...me, features: pa.features, storeOff: [], must: false, person: { sub: per.sub, name: per.name }, canVoid: pa.canVoid, isManager: pa.isManager, scheduleAdmin: pa.scheduleAdmin } : me;
   if (per) { s.duty = pa.features.includes('duty'); curActor = per.name; }
   if (method === 'POST' && p === '/logout') { delete db.sessions[token]; return ok(); }
   if (method === 'GET' && p === '/me') return ok(per ? PM.sessionBody(db, per, s.code, eff, null) : pub(me));

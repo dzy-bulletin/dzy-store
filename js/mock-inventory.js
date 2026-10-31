@@ -114,7 +114,12 @@ export function inventory(action, me, b, db) {
   if (window.__E2E_INV_FAIL && action === 'saveCounts') return fail('UPSTREAM', '庫存伺服器沒有回應，請稍後再試');   // e2e 用：模擬存檔失敗
   const st = store(db, me.code), S = st.S;
   const at = () => new Date().toISOString();
-  if (action === 'bootstrap') { const d = snap(st); return ok({ at: at(), lastFinish: st.lastFinish, data: d }); }
+  // 鎖定（照 server/inventory.js）：完成盤點就鎖；個人帳號只有店長能完成盤點與解鎖；門市共用帳號能完成盤點、不能解鎖
+  const canLock = !me.person || !!me.isManager, canUnlock = !!me.person && !!me.isManager;
+  const WRITES = ['saveCounts', 'saveCats', 'saveProduct', 'deleteProduct', 'saveThreshold', 'finish', 'importLegacy'];
+  if (st.lock && WRITES.includes(action) && !(action === 'importLegacy' && b.confirm !== true)) return fail('LOCKED', '盤點已鎖定，要修改請店長先解鎖');
+  if (action === 'bootstrap') { const d = snap(st); return ok({ at: at(), lastFinish: st.lastFinish, lock: st.lock || null, canLock, canUnlock, data: d }); }
+  if (action === 'unlock') { if (!canUnlock) return fail('FORBIDDEN', '只有店長可以解鎖，請用管理系統個人帳號登入'); st.lock = null; return ok({ at: at(), lock: null }); }
   if (action === 'lowCount') return ok({ ...counts(S, true), missing: 0 });
   if (action === 'saveCounts') {
     if (!ZONES.includes(b.zone)) return bad('區域不正確');
@@ -194,7 +199,11 @@ export function inventory(action, me, b, db) {
     S.thresholds[b.pid] = { low, high };
     return ok({ at: at() });
   }
-  if (action === 'finish') { const id = hist(st, 'finish', true); st.lastFinish = at(); return ok({ id, at: st.lastFinish }); }
+  if (action === 'finish') {
+    if (!canLock) return fail('FORBIDDEN', '完成盤點會鎖定盤點，只有店長可以按');
+    const id = hist(st, 'finish', true); st.lastFinish = at(); st.lock = { at: st.lastFinish, by: (me.person && me.person.name) || me.code };
+    return ok({ id, at: st.lastFinish, lock: st.lock });
+  }
   if (action === 'listHistory') return ok({ items: [...st.history].reverse().slice(0, Math.min(+b.limit || 50, 200)).map(({ id, at: a, kind, total: t }) => ({ id, at: a, kind, total: t })) });
   if (action === 'getHistory') {
     const h = st.history.find(x => x.id === +b.id);

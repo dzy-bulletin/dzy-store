@@ -88,3 +88,10 @@
   body.inv-printing .inv-printhead .pm{display:block;text-align:center;font-size:9pt;color:#666;margin-bottom:14px}
   body.inv-printing .card,body.inv-printing .sum-row{page-break-inside:avoid}
 }
+
+/* 鎖定（完成盤點後）：上方提示列；鎖住的頁面輸入框淡化 */
+.inv-lockbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:0 0 12px;padding:10px 14px;border-radius:10px;background:#f1f3f5;border:1px solid #d5d9de;color:#333;font-size:14px}
+.inv-lockbar span:first-child{flex:1 1 240px}
+.inv-lockhint{color:#666;font-size:13px}
+.inv-locked input:disabled,.inv-locked select:disabled{background:#f6f6f6;color:#555}
+@media print{.inv-lockbar{display:none}}

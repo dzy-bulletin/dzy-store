@@ -4,7 +4,7 @@
 import { api } from '../../js/api.js';
 
 export const AUTOSAVE_MS = 3000;
-export const S = { key: null, loaded: false, loading: null, loadedAt: 0, data: null, at: '', lastFinish: null,
+export const S = { key: null, loaded: false, loading: null, loadedAt: 0, data: null, at: '', lastFinish: null, lock: null, canLock: true, canUnlock: false,
   dirty: { cart: new Set(), stock: new Set() }, deleted: { cart: new Set(), stock: new Set() }, inflight: null,
   timer: null, saving: 0, status: { kind: 'idle', hm: '', msg: '' }, retry: new Map(), warn: '', collapsed: new Set(), device: '' };
 
@@ -18,7 +18,7 @@ function deviceId() {
 }
 export function resetState(key) {
   clearTimeout(S.timer);
-  Object.assign(S, { key, loaded: false, loading: null, loadedAt: 0, data: null, at: '', lastFinish: null, inflight: null, timer: null, saving: 0,
+  Object.assign(S, { key, loaded: false, loading: null, loadedAt: 0, data: null, at: '', lastFinish: null, lock: null, canLock: true, canUnlock: false, inflight: null, timer: null, saving: 0,
     status: { kind: 'idle', hm: '', msg: '' }, retry: new Map(), warn: '', collapsed: new Set(), device: deviceId() });
   S.dirty = { cart: new Set(), stock: new Set() }; S.deleted = { cart: new Set(), stock: new Set() };
 }
@@ -46,6 +46,7 @@ const setStatus = (kind, msg) => { S.status = { kind, hm: kind === 'ok' ? hm() :
 export async function load() {
   const d = await api('POST', '/m/inventory/bootstrap', {});
   S.data = d.data; S.at = d.at; S.lastFinish = d.lastFinish; S.loaded = true; S.loadedAt = Date.now();
+  S.lock = d.lock || null; S.canLock = d.canLock !== false; S.canUnlock = !!d.canUnlock;
   S.data.cartCats = S.data.cartCats || []; S.data.stockCats = S.data.stockCats || [];
   return S.data;
 }
@@ -107,6 +108,7 @@ export function flushNow() {
       }
     }
     S.saving--;
+    if (failed && failed.code === 'LOCKED') { lockedMeanwhile(batch); failed = null; }
     // 資料本身不對（BAD_INPUT）重送也不會過：不自動重試，等店長改好再存（2026-10-11 審查）
     if (failed) { setStatus('fail', failed.message); clearTimeout(S.timer); if (failed.code !== 'BAD_INPUT') S.timer = setTimeout(() => { flushNow(); }, 10000); }
     else if (S.saving === 0) { setStatus('ok'); }
@@ -115,6 +117,13 @@ export function flushNow() {
   const p = run().then(() => { if (S.inflight === p) S.inflight = null; });
   S.inflight = p;
   return p;
+}
+
+// 存的時候發現盤點已被鎖定（別支手機剛按了完成盤點）：這批修改存不進去也不重送，丟掉並提示重新讀取
+const LOCKED_MSG = '盤點已經被鎖定（可能有人剛按了完成盤點），你剛剛改的沒有存進去。請按「重新讀取」。';
+function lockedMeanwhile(batch) {
+  for (const zone of ['cart', 'stock']) { batch[zone].ids.forEach(id => S.dirty[zone].delete(id)); batch[zone].del.forEach(id => S.deleted[zone].delete(id)); }
+  S.warn = LOCKED_MSG; S.lock = S.lock || { at: '', by: '' };
 }
 
 // 完成盤點、列印、匯出之前用：先存，還有沒存進去的就丟錯（不能拿舊資料去完成盤點或印出來）（2026-10-12 Codex 審查）
@@ -128,7 +137,11 @@ export async function flushStrict() {
 export async function track(key, fn) {
   S.saving++; setStatus('saving');
   try { const r = await fn(); S.retry.delete(key); S.saving--; if (S.saving === 0 && !S.retry.size && !dirtyCount()) setStatus('ok'); else paintStatus(); return r; }
-  catch (e) { S.saving--; S.retry.set(key, fn); setStatus('fail', e.message); throw e; }
+  catch (e) {
+    S.saving--;
+    if (e.code === 'LOCKED') { S.retry.delete(key); S.warn = LOCKED_MSG; S.lock = S.lock || { at: '', by: '' }; setStatus('idle'); throw e; }
+    S.retry.set(key, fn); setStatus('fail', e.message); throw e;
+  }
 }
 export async function retryAll() {
   const fns = [...S.retry.entries()];
