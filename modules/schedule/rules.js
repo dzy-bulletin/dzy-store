@@ -322,15 +322,10 @@ export function checkPeriod(ctx) {
     }
   }
 
-  // 工作站別（station-spec §4、§11）：店裡沒有任何使用中的站就都不跑。兩條都只提醒（warn），不擋鎖定。
+  // 工作站別（station-spec §4、§11）：店裡沒有任何使用中的站就不跑。只提醒（warn），不擋鎖定。
+  // 原本的 T1「還有 N 個上班日沒選站」2026-11-01 Eason 拿掉：沒選站不列入提醒（班表上沒選站本來就是空白）
   const stations = ctx.stations || {};
   if (Object.values(stations).some(x => x.active)) {
-    // T1 沒選站：每人一條，最多列 5 個日期；只算在職日的上班格
-    for (const st of ctx.staff) {
-      const mine = ctx.days[st.emp_id] || {};
-      const miss = dates.filter(d => employed(st, d) && mine[d] && mine[d].shift_id && !mine[d].station_id);
-      if (miss.length) add('T1', 'warn', st.emp_id, null, `${st.name} 還有 ${miss.length} 個上班日沒選站（${miss.slice(0, 5).map(md).join('、')}${miss.length > 5 ? ' 等' : ''}）`);
-    }
     // T2 站別缺人：每天一條彙總；只看使用中的站（停用站的需求列保留但不提醒）；沒選站的人不算進任何站
     for (const d of dates) {
       const need = (ctx.stationNeed || {})[d] || {};

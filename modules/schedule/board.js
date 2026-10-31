@@ -47,7 +47,7 @@ export function renderBoard(ctx) {
     if (hideSt || !c || !c.shift_id) return '';
     const x = c.station_id && stMap[c.station_id];
     if (x) return `<small class="sc-sn${x.active ? '' : ' off'}" data-station="${esc(x.id)}"${x.color ? ` style="color:${esc(x.color)}"` : ''}>${esc(x.name)}</small>`;
-    return '';   // 沒選站＝空白（2026-10-31 Eason：只顯示有指定的工作站；沒選站仍列在提醒清單 T1）
+    return '';   // 沒選站＝空白（2026-10-31 Eason：只顯示有指定的工作站；2026-11-01 起也不列入提醒）
   };
   const narrow = window.matchMedia && window.matchMedia('(max-width: 760px)').matches;
   const view = S.view || (narrow ? 'day' : 'grid');

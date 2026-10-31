@@ -176,7 +176,13 @@ button.hq-day{cursor:pointer}
   .sc-grid{table-layout:fixed}
   .sc-grid thead .sc-name{width:72px} .sc-grid .sc-offh,.sc-grid .sc-hrh{width:40px;min-width:0;max-width:none}
   .sc-grid tr > :not(.sc-name):not([scope=row]):not(.sc-off):not(.sc-offh):not(.sc-hr):not(.sc-hrh){width:auto;min-width:0;max-width:none}
-  .sc-ntx{width:auto}
+  .sc-ntx{width:auto;max-height:none;font-size:8px;line-height:1.2}   /* 列印時備註整段印出，不截斷 */
+  /* 列印不溢出（2026-11-01 Eason：特休剩（本期排）、病假・特休、11/20 這類日期蓋到隔壁格）：長字一律換行、縮小 */
+  .sc-grid thead th{font-size:9px;padding:2px 0;letter-spacing:-.2px} .sc-grid thead th small{font-size:8px}
+  .sc-grid .sc-name{white-space:normal;line-height:1.2;padding:1px 3px}
+  .sc-al{font-size:7px;line-height:1.15;white-space:normal;word-break:break-all}
+  .sc-off b{font-size:11px} .sc-off small{font-size:7px;line-height:1.15;white-space:normal;word-break:break-all}
+  .sc-grid .sc-off,.sc-grid .sc-hr{padding:1px}
   .sc-c.i-block,.sc-c.i-warn,.sc-c.sel{outline:0}
   .sc-c.pin::after{display:none}
   .sc-grid .sc-off,.sc-grid .sc-offh,.sc-grid .sc-hr,.sc-grid .sc-hrh{position:static!important}
