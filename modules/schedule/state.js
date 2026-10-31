@@ -1,6 +1,7 @@
 // 自動排班：前端狀態與呼叫。每次修改後整包重讀（伺服器回來的就是最新的檢查結果與版本），不在前端自己拼。
 import { api } from '../../js/api.js';
 import { periodOf, todayTaipei, shiftPeriod, parseLabel } from './period.js';
+import { LEAVES } from './rules.js';
 
 export const S = { key: null, period: null, data: null, loading: null, sel: null, view: null, day: null, msg: '', err: '', annual: undefined, annualP: null };
 
@@ -55,4 +56,4 @@ export const WD = ['日', '一', '二', '三', '四', '五', '六'];
 export const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
 export const hm = (min) => { const h = Math.floor(min / 60), r = min % 60; return r ? `${h}:${String(r).padStart(2, '0')}` : String(h); };
 export const DAY_LABEL = { R: '例', H: '休' };
-export const LEAVE_LABEL = { '特': '特休', '補': '補休', '國': '國定' };
+export const LEAVE_LABEL = Object.assign(Object.fromEntries(LEAVES), { '國': '國定' });

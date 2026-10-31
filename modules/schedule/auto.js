@@ -477,6 +477,34 @@ function scheduleOnce(ctx, opts, guoSkip) {
   const blockCount = (rs) => rs.filter(r => r.level === 'block').length;
   const d1Count = (rs) => rs.filter(r => r.code === 'D1').length;
 
+  // 4.1 某天上班人數超過各班「最多」加總（有任一使用中的班沒設最多＝不限）：讓那天上班的人跟同週他休、人數還沒到上限的一天對調。
+  //   原本挑休假只看最少人數，週末設了最多 4 人照樣排成 5 人（2026-10-31 Eason）。整期重驗：不能多出「擋」或缺人，超額總數要變少
+  const activeIds = Object.keys(ctx.shifts).filter(s => ctx.shifts[s].active !== 0);
+  const capOf = (d) => { const n = needOf(ctx, d); return activeIds.reduce((a, s) => a + ((n[s] || {}).max == null ? Infinity : n[s].max), 0); };
+  const onOf = (o, d) => ctx.staff.filter(st => employed(st, d) && (o[st.emp_id][d] || {}).shift_id).length;
+  const overAll = (o) => dates.reduce((a, d) => a + Math.max(0, onOf(o, d) - capOf(d)), 0);
+  let overTries = 0;
+  for (let progressed = overAll(out) > 0; progressed && overTries < REPAIR_MAX;) {
+    progressed = false;
+    for (const d of dates) {
+      if (onOf(out, d) <= capOf(d) || overTries++ >= REPAIR_MAX) continue;
+      const wk = dates.slice(Math.floor(dates.indexOf(d) / 7) * 7, Math.floor(dates.indexOf(d) / 7) * 7 + 7);
+      let done = false;
+      for (const st of ctx.staff.slice().reverse()) {   // 順位最後的人先換
+        const e = st.emp_id;
+        if (done || plan[e][d] !== 'work' || pinOf(ctx, e, d) || holWork(e, d) || bkDay(ctx, e, d)) continue;
+        for (const d2 of wk) {
+          if (d2 === d || plan[e][d2] !== 'off' || pinOf(ctx, e, d2) || bkDay(ctx, e, d2) || onOf(out, d2) >= capOf(d2)) continue;
+          plan[e][d] = 'off'; plan[e][d2] = 'work';
+          const trial = buildDays(ctx, dates, fixed, plan);
+          const tres = checkPeriod(merged(ctx, dates, trial.out));
+          if (blockCount(tres) <= blockCount(res) && d1Count(tres) <= d1Count(res) && overAll(trial.out) < overAll(out)) { out = trial.out; problems = trial.problems; res = tres; done = true; progressed = true; break; }
+          plan[e][d] = 'work'; plan[e][d2] = 'off';
+        }
+      }
+    }
+  }
+
   // 4.2 還是缺人：叫備援同仁（計時）來補，一次一天、整期重排驗證（2026-10-28 Eason：其他同仁真的排不開才排他）。
   //     排在國定假日假換回上班（4.5）、休息日加班（5）之前：備援是一般工時，比雙倍薪資、加班費便宜。
   //     不能多出「擋」，也不能讓他多出加班提醒（連上第 6 天、超過 8 小時、超過 40 小時、休息日出勤）——那種寧可留給後面的步驟或店長。

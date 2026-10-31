@@ -26,6 +26,9 @@ export const MONTH_OT = 46 * H, MONTH_OT_WARN = 36 * H;   // 每月加班：超�
 const PT_OT_RUN = 6;                         // 計時連上第 6 天＝休息日加班，提醒（Eason 2026-10-27；第 7 天由 P3 擋）
 export const MIN_GAP = 12 * H;                // 換班間隔（內規）：Eason 2026-10-11 從 11 小時改 12 小時，自動排班與檢查共用這一個值
 const LEAVE_MIN = 8 * H;                     // 請假、國定假日放假一天算 8 小時（F7）
+/** 假別（sch_days.leave 存第一欄代號）：指定休假、班表格子共用；國定假日假「國」另外處理（2026-10-31 Eason：指定休假要能先選假別） */
+export const LEAVES = [['特', '特休'], ['事', '事假'], ['病', '病假'], ['婚', '婚假'], ['喪', '喪假'], ['公', '公假'], ['產', '產假'], ['陪', '陪產假'], ['生', '生理假'], ['家', '家庭照顧假'], ['補', '補休']];
+const LEAVE_CODES = LEAVES.map(x => x[0]).concat('國');
 const LOOKBACK = 13;
 
 const hm = (m) => { const h = Math.floor(m / 60), r = m % 60; return r ? `${h} 小時 ${r} 分` : `${h} 小時`; };
@@ -80,7 +83,7 @@ export function comboError(c, hol, d) {
     case 'H': return c.leave ? '休息日不能填假別' : null;
     case 'L':
       if (s) return '請假那天不能排班';
-      if (!['特', '補', '國'].includes(c.leave)) return '請假要選特休、補休或國定假日';
+      if (!LEAVE_CODES.includes(c.leave)) return '請假要選假別（特休、事假、病假…）';
       return null;   // 「國」排在哪天合法要看整期（正職可移到同期別天），由 checkPeriod 的 C7 檢查
     default: return '日別要是工作日、例假、休息日或請假';
   }
@@ -244,8 +247,8 @@ export function checkPeriod(ctx) {
       if (otDays.length > FT_OT_MAX) add('F8', 'warn', e, otDays[FT_OT_MAX], `${who} 這期排了 ${otDays.length} 天休息日加班，超過每期 ${FT_OT_MAX} 天（要付加班費）`);
       const normal = dates.reduce((a, d) => a + (mine[d] && mine[d].day_type === 'W' ? Math.min(mins[d].work, FT_DAY_NORMAL) : 0), 0);
       if (normal > PERIOD_NORMAL) add('F5', 'info', e, end, `${who} 這期正常工時 ${hm(normal)}，超過 160 小時的部分要付加班費`);
-      // 特休、國定假日放假一天算 8 小時；補休不算（Eason 2026-10-11：補休是用掉之前的加班，不能再抵這期的目標工時）
-      const credit = dates.reduce((a, d) => a + mins[d].normal + (mine[d] && mine[d].day_type === 'L' && (mine[d].leave === '特' || mine[d].leave === '國') ? LEAVE_MIN : 0), 0);
+      // 請假（特休、事假、病假…）與國定假日放假一天算 8 小時；補休不算（Eason 2026-10-11：補休是用掉之前的加班，不能再抵這期的目標工時）
+      const credit = dates.reduce((a, d) => a + mins[d].normal + (mine[d] && mine[d].day_type === 'L' && mine[d].leave !== '補' ? LEAVE_MIN : 0), 0);
       const target = t0.target_min == null ? PERIOD_NORMAL : t0.target_min;
       if (fullPeriod && !blank.length && credit < target) add('F7', 'warn', e, end, `${who} 這期只排到 ${hm(credit)}，目標 ${hm(target)}，還差 ${hm(target - credit)}`);
     } else if (t0) {

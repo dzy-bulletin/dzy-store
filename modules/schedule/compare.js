@@ -1,8 +1,9 @@
 // 出勤核定比對班表（spec 10.3）：只提示、不擋核定、不鎖定。差超過 15 分鐘標橘色（Eason 2026-10-11）。
 // plan：{ day_type, leave, shift_name, start, end, segs?, station?, label? }（segs＝分段班各段 [['10:00','14:00'],['17:00','21:00']]，2 段以上才有）（dayPlan 的一筆；label＝月曆版休假名稱，例：休假、指定休）或 undefined；segments：打卡段 [{in:'HH:MM', out:'HH:MM'|null}]
+import { LEAVES } from './rules.js';
 export const THRESHOLD_MIN = 15;
 const toMin = (hm) => { const m = /^(\d{1,2}):(\d{2})$/.exec(hm || ''); return m ? +m[1] * 60 + +m[2] : null; };
-const LEAVE = { '特': '特休', '補': '補休', '國': '國定假日' };
+const LEAVE = Object.assign(Object.fromEntries(LEAVES), { '國': '國定假日' });
 
 export function comparePlan(plan, segments, opts) {
   const segs = (segments || []).filter((s) => s && (s.in || s.out));

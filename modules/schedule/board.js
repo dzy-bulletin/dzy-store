@@ -1,10 +1,10 @@
 // 自動排班「班表」分頁：整期格子（桌機）／單日清單（手機）、營業額與工時比、每班人數、檢查結果、自動排班、鎖定與發布。
 import { esc, busy, confirmBox } from '../../js/ui.js';
-import { timeText } from './hours.js';
+import { timeText, segsOf, shiftMinutes } from './hours.js';
 import { api } from '../../js/api.js';
 import { S, canEdit, loadAnnual, load, mutate, movePeriod, WD, md, hm, DAY_LABEL, LEAVE_LABEL, call } from './state.js';
 import { weekday, periodEnd } from './period.js';
-import { termAt } from './rules.js';
+import { termAt, LEAVES } from './rules.js';
 import { stHidden, setStHidden, stToggleHtml } from './stview.js';
 import { setupChecklist } from './checklist.js';
 import { getSession } from '../../js/auth.js';
@@ -71,6 +71,8 @@ export function renderBoard(ctx) {
     }
     return { n, lv };
   };
+  // 本期排班時數（2026-10-31 Eason：休假天數右邊加一欄）：在職日有排班的格子，照班別扣掉休息後的工時加總（含休息日加班）
+  const hoursOf = (st) => D.dates.reduce((a, d) => { const c = (D.days[st.emp_id] || {})[d], s = c && c.shift_id && shifts[c.shift_id]; return a + (s && inJobOn(st, d) ? shiftMinutes(s) : 0); }, 0);
   // 名字下方的剩餘特休：薪資系統的餘額（S.annual，另外抓；計時或拿不到就不顯示）
   loadAnnual(ctx.rerender);
   const annualTxt = (st) => { const a = S.annual && S.annual[st.emp_id]; return a == null ? '' : `<small class="sc-al">特休剩 ${a} 天</small>`; };
@@ -82,6 +84,10 @@ export function renderBoard(ctx) {
   const stCount = (d, id) => staff.filter((st) => inJobOn(st, d) && ((D.days[st.emp_id] || {})[d] || {}).station_id === id && ((D.days[st.emp_id] || {})[d] || {}).shift_id).length;
   const stNeed = (d, id) => ((D.stationNeed || {})[d] || {})[id] || 0;
   const dayNeed = (d) => Object.values(D.demand[d] || {}).reduce((a, x) => a + (x.min || 0), 0);
+  // 當天人數只顯示早／晚（2026-10-31 Eason）：照上班時間分、不看班名——早＝15:00 以前開始，晚＝18:00 以後才結束（含跨夜）；二段班、整天班兩邊都算
+  const isEarly = (s) => segsOf(s)[0].start < '15:00';
+  const isLate = (s) => { const g = segsOf(s), last = g[g.length - 1]; return last.end > '18:00' || last.end <= g[0].start; };
+  const dayEL = (d) => { let e = 0, l = 0; for (const st of staff) { const c = (D.days[st.emp_id] || {})[d] || {}, s = c.shift_id && shifts[c.shift_id]; if (!s || !inJobOn(st, d)) continue; if (isEarly(s)) e++; if (isLate(s)) l++; } return { e, l }; };
   // 每天的午餐／晚餐備註（全店共用，Eason 2026-10-26）：放在日期下方、同仁上方；鎖定後也能改，存了自動重送 LINE
   const NOTE_KINDS = [['lunch', '午餐備註'], ['dinner', '晚餐備註']];
   const noteOf = (d, k) => ((D.notes || {})[d] || {})[k] || '';
@@ -150,24 +156,28 @@ export function renderBoard(ctx) {
         return `<td class="sc-c ${x.cls}${isWe(d) ? ' we' : ''}${bday(st, d) ? ' bd' : ''}${lv ? ' i-' + lv : ''}${sel ? ' sel' : ''}${pinCls}" data-emp="${esc(st.emp_id)}" data-date="${d}" title="${esc(iss.map((r) => r.msg).concat(pin && pin.kind === 'off' ? ['指定休假'] : [], x.ot ? ['休息日加班'] : []).join('\n'))}">${esc(x.t)}${otTag(x)}${stTag(c)}${bday(st, d) ? '<i class="sc-bd" title="生日">生日</i>' : ''}</td>`;
       }).join('');
       const o = offOf(st), lvs = Object.entries(o.lv).map(([k, v]) => k + ' ' + v).join('・');
-      return `<tr><th class="sc-name" scope="row">${esc(st.name)}${annualTxt(st)}</th>${tds}<td class="sc-off"><b>${o.n}</b>${lvs ? `<small>${esc(lvs)}</small>` : ''}</td></tr>`;
+      return `<tr><th class="sc-name" scope="row">${esc(st.name)}${annualTxt(st)}</th>${tds}<td class="sc-off"><b>${o.n}</b>${lvs ? `<small>${esc(lvs)}</small>` : ''}</td><td class="sc-hr"><b>${hm(hoursOf(st))}</b></td></tr>`;
     }).join('');
     const cnt = `<tr class="sc-cnt"><th scope="row">當天人數</th>${D.dates.map((d) => {
-      const n = dayTotal(d), need = dayNeed(d);
-      return `<td class="${need && n < need ? 'short' : ''}${isWe(d) ? ' we' : ''}" title="${need ? `至少要 ${need} 人` : '沒有設人數'}">${n}${need ? '/' + need : ''}</td>`;
-    }).join('')}<td class="sc-off"></td></tr>`;
+      const n = dayTotal(d), need = dayNeed(d), el = dayEL(d);
+      return `<td class="${need && n < need ? 'short' : ''}${isWe(d) ? ' we' : ''}" title="共 ${n} 人上班${need ? `，至少要 ${need} 人` : ''}">早 ${el.e}<br>晚 ${el.l}</td>`;
+    }).join('')}<td class="sc-off"></td><td class="sc-hr"></td></tr>`;
     const noteRows = NOTE_KINDS.map(([k, label]) => `<tr class="sc-noterow"><th scope="row">${label}</th>${D.dates.map((d) => {
       const t = noteOf(d, k);
       return `<td class="sc-nt${isWe(d) ? ' we' : ''}${t ? ' has' : ''}${S.noteSel === d ? ' sel' : ''}" data-note="${d}" data-kind="${k}" title="${esc(t || (canLock ? '點一下寫' + label : ''))}">${t ? `<div class="sc-ntx">${esc(t)}</div>` : canLock ? '<span class="sc-ntadd" aria-hidden="true">＋</span>' : ''}</td>`;
-    }).join('')}<td class="sc-off"></td></tr>`).join('');
+    }).join('')}<td class="sc-off"></td><td class="sc-hr"></td></tr>`).join('');
     // 各站人數：每個使用中的站一列，不足最少人數的紅字「1/2」
     const stRows = stShow.map((x) => `<tr class="sc-stcnt" data-station="${esc(x.id)}"><th scope="row">${esc(x.name)}</th>${D.dates.map((d) => {
       const n = stCount(d, x.id), need = stNeed(d, x.id);
       return `<td class="${need && n < need ? 'short' : ''}${isWe(d) ? ' we' : ''}" title="${esc(x.name)}${need ? `至少要 ${need} 人` : '沒有設人數'}">${n}${need ? '/' + need : ''}</td>`;
-    }).join('')}<td class="sc-off"></td></tr>`).join('');
+    }).join('')}<td class="sc-off"></td><td class="sc-hr"></td></tr>`).join('');
+    // 班表最下方列班別與時間（2026-10-31 Eason）：使用中的班＋這期有排到的停用班
+    const usedSh = new Set(); for (const st of staff) for (const d of D.dates) { const c = (D.days[st.emp_id] || {})[d]; if (c && c.shift_id) usedSh.add(c.shift_id); }
+    const legendSh = D.shifts.filter((s) => s.active || usedSh.has(s.id));
+    const legend = legendSh.length ? `<div class="sc-legend" id="scLegend">${legendSh.map((s) => `<span><b>${esc(s.name)}</b>：${esc(timeText(s))}</span>`).join('')}</div>` : '';
     body = `<div class="card sc-gridcard"><div class="scroll"><table class="sc-grid">
-      <thead><tr><th class="sc-name">同仁</th>${th}<th class="sc-offh">休假<small>天數</small></th></tr></thead>
-      <tbody>${noteRows}${rows}${cnt}${stRows}</tbody></table></div></div>`;
+      <thead><tr><th class="sc-name">同仁</th>${th}<th class="sc-offh">休假<small>天數</small></th><th class="sc-hrh">排班<small>時數</small></th></tr></thead>
+      <tbody>${noteRows}${rows}${cnt}${stRows}</tbody></table></div>${legend}</div>`;
   } else {
     const d = S.day, hol = D.holidays.days[d];
     const chips = D.dates.map((x) => `<button type="button" class="sc-daychip${x === d ? ' on' : ''}${isWe(x) ? ' we' : ''}${(byDay[x] || []).length ? ' warn' : ''}" data-day="${x}">${md(x)}<small>${WD[weekday(x)]}</small></button>`).join('');
@@ -179,8 +189,8 @@ export function renderBoard(ctx) {
         <span class="sc-dn">${esc(st.name)}${bday(st, d) ? ' <i class="sc-bd">生日</i>' : ''}${annualTxt(st)}</span><span class="sc-dv">${esc(x.t)}${otTag(x)}${s ? `<small>${esc(timeText(s))}</small>` : ''}${stTag(c)}</span>
         ${iss.length ? `<span class="sc-dmsg">${esc(iss.map((i) => i.msg).join('；'))}</span>` : ''}</button>`;
     }).join('');
-    const n = dayTotal(d), nd = dayNeed(d);
-    const cnt = `<span class="tag ${nd && n < nd ? 'bad' : ''}" id="scDayCount">當天 ${n}${nd ? '/' + nd : ''} 人</span>`
+    const n = dayTotal(d), nd = dayNeed(d), el = dayEL(d);
+    const cnt = `<span class="tag ${nd && n < nd ? 'bad' : ''}" id="scDayCount">早 ${el.e} 人｜晚 ${el.l} 人</span>`
       + stShow.map((x) => { const k = stCount(d, x.id), nn = stNeed(d, x.id); return `<span class="tag sc-dst ${nn && k < nn ? 'bad' : ''}" data-station="${esc(x.id)}">${esc(x.name)} ${k}${nn ? '/' + nn : ''}</span>`; }).join('');
     body = `<div class="card"><div class="sc-days">${chips}</div>
       <h2 class="mt">${md(d)}（${WD[weekday(d)]}）${hol ? `<span class="tag">${esc(hol)}</span>` : ''}</h2>
@@ -215,7 +225,7 @@ export function renderBoard(ctx) {
       // 休息日加班只能改回休息日或換一個休息日出勤的班（伺服器同樣擋，Eason 2026-10-11）
       const opts = c.day_type === 'H' && c.shift_id ? otOpts + '<option value="H">休息日</option>'
         : activeShifts.map((s) => `<option value="S:${esc(s.id)}">${esc(s.name)} ${esc(timeText(s))}</option>`).join('') + otOpts
-        + '<option value="R">例假</option><option value="H">休息日</option><option value="L:特">特休</option><option value="L:補">補休</option>'
+        + '<option value="R">例假</option><option value="H">休息日</option>' + LEAVES.map(([k, l]) => `<option value="L:${k}">${l}</option>`).join('')
         + (guoOk ? '<option value="L:國">國定假日假</option>' : '') + '<option value="CLEAR">清空</option>';
       editor = `<div class="card sc-editor" id="scEditor">${head2}
       <div class="row mt"><select id="scCellSel" aria-label="這一格要排什麼">${opts.replace(`value="${cur}"`, `value="${cur}" selected`)}</select>

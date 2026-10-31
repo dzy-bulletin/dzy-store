@@ -2,6 +2,7 @@
 import { esc, busy } from '../../js/ui.js';
 import { S, mutate, call, load, WD, md } from './state.js';
 import { weekday } from './period.js';
+import { LEAVES } from './rules.js';
 // 指定日期格：月份放在 span，窄螢幕（≤360）除了第一格與每月 1 號都只顯示日（12/27 → 27），不然 7 欄塞不下（2026-10-26 手機巡檢）
 const pinDate = (d) => { const t = md(d), k = t.indexOf('/'); return k < 0 ? t : `<span class="m">${t.slice(0, k + 1)}</span>${t.slice(k + 1)}`; };
 
@@ -22,6 +23,13 @@ export function renderNeeds(ctx) {
   const dayV = (sid, f) => { const x = (ov || D.demand[S.needDay] || {})[sid]; return x && x[f] != null ? x[f] : ''; };
   const pins = (D.pins[S.pinEmp] || {});
   const pinLabel = (p) => (!p ? '' : p.kind === 'off' ? '休' : p.kind === 'work' ? '上' : ((D.shifts.find((s) => s.id === p.shift_id) || {}).name || p.shift_id));
+  // 指定請假（2026-10-31 Eason：先選假別再點日期）：直接寫成班表的請假格（sch_days L＋假別），自動排班本來就保留請假、不佔例休
+  const leaveOf = (d) => { const c = (D.days[S.pinEmp] || {})[d]; return c && c.day_type === 'L' && c.leave !== '國' ? c.leave : null; };
+  const keyOf = (d) => { const p = pins[d]; if (p) return p.kind === 'shift' ? 'S:' + p.shift_id : p.kind; const l = leaveOf(d); return l ? 'L:' + l : null; };
+  const CHOICES = [['off', '休假（例假／休息日，由系統排）'], ...LEAVES.map(([k, l]) => ['L:' + k, l]), ['work', '指定上班'], ...shifts.map((s) => ['S:' + s.id, '指定上 ' + s.name])];
+  if (!CHOICES.some(([k]) => k === S.pinChoice)) S.pinChoice = 'off';
+  const cellLabel = (d) => { const l = leaveOf(d); return !pins[d] && l ? l : pinLabel(pins[d]); };
+  const cellCls = (d) => (pins[d] ? ' on k-' + pins[d].kind : leaveOf(d) ? ' on k-leave' : '');
 
   const snMsg = S.snMsg || ''; S.snMsg = '';
   const tplMsg = S.ndMsg || ''; S.ndMsg = '';            // 重畫之後才顯示的訊息（重畫是非同步的，直接寫進舊畫面會被蓋掉）
@@ -57,9 +65,11 @@ export function renderNeeds(ctx) {
     <div id="snDayMsg" class="okmsg" role="status"></div></div>` : ''}
 
   <div class="card"><h2>指定休假、指定上班</h2>
-    <p class="hint">同仁要休的日子先在這裡點好，自動排班不會改動。點一下日期會依序切換：沒指定 → 休 → 上 →（各班別）→ 沒指定。</p>
-    ${D.staff.length ? `<div class="row"><select id="pnEmp" aria-label="同仁">${D.staff.map((s) => `<option value="${esc(s.emp_id)}" ${s.emp_id === S.pinEmp ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>
-    <div class="sc-pins mt">${D.dates.map((d, i) => `<button type="button" class="sc-pin${pins[d] ? ' on k-' + pins[d].kind : ''}${i && d.slice(8) !== '01' ? ' no-m' : ''}" data-date="${d}" ${locked ? 'disabled' : ''}>${pinDate(d)}<small>${WD[weekday(d)]}</small><b>${esc(pinLabel(pins[d]))}</b></button>`).join('')}</div>` : '<p class="hint">還沒有同仁。</p>'}
+    <p class="hint">同仁要休的日子先在這裡點好，自動排班不會改動。先選同仁和「要指定什麼」（休假、特休、事假、病假…），再點日期；同一天再點一次＝取消。</p>
+    ${D.staff.length ? `<div class="row"><select id="pnEmp" aria-label="同仁">${D.staff.map((s) => `<option value="${esc(s.emp_id)}" ${s.emp_id === S.pinEmp ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
+    <select id="pnKind" aria-label="要指定什麼">${CHOICES.map(([k, l]) => `<option value="${esc(k)}" ${k === S.pinChoice ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+    <div class="sc-pins mt">${D.dates.map((d, i) => `<button type="button" class="sc-pin${cellCls(d)}${i && d.slice(8) !== '01' ? ' no-m' : ''}" data-date="${d}" ${locked ? 'disabled' : ''}>${pinDate(d)}<small>${WD[weekday(d)]}</small><b>${esc(cellLabel(d))}</b></button>`).join('')}</div>
+    <p class="hint">格子裡的字：休＝休假、上＝指定上班、特／事／病／婚／喪…＝請該假別、班別名稱＝指定上那個班。請假會直接寫進班表，算這期的工時（補休除外）。</p>` : '<p class="hint">還沒有同仁。</p>'}
     <div id="pnMsg" class="okmsg" role="status"></div></div>`;
 
   const q = (s) => el.querySelector(s);
@@ -100,14 +110,19 @@ export function renderNeeds(ctx) {
     try { await mutate('saveStationNeedDay', { date: S.stDay, rows: [] }); ctx.rerender(); } catch (e) { msg('#snDayMsg', e.message, true); }
   });
   if (q('#pnEmp')) q('#pnEmp').onchange = () => { S.pinEmp = q('#pnEmp').value; ctx.rerender(); };
+  if (q('#pnKind')) q('#pnKind').onchange = () => { S.pinChoice = q('#pnKind').value; };
   el.querySelectorAll('.sc-pin').forEach((b) => {
     b.onclick = () => busy(b, async () => {
-      const cur = pins[b.dataset.date];
-      const cycle = [null, { kind: 'off' }, { kind: 'work' }, ...shifts.map((s) => ({ kind: 'shift', shift_id: s.id }))];
-      const i = cycle.findIndex((c) => (c === null ? !cur : cur && c.kind === cur.kind && (c.shift_id || null) === (cur.shift_id || null)));
-      const next = cycle[(i + 1) % cycle.length];
-      try { await mutate('savePins', { pins: [Object.assign({ emp_id: S.pinEmp, date: b.dataset.date }, next || { kind: null })] }); ctx.rerender(); }
-      catch (e) { msg('#pnMsg', e.message, true); }
+      const d = b.dataset.date, cur = keyOf(d), want = cur === S.pinChoice ? null : S.pinChoice;   // 同一天再點同一種＝取消
+      const base = { emp_id: S.pinEmp, date: d };
+      try {
+        // 指定（pin）與請假（班表格子）是兩份資料：換種類時先清掉舊的那份
+        if (pins[d] && !(want && !want.startsWith('L:'))) await mutate('savePins', { pins: [Object.assign({}, base, { kind: null })] });
+        if (leaveOf(d) && !(want && want.startsWith('L:'))) await mutate('saveDays', { cells: [Object.assign({}, base, { clear: true })] });
+        if (want && want.startsWith('L:')) await mutate('saveDays', { cells: [Object.assign({}, base, { day_type: 'L', leave: want.slice(2) })] });
+        else if (want) await mutate('savePins', { pins: [Object.assign({}, base, want.startsWith('S:') ? { kind: 'shift', shift_id: want.slice(2) } : { kind: want })] });
+        ctx.rerender();
+      } catch (e) { msg('#pnMsg', e.message, true); }
     });
   });
 }
