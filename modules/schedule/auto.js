@@ -613,6 +613,8 @@ function scheduleCore(ctx, opts, guoSkip, keepManual) {
     for (const st of cands) {
       for (const sid of lacking) {
         if (!allowedOf(ctx, st.emp_id, d).includes(sid)) continue;
+        // 不排同班的對象那天已經在這班 → 不挑他（2026-10-31 換班間隔改回 11 小時後才露出來：原本這步不看 D5）
+        if ((ctx.pairs || []).some(([a, b]) => (a === st.emp_id || b === st.emp_id) && (out[a === st.emp_id ? b : a] || {})[d] && out[a === st.emp_id ? b : a][d].shift_id === sid)) continue;
         const before = out[st.emp_id][d];
         const short0 = shortOn(d);
         out[st.emp_id][d] = { day_type: 'H', shift_id: sid, leave: null, source: 'auto' };

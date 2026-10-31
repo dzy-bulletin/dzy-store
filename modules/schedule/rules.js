@@ -24,7 +24,7 @@ const FT_DAY_NORMAL = 10 * H, PT_DAY_NORMAL = 8 * H, DAY_MAX = 12 * H;
 const PERIOD_NORMAL = 160 * H, WEEK_NORMAL = 40 * H;
 export const MONTH_OT = 46 * H, MONTH_OT_WARN = 36 * H;   // 每月加班：超過 46 擋、超過 36 警告（Eason 2026-10-27，取代 10-11 的「46 只提醒」）
 const PT_OT_RUN = 6;                         // 計時連上第 6 天＝休息日加班，提醒（Eason 2026-10-27；第 7 天由 P3 擋）
-export const MIN_GAP = 12 * H;                // 換班間隔（內規）：Eason 2026-10-11 從 11 小時改 12 小時，自動排班與檢查共用這一個值
+export const MIN_GAP = 11 * H;                // 換班間隔（§34）：Eason 2026-10-11 改 12 小時、2026-10-31 改回 11 小時，自動排班與檢查共用這一個值
 const LEAVE_MIN = 8 * H;                     // 請假、國定假日放假一天算 8 小時（F7）
 /** 假別（sch_days.leave 存第一欄代號）：指定休假、班表格子共用；國定假日假「國」另外處理（2026-10-31 Eason：指定休假要能先選假別） */
 export const LEAVES = [['特', '特休'], ['事', '事假'], ['病', '病假'], ['婚', '婚假'], ['喪', '喪假'], ['公', '公假'], ['產', '產假'], ['陪', '陪產假'], ['生', '生理假'], ['家', '家庭照顧假'], ['補', '補休']];
@@ -197,7 +197,7 @@ export function checkPeriod(ctx) {
       if (t.kind === 'pt' && run === PT_OT_RUN && mine[d] && mine[d].day_type === 'W') add('P7', 'warn', e, d, `${who} ${md(d)} 是連續上班第 ${PT_OT_RUN} 天，這天算休息日加班（要付加班費）：請改成「班別（休息日出勤）」`);
     }
 
-    // 換班間隔 12 小時（內規，比 §34 的 11 小時嚴；跨期也比）
+    // 換班間隔 11 小時（§34；跨期也比）
     let lastShift = null;                                              // 上一個實際的班（跨夜班可能隔一天才接下一班，GPT 上線前審查 8）
     for (let i = 3; i >= 1; i--) { const w = workedOn(ctx, e, addDays(start, -i)); if (w && w.shift) lastShift = w; }
     for (const d of dates) {
@@ -205,7 +205,7 @@ export function checkPeriod(ctx) {
       if (!cur || !cur.shift) continue;
       if (lastShift && lastShift.shift) {
         const g = gapMinutes(lastShift.date, lastShift.shift, d, cur.shift);
-        if (g < MIN_GAP) add('C1', 'block', e, d, `${who} ${md(lastShift.date)} 下班到 ${md(d)} 上班只隔 ${hm(Math.max(0, g))}，至少要 12 小時`);
+        if (g < MIN_GAP) add('C1', 'block', e, d, `${who} ${md(lastShift.date)} 下班到 ${md(d)} 上班只隔 ${hm(Math.max(0, g))}，至少要 ${MIN_GAP / H} 小時`);
       }
       lastShift = cur;
     }
@@ -360,7 +360,7 @@ export const blocks = (results) => results.filter(r => r.level === 'block');
 //   from?: 'YYYY-MM-DD'     // 這套排班從哪天起（mode_from）；之前的日子不用選、不檢查整月都要選
 //   soft?: true      // 央廚固定排班：只提醒不擋，block 一律降成 warn
 // }
-// 規則（Q1 推薦版）：以週日到週六為一週，每週至少 1 天例假（R）＋1 天休息日（H，沒排班的）；換班間隔 < 12 小時、單日 > 12 小時＝block；
+// 規則（Q1 推薦版）：以週日到週六為一週，每週至少 1 天例假（R）＋1 天休息日（H，沒排班的）；換班間隔 < 11 小時、單日 > 12 小時＝block；
 // 每週超過 40 小時＝warn；國定假日上班＝warn（工資加倍）；整月還有沒選的天＝block。
 // 跨月的週：相鄰日子沒有資料時不能判斷，只有「剩下沒資料的天數也補不齊」才擋（不然永遠送不出去）。
 // 回傳 [{ code, level:'block'|'warn', emp_id, date, msg }]
@@ -398,14 +398,14 @@ export function checkSelfMonth(ctx) {
       if (sh && shiftMinutes(sh) > DAY_MAX) add('F4', 'block', e, d, `${who} ${md(d)} 一天 ${hm(shiftMinutes(sh))}，超過 12 小時`);
     }
 
-    // 換班間隔 12 小時（含跨月：月初前、月底後各 3 天的相鄰格）
+    // 換班間隔 11 小時（含跨月：月初前、月底後各 3 天的相鄰格）
     let prev = null;
     for (let d = addDays(first, -3); d <= addDays(last, 3); d = addDays(d, 1)) {
       const c = mine[d], sh = c && c.shift_id ? shifts[c.shift_id] : null;
       if (!sh) continue;
       if (prev) {
         const g = gapMinutes(prev.date, prev.shift, d, sh);
-        if (g < MIN_GAP && (d <= last && d >= first || prev.date >= first && prev.date <= last)) add('C1', 'block', e, d, `${who} ${md(prev.date)} 下班到 ${md(d)} 上班只隔 ${hm(Math.max(0, g))}，至少要 12 小時`);
+        if (g < MIN_GAP && (d <= last && d >= first || prev.date >= first && prev.date <= last)) add('C1', 'block', e, d, `${who} ${md(prev.date)} 下班到 ${md(d)} 上班只隔 ${hm(Math.max(0, g))}，至少要 ${MIN_GAP / H} 小時`);
       }
       prev = { date: d, shift: sh };
     }
