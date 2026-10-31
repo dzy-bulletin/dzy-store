@@ -132,28 +132,49 @@ function planOffDays(ctx, dates, fixed, guoSkip) {
       const fixedOff = wk.filter(d => fixed[e][d] && (fixed[e][d].day_type === 'R' || fixed[e][d].day_type === 'H') && !fixed[e][d].shift_id).length;
       const k = Math.max(need - fixedOff, pinnedOff.length);
       const cand = free.filter(d => !mustWork.has(d) && !pinnedOff.includes(d));
-      let best = null, bestScore = Infinity, bestRun = run;
-      for (const pick of combos(cand, Math.min(cand.length, k - pinnedOff.length))) {
-        const offs = new Set(pinnedOff.concat(pick));
-        let r = run, okRun = true;
-        for (const d of dates.slice(w * 7, w * 7 + 7)) {
-          const c = fixed[e][d];
-          const works = c ? !!c.shift_id : (employed(st, d) && !offs.has(d) && !bkDay(ctx, e, d));
-          r = works ? r + 1 : 0;
-          if (r > limit) { okRun = false; break; }
+      // 下一週開頭「一定要上班」的天數（固定的班、指定上班、正職國定假日）：這週結尾連上的天數要留空間給它們，
+      //   不然下一週再怎麼挑都會超過連上上限（2026-10-31 光復徐佑昕：11/20、11/21 指定休湊滿第 3 週休假，11/11–11/17 被排成連上 7 天）
+      let lead = 0;
+      if (w < 3) {
+        for (const d of dates.slice(w * 7 + 7, w * 7 + 14)) {
+          const c = fixed[e][d], p = pinOf(ctx, e, d);
+          const ftD = (termAt(ctx.terms, e, d) || {}).kind === 'ft';
+          const forced = c ? !!c.shift_id : (employed(st, d) && ((p && p.kind !== 'off') || (!p && ftD && isHoliday(ctx.holidays, d))));
+          if (!forced) break;
+          lead++;
         }
-        if (!okRun) continue;
-        let score = 0;
-        for (const d of pick) {
-          const need2 = needOf(ctx, d);
-          for (const s of allowedOf(ctx, e, d)) {
-            const slack = avail[d][s] - ((need2[s] || {}).min || 0);
-            score += slack <= 0 ? 1000 : 10 / slack;
-          }
-          score += ((dates.indexOf(d) + si * 3) % 7) * 0.001;          // 輪替破同分
-        }
-        if (score < bestScore) { bestScore = score; best = offs; bestRun = r; }
       }
+      const search = (nPick, ahead) => {
+        let best = null, bestScore = Infinity, bestRun = run;
+        for (const pick of combos(cand, Math.min(cand.length, nPick))) {
+          const offs = new Set(pinnedOff.concat(pick));
+          let r = run, okRun = true;
+          for (const d of dates.slice(w * 7, w * 7 + 7)) {
+            const c = fixed[e][d];
+            const works = c ? !!c.shift_id : (employed(st, d) && !offs.has(d) && !bkDay(ctx, e, d));
+            r = works ? r + 1 : 0;
+            if (r > limit) { okRun = false; break; }
+          }
+          if (!okRun || r + ahead > limit) continue;
+          let score = 0;
+          for (const d of pick) {
+            const need2 = needOf(ctx, d);
+            for (const s of allowedOf(ctx, e, d)) {
+              const slack = avail[d][s] - ((need2[s] || {}).min || 0);
+              score += slack <= 0 ? 1000 : 10 / slack;
+            }
+            score += ((dates.indexOf(d) + si * 3) % 7) * 0.001;          // 輪替破同分
+          }
+          if (score < bestScore) { bestScore = score; best = offs; bestRun = r; }
+        }
+        return { best, bestRun };
+      };
+      // 照該休的天數挑；挑不出不超過連上上限的組合（休假天數已被指定休假湊滿、或下一週開頭一定要上班），就多休一天再挑，
+      //   一次加一天、加到挑得出來為止（寧可多休，也不排出「擋」讓整期存不了）。真的加到底都不行才照舊硬排
+      const base = Math.max(0, k - pinnedOff.length);
+      let { best, bestRun } = search(base, lead);
+      for (let extra = 1; !best && base + extra <= cand.length; extra++) ({ best, bestRun } = search(base + extra, lead));
+      if (!best) ({ best, bestRun } = search(base, 0));
       if (!best) best = new Set(pinnedOff.concat(cand.slice(0, Math.max(0, k - pinnedOff.length))));
       for (const d of dates.slice(w * 7, w * 7 + 7)) {
         if (!employed(st, d) || fixed[e][d] || bkDay(ctx, e, d)) continue;
