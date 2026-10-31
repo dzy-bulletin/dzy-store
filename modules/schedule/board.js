@@ -71,7 +71,7 @@ export function renderBoard(ctx) {
     }
     return { n, lv };
   };
-  // 本期排班時數（2026-10-31 Eason：休假天數右邊加一欄）：在職日有排班的格子，照班別扣掉休息後的工時加總（含休息日加班）
+  // 本期排班時數（2026-10-31 Eason：休假天數右邊加一欄；小時用小數，149:30 → 149.5）：在職日有排班的格子，照班別扣掉休息後的工時加總（含休息日加班）
   const hoursOf = (st) => D.dates.reduce((a, d) => { const c = (D.days[st.emp_id] || {})[d], s = c && c.shift_id && shifts[c.shift_id]; return a + (s && inJobOn(st, d) ? shiftMinutes(s) : 0); }, 0);
   // 名字下方的剩餘特休：薪資系統的餘額（S.annual，另外抓；計時或拿不到就不顯示）
   loadAnnual(ctx.rerender);
@@ -156,7 +156,7 @@ export function renderBoard(ctx) {
         return `<td class="sc-c ${x.cls}${isWe(d) ? ' we' : ''}${bday(st, d) ? ' bd' : ''}${lv ? ' i-' + lv : ''}${sel ? ' sel' : ''}${pinCls}" data-emp="${esc(st.emp_id)}" data-date="${d}" title="${esc(iss.map((r) => r.msg).concat(pin && pin.kind === 'off' ? ['指定休假'] : [], x.ot ? ['休息日加班'] : []).join('\n'))}">${esc(x.t)}${otTag(x)}${stTag(c)}${bday(st, d) ? '<i class="sc-bd" title="生日">生日</i>' : ''}</td>`;
       }).join('');
       const o = offOf(st), lvs = Object.entries(o.lv).map(([k, v]) => k + ' ' + v).join('・');
-      return `<tr><th class="sc-name" scope="row">${esc(st.name)}${annualTxt(st)}</th>${tds}<td class="sc-off"><b>${o.n}</b>${lvs ? `<small>${esc(lvs)}</small>` : ''}</td><td class="sc-hr"><b>${hm(hoursOf(st))}</b></td></tr>`;
+      return `<tr><th class="sc-name" scope="row">${esc(st.name)}${annualTxt(st)}</th>${tds}<td class="sc-off"><b>${o.n}</b>${lvs ? `<small>${esc(lvs)}</small>` : ''}</td><td class="sc-hr"><b>${+(hoursOf(st) / 60).toFixed(2)}</b></td></tr>`;
     }).join('');
     const cnt = `<tr class="sc-cnt"><th scope="row">當天人數</th>${D.dates.map((d) => {
       const n = dayTotal(d), need = dayNeed(d), el = dayEL(d);
