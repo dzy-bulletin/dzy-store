@@ -243,6 +243,7 @@ select{min-height:44px}
 .du-total-lb{font-size:12.5px;color:var(--muted);font-weight:700}
 .du-total-val{font-size:22px;font-weight:900;color:var(--red)}
 .du-total-unit{font-size:12.5px;color:var(--muted)}
+.du-total-over{flex-basis:100%;font-size:12.5px;font-weight:800;color:var(--red);border-left:3px solid var(--red);padding-left:8px}   /* 單日超過 10 小時（2026-11-01） */
 .du-breaktoggle{margin-top:6px;font:inherit;font-size:13px;font-weight:700;background:none;border:1px dashed var(--pink);color:var(--red);border-radius:8px;padding:8px 12px;min-height:40px;cursor:pointer;max-width:100%}
 .du-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}
 .du-row label{font-size:13px;font-weight:700;flex:none;min-width:4.5em}

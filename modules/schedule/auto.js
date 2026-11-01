@@ -6,9 +6,9 @@
 //       → 3 逐日配對（先滿足最少人數，用增廣路徑做二分圖配對）→ 4 修復（同週對調休假日）→ 4.2 備援同仁補缺人 → 5 整期檢查，沒有「擋」才回傳
 import { periodDates, addDays } from './period.js';
 import { shiftMinutes, gapMinutes } from './hours.js';
-import { checkPeriod, termAt, employed, isHoliday, allowedList, backupAt, ptCapMin, MIN_GAP, FT_OT_MAX } from './rules.js';
+import { checkPeriod, termAt, employed, isHoliday, allowedList, backupAt, ptCapMin, MIN_GAP, FT_OT_MAX, DAY_MAX } from './rules.js';
 
-const DAY_MAX = 12 * 60, REPAIR_MAX = 200;
+const REPAIR_MAX = 200;   // DAY_MAX 改從 rules.js 來（2026-11-01 改 10 小時）
 const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
 
 function allowedOf(ctx, emp, d) {

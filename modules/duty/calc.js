@@ -82,6 +82,7 @@ export function sumPeriods(rows) {
   return { total, filled };
 }
 export const round2 = n => Math.round(n * 100) / 100;
+export const DAY_MAX_H = 10;   // 單日上限（2026-11-01 Eason）：照實核定、超過標紅；與打卡 Rest.gs、排班 rules.js 同一個數字
 
 // manager.html:1368–1400：送出前的確認資訊——總時數、跨夜提醒、時段重疊（含「長段包兩短段」的掃描法）
 export function analyzePeriods(periods) {

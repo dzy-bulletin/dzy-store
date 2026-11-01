@@ -190,7 +190,7 @@ export async function schedule(action, me, b, db, s, hooks) {
       let sh = { start: x.start, end: x.end, break_min: Number(x.break_min) || 0 };
       if (Array.isArray(x.segs) && x.segs.length >= 2) { try { sh = normSegs(x.segs); } catch (e) { return fail('BAD_INPUT', e.message); } }   // 分段班（同 server/schedule.js saveShift）
       if (!breakOk(sh)) return fail('BAD_INPUT', sh.segs ? '有一段超過 6 小時，那一段休息至少要 30 分鐘（勞基法 §35）' : '一個班超過 6 小時，休息至少要 30 分鐘（勞基法 §35）');
-      if (shiftMinutes(sh) > 720) return fail('BAD_INPUT', '一班不能超過 12 小時');
+      if (shiftMinutes(sh) > 600) return fail('BAD_INPUT', '一班不能超過 10 小時');   // 同伺服器（2026-11-01 由 12 改 10）
       let id = x.id; if (!id) { let i = Object.keys(st.shifts).length + 1; while (st.shifts['S' + i]) i++; id = 'S' + i; }
       st.shifts[id] = Object.assign({ id, name: String(x.name).trim(), color: x.color || '', sort: Number(x.sort) || 0, active: x.active === false ? 0 : 1 }, sh);
       return ok({ id });
