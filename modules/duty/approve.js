@@ -365,9 +365,8 @@ function buildCard(emp, date) {
         if (!wc.ok) return say('bad', '✕ ' + wc.msg + '，無法送出。確有需要請聯絡 Eason。');
         if (wc.note && !await confirmBox(wc.note + '\n\n仍要送出嗎？', '送出')) return;
       }
-      // 補休：時數不能超過餘額（同一天重送原本的補休紀錄放行，否則改不動；manager.html:1388–1395）
-      if (q0 && q0.comp && (!q0.allowed || Number(L.hours || 0) > Number(q0.balance_h || 0)))
-        return say('bad', '✕ ' + emp.name + (q0.allowed ? ' 的補休餘額只剩 ' + (q0.balance_h || 0) + ' 小時，不夠請 ' + (L.hours || 0) + ' 小時' : ' 是計時同仁，沒有補休') + '，無法送出。');
+      // 補休：只擋計時同仁（2026-11-01 起可以先休後補，不看餘額；同一天重送原本的補休紀錄放行）
+      if (q0 && q0.comp && !q0.allowed) return say('bad', '✕ ' + emp.name + ' 是計時同仁，沒有補休，無法送出。');
       if (q0 && q0.blocked && !q0.comp) return say('bad', '✕ ' + emp.name + ' 的「' + L.type + '」額度已用完（上限 ' + q0.cap_days + ' 日，已用 ' + (Math.round((q0.used_days || 0) * 10) / 10) + ' 日），無法送出。確有需要請聯絡 Eason 調整假別設定。');
     }
     const lvText = C.leavesText(lv), hasTripLv = lv.some(x => x.type === '出差');
