@@ -538,10 +538,12 @@ function withFake(code, fn) { const prev = curFake; curFake = code && code !== '
 const ALL_OPS = { mgr_day: 'employees', mgr_pending_approvals: 'items', mgr_req_pending: 'items', mgr_req_day: null, payroll_leave_options: null };
 // 支援標示（對照 server/proxy/duty.js filterFor 的 support_from，2026-10-26）：示範人物的 support＝{門市代號: {員編: 原單位名稱}}，只在個人登入時加
 const SUPPORT_LISTS = { mgr_day: 'employees', mgr_pending_approvals: 'items', mgr_req_pending: 'items', mgr_roster: 'roster' };
+// 個人例外的歸屬（對照 home_tag，2026-11-01）：示範人物的 homeTag＝{門市代號: {員編: 標示}}；elsewhere＝{門市代號: [捷徑卡]}（只在單一門市的核定工時）
 function markSupport(per, code, action, data) {
-  const m = per && per.support && per.support[code], list = SUPPORT_LISTS[action];
-  if (!m || !list || !data || !Array.isArray(data[list])) return;
-  data[list] = data[list].map(it => (it && Object.prototype.hasOwnProperty.call(m, it.emp_id) ? { ...it, support_from: m[it.emp_id] } : it));
+  const m = (per && per.support && per.support[code]) || {}, t = (per && per.homeTag && per.homeTag[code]) || {}, list = SUPPORT_LISTS[action];
+  if (!list || !data || !Array.isArray(data[list])) return;
+  const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  data[list] = data[list].map(it => (!it ? it : has(m, it.emp_id) ? { ...it, support_from: m[it.emp_id] } : has(t, it.emp_id) ? { ...it, home_tag: t[it.emp_id] } : it));
 }
 // action=all（對照 server/proxy/duty.js handleAll）：e2e 可把門市代號放進 db.dutyDown，模擬那家打卡暫時讀不到
 function dutyAll(b, s) {
@@ -681,7 +683,12 @@ function duty(action, me, s, b) {
     if (action === 'mgr_req_pending') r.data.items = r.data.items.map(it => (ms.mine(it.emp_id) ? { ...it, self: true } : it));
     if (action === 'mgr_req_day') Object.keys(r.data.by_emp).forEach(e => { if (ms.mine(e)) r.data.by_emp[e] = r.data.by_emp[e].map(x => ({ ...x, self: true })); });
   }
-  if (r.ok && me.person) markSupport(PM && PM.personaOf(db, s.sub), tgt || s.code, action, r.data);
+  if (r.ok && me.person) {
+    const per = PM && PM.personaOf(db, s.sub);
+    markSupport(per, tgt || s.code, action, r.data);
+    const els = action === 'mgr_day' && per && per.elsewhere && per.elsewhere[tgt || s.code];
+    if (Array.isArray(els) && els.length) r.data.elsewhere = els;
+  }
   if (r.ok) r.data.meta = { clockStore: tgt, label: tgt ? (db.accounts[tgt] || {}).name : '麻的小辛辣 新竹光復店', breakStart: d.brk[0], breakEnd: d.brk[1] };
   return r;
 }

@@ -5,12 +5,12 @@ import { getSession } from '../../js/auth.js';
 const FLAG = 'dzystore_dutyok';
 // 管理者（2026-10-11 Eason：看得到所有門市、也能代核）：asStore＝正在看的門市代號，每次呼叫自動帶上；stores＝各店總覽讀到的門市清單。
 export const S = { key: null, admin: false, asStore: '', asName: '', stores: null, meta: { clockStore: '', label: '', breakStart: '', breakEnd: '' }, date: null, dayCache: {}, dayTok: 0,
-  pend: null, pendAll: false, focusEmp: null, rerender: null, leave: null, leaveP: null,
+  pend: null, pendAll: false, focusEmp: null, elsewhere: [], rerender: null, leave: null, leaveP: null,
   all: false, metaBy: {}, leaveBy: {} };   // all＝個人登入「全部門市」模式（2026-10-19）；metaBy／leaveBy＝各店的休息帶與假別額度（以營運系統門市代號為鍵）
 
 export function reset(key) {
   S.key = key; S.asStore = ''; S.asName = ''; S.stores = null; S.meta = { clockStore: '', label: '', breakStart: '', breakEnd: '' }; S.date = null; S.dayCache = {}; S.dayTok++;
-  S.pend = null; S.pendAll = false; S.focusEmp = null; S.leave = null; S.leaveP = null; S.reqCount = 0; S.reqAt = 0; S.metaBy = {}; S.leaveBy = {};
+  S.pend = null; S.pendAll = false; S.focusEmp = null; S.elsewhere = []; S.leave = null; S.leaveP = null; S.reqCount = 0; S.reqAt = 0; S.metaBy = {}; S.leaveBy = {};
 }
 
 // ---- 全部門市（個人登入、可核的人分布在兩家以上打卡店；2026-10-19）----
@@ -94,8 +94,14 @@ export function h(tag, cls, text, attrs) {
 }
 
 // 支援標示（2026-10-26）：伺服器在支援帳號那筆加 support_from（原單位名稱，可能是空字串）；舊版沒有＝不標
-export const supportText = it => (it && typeof it.support_from === 'string' ? '支援' + (it.support_from ? '（' + it.support_from + '）' : '') : '');
-export function supportTag(it) { const t = supportText(it); return t ? h('span', 'du-support', t, { 'data-support': it.support_from }) : null; }
+// 個人例外（2026-11-01）：伺服器加 home_tag（歸屬，例「總部」），同一個標籤位置顯示（例：財務部同仁固定在央廚打卡，標「總部」）
+export const supportText = it => (it && typeof it.support_from === 'string' ? '支援' + (it.support_from ? '（' + it.support_from + '）' : '')
+  : (it && typeof it.home_tag === 'string' && it.home_tag ? it.home_tag : ''));
+export function supportTag(it) {
+  const t = supportText(it);
+  if (!t) return null;
+  return typeof it.support_from === 'string' ? h('span', 'du-support', t, { 'data-support': it.support_from }) : h('span', 'du-support du-home', t, { 'data-home': it.home_tag });
+}
 
 // 載入失敗提示條 + 重新載入（伺服器已自動重試過一次，這裡交給人按）
 export function failBar(el, label, e, retry) {

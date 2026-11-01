@@ -1,11 +1,12 @@
 // 核定工時：照原系統 ~/mala-clock-in/manager.html 搬。日期列（前一天／後一天／今天）、本月待核定提醒、員工卡（收合展開、時段、
 // 核定時數即時算、休息、假別、出差、遲到分鐘）、送出核定。外觀換成營運系統風格，規則與文案不改。
 import { confirmBox } from '../../js/ui.js';
-import { S, dutyManager, call, callAll, brk, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow, supportTag } from './state.js';
+import { S, dutyManager, call, callAll, brk, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow, supportTag, rememberOne } from './state.js';
 import * as C from './calc.js';
 import { qrButton } from './qr.js';
 import { api } from '../../js/api.js';
 import { comparePlan } from '../schedule/compare.js';
+import { ssoSwitch, setSession, toSession } from '../../js/auth.js';
 
 export function renderApprove(ctx) {
   const el = ctx.el;
@@ -83,6 +84,7 @@ export function renderApprove(ctx) {
     dayRead(body).then(r => {
       if (tok !== S.dayTok || !live()) return;
       const failed = S.all ? (r.failed || []) : [];
+      if (!S.all) S.elsewhere = Array.isArray(r.elsewhere) ? r.elsewhere : [];      // 捷徑卡（歸屬這組、在別家打卡的人）不隨日期變，快取的日子沿用
       if (cacheable(r.date) && !failed.length) S.dayCache[r.date] = r.employees;
       drawDay(r.date, r.employees, failed); prefetch(r.date);
     }, e => {
@@ -148,6 +150,7 @@ export function renderApprove(ctx) {
 function renderEmployees(box, date, employees, failed, retry) {
   box.innerHTML = '';
   if (S.all) failedStores(box, failed, retry);
+  if (!S.all && S.elsewhere && S.elsewhere.length) box.append(elsewhereCards(S.elsewhere));
   if (!employees || !employees.length) { box.append(h('div', 'card du-center', failed && failed.length ? '讀得到的門市這天沒有任何同仁打卡紀錄。' : '這天沒有任何同仁打卡紀錄。')); return; }
   const pendingCount = employees.filter(e => !e.approved).length;
   const bar = h('div', 'du-listbar');
@@ -175,6 +178,28 @@ function renderEmployees(box, date, employees, failed, retry) {
     const left = [].filter.call(list.querySelectorAll('.du-card'), c => c.__pending).length;
     count.innerHTML = '共 ' + employees.length + ' 人・待核定 <b>' + left + '</b> 人';
   });
+}
+
+// 捷徑卡（2026-11-01 Eason 選 A）：歸屬這組、但在別家店打卡的人（例：財務部同仁固定在央廚打卡，總部那組也看得到她）。
+// 資料只有一份，在打卡那家核；按鈕換店過去（同「換店」：換新 token、整頁重載）
+function elsewhereCards(list) {
+  const wrap = h('div', 'du-else');
+  list.forEach(x => {
+    const card = h('div', 'du-card du-else-card');
+    card.dataset.elseEmp = String(x.emp_id); card.dataset.elseStore = String(x.store);
+    const nameEl = h('div', 'du-name', x.name);
+    if (x.home_tag) nameEl.append(h('span', 'du-support du-home', x.home_tag, { 'data-home': x.home_tag }));
+    const btn = h('button', 'btn sm', '前往' + x.storeName + '核定', { type: 'button' });
+    const err = h('div', 'du-fail-msg');
+    btn.onclick = async () => {
+      btn.disabled = true; btn.textContent = '切換中…'; err.textContent = '';
+      try { const d = await ssoSwitch(x.store); setSession(toSession(d)); rememberOne(d.token); location.hash = '#/duty/approve'; location.reload(); }
+      catch (e) { btn.disabled = false; btn.textContent = '前往' + x.storeName + '核定'; err.textContent = '換店失敗：' + ((e && e.message) || '請稍後再試'); }
+    };
+    card.append(nameEl, h('div', 'du-else-hint', '在' + x.storeName + '打卡，工時請到那邊核定'), btn, err);
+    wrap.append(card);
+  });
+  return wrap;
 }
 
 function periodRow(p, onChange) {

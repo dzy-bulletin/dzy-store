@@ -34,7 +34,7 @@ export function renderRoster(ctx) {
   // ---- 同仁異動 ----
   function drawRoster(rows) {
     const actives = rows.filter(r => r.active && r.name !== myName), off = rows.filter(r => !r.active);
-    const sup = r => { const t = supportText(r); return t ? `<span class="du-support" data-support="${esc(r.support_from)}">${esc(t)}</span>` : ''; };      // 支援（原單位）
+    const sup = r => { const t = supportText(r); if (!t) return ''; return typeof r.support_from === 'string' ? `<span class="du-support" data-support="${esc(r.support_from)}">${esc(t)}</span>` : `<span class="du-support du-home" data-home="${esc(r.home_tag)}">${esc(t)}</span>`; };      // 支援（原單位）／個人例外的歸屬（總部）
     if (dm) {
       sel.innerHTML = '<option value="">選擇同仁…</option>' + actives.map(r => `<option value="${esc(r.emp_id)}">${esc(r.name)}（${esc(r.emp_id)}）${supportText(r) ? '・' + esc(supportText(r)) : ''}</option>`).join('');
       reBtn.disabled = actives.length === 0;
