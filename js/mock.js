@@ -686,11 +686,32 @@ function duty(action, me, s, b) {
   if (r.ok && me.person) {
     const per = PM && PM.personaOf(db, s.sub);
     markSupport(per, tgt || s.code, action, r.data);
-    const els = action === 'mgr_day' && per && per.elsewhere && per.elsewhere[tgt || s.code];
-    if (Array.isArray(els) && els.length) r.data.elsewhere = els;
+    // 總部那組直接列（對照 server/proxy/duty.js mergeHome，2026-11-02）：per.elsewhere[本店]＝歸屬這組、在別家打卡的人 → 單一門市讀取把他們那家的資料併進來
+    const els = !tgt && Object.prototype.hasOwnProperty.call(ALL_OPS, action) && per && per.elsewhere && per.elsewhere[s.code];
+    if (Array.isArray(els) && els.length) mockMergeHome(per, action, b, r.data, els);
   }
   if (r.ok) r.data.meta = { clockStore: tgt, label: tgt ? (db.accounts[tgt] || {}).name : '麻的小辛辣 新竹光復店', breakStart: d.brk[0], breakEnd: d.brk[1] };
   return r;
+}
+function mockMergeHome(per, action, b, data, els) {
+  const list = ALL_OPS[action], groups = new Map();
+  for (const x of els) { if (!groups.has(x.store)) groups.set(x.store, { name: x.storeName, emps: new Set() }); groups.get(x.store).emps.add(String(x.emp_id)); }
+  data.home_stores = []; data.failed = [];
+  for (const [code, g] of groups) {
+    if ((db.dutyDown || []).includes(code)) { data.failed.push({ store: code, storeName: g.name, message: '打卡系統暫時沒有回應，請稍後再試' }); data.home_stores.push({ store: code, storeName: g.name, ok: false }); continue; }
+    const d = dutyStore(code);
+    const sub = {}; if (b.date !== undefined || data.date) sub.date = data.date || b.date;
+    const r = withFake(code, () => dutyDo(d, action, sub));
+    if (!r.ok) { data.failed.push({ store: code, storeName: g.name, message: r.message || '暫時讀不到' }); data.home_stores.push({ store: code, storeName: g.name, ok: false }); continue; }
+    markSupport(per, code, action, r.data);
+    data.home_stores.push({ store: code, storeName: g.name, ok: true, meta: { clockStore: code, label: g.name, breakStart: d.brk[0], breakEnd: d.brk[1] } });
+    if (list) for (const it of r.data[list] || []) { if (it && g.emps.has(String(it.emp_id))) data[list].push({ ...it, store: code, storeName: g.name }); }
+    else {
+      const o = Object.assign({}, r.data); delete o.meta;
+      for (const m of ['by_emp', 'quotas', 'events']) if (o[m] && typeof o[m] === 'object') o[m] = Object.fromEntries(Object.entries(o[m]).filter(([k]) => g.emps.has(k)));
+      data.by_store = data.by_store || {}; data.by_store[code] = o;
+    }
+  }
 }
 function dutyDo(d, action, b) {
   const MGR = '門市營運系統';

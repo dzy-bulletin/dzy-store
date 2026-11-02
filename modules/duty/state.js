@@ -32,7 +32,8 @@ export async function callAll(op, body) {
   return r;
 }
 // 每一列自己的店（全部門市時列上有 store）：休息帶與假別額度各用各的店
-export const leaveFor = store => (S.all ? (S.leaveBy[store] || null) : S.leave);
+// 單一門市也可能有別家的列（總部那組直接列在央廚打卡的人，2026-11-02）：列上有 store 就用那家的
+export const leaveFor = store => (S.all ? (S.leaveBy[store] || null) : store ? (S.leaveBy[store] || null) : S.leave);
 export const rowKey = r => (r && r.store ? r.store + '|' : '') + String(r && r.emp_id);
 // 某店讀不到的提示條（全部門市時，其他店照常顯示）
 export function failedStores(el, failed, retry) {
@@ -55,7 +56,8 @@ export async function call(action, body) {
   try {
     const k = S.key, st = S.asStore;
     const r = await api('POST', '/m/duty/' + action, st ? Object.assign({}, body || {}, { asStore: st }) : (body || {}));
-    if (r && r.meta && S.key === k && S.asStore === st) S.meta = r.meta;   // 管理者已經換店／換登入：上一家店晚到的回應不寫進來（2026-10-12 Codex 審查）
+    if (r && r.meta && S.key === k && S.asStore === st) S.meta = r.meta;
+    if (r && Array.isArray(r.home_stores) && S.key === k) for (const x of r.home_stores) if (x.ok && x.meta) S.metaBy[x.store] = x.meta;   // 總部那組併進來的別家：休息帶各用各的   // 管理者已經換店／換登入：上一家店晚到的回應不寫進來（2026-10-12 Codex 審查）
     return r;
   } catch (e) {
     if (e.code === 'FORBIDDEN' && /核定通行碼/.test(e.message)) { try { sessionStorage.removeItem(FLAG); } catch (x) {} if (S.rerender) S.rerender(); }
@@ -82,7 +84,7 @@ export function refreshReqBadge() {
   (S.all ? callAll('mgr_req_pending') : call('mgr_req_pending')).then(r => { if (S.key === k) setReqBadge(reqTodo(r && r.items).length); }, () => {});
 }
 
-export const brk = store => { const m = (S.all && store && S.metaBy[store]) || S.meta; return { start: m.breakStart, end: m.breakEnd }; };
+export const brk = store => { const m = (store && S.metaBy[store]) || S.meta; return { start: m.breakStart, end: m.breakEnd }; };
 
 // 小工具：建元素（文字一律用 textContent，不拼 innerHTML）
 export function h(tag, cls, text, attrs) {
@@ -130,7 +132,13 @@ export function loadLeave() {
   if (!S.leaveP) {
     const k = S.key, st = S.asStore;
     const same = () => S.key === k && S.asStore === st;                   // 管理者換店後，上一家店的假別不能套到新店
-    const p = call('payroll_leave_options').then(r => { if (same() && S.leaveP === p) { S.leave = r && Array.isArray(r.types) ? r : null; if (!S.leave) S.leaveP = null; } return same() ? S.leave : null; },
+    const p = call('payroll_leave_options').then(r => {
+      if (same() && S.leaveP === p) {
+        S.leave = r && Array.isArray(r.types) ? r : null; if (!S.leave) S.leaveP = null;
+        const by = {}; for (const [c, v] of Object.entries((r && r.by_store) || {})) if (v && Array.isArray(v.types)) by[c] = v;
+        S.leaveBy = by;                                                   // 總部那組併進來的別家（by_store）
+      }
+      return same() ? S.leave : null; },
       () => { if (same() && S.leaveP === p) S.leaveP = null; return null; });
     S.leaveP = p;
   }

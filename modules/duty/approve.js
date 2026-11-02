@@ -20,13 +20,13 @@ export function renderApprove(ctx) {
 
   // ---------- 本月待核定提醒（manager.html:1604–1745）：沒有待核定＝整塊不畫 ----------
   function loadPending() {
-    (S.all ? callAll('mgr_pending_approvals') : call('mgr_pending_approvals')).then(r => { if (!live()) return; S.pend = Array.isArray(r.items) ? r.items : []; S.pendFailed = S.all ? (r.failed || []) : []; drawPending(); },
+    (S.all ? callAll('mgr_pending_approvals') : call('mgr_pending_approvals')).then(r => { if (!live()) return; S.pend = Array.isArray(r.items) ? r.items : []; S.pendFailed = r.failed || []; drawPending(); },
       e => { if (live()) failBar(pendEl, '本月待核定提醒', e, loadPending); });
   }
   function drawPending() {
     pendEl.innerHTML = '';
     const items = S.pend || [];
-    if (S.all) failedStores(pendEl, S.pendFailed, loadPending);
+    failedStores(pendEl, S.pendFailed, loadPending);
     if (!items.length) return;
     const groups = [], by = {};
     items.forEach(it => { if (!by[it.date]) { by[it.date] = { date: it.date, names: [] }; groups.push(by[it.date]); } by[it.date].names.push(it); });
@@ -83,7 +83,7 @@ export function renderApprove(ctx) {
     const body = dateOverride ? { date: dateOverride } : {};
     dayRead(body).then(r => {
       if (tok !== S.dayTok || !live()) return;
-      const failed = S.all ? (r.failed || []) : [];
+      const failed = r.failed || [];      // 全部門市，或總部那組併進來的別家讀不到
       if (!S.all) S.elsewhere = Array.isArray(r.elsewhere) ? r.elsewhere : [];      // 捷徑卡（歸屬這組、在別家打卡的人）不隨日期變，快取的日子沿用
       if (cacheable(r.date) && !failed.length) S.dayCache[r.date] = r.employees;
       drawDay(r.date, r.employees, failed); prefetch(r.date);
@@ -132,6 +132,7 @@ export function renderApprove(ctx) {
     call('mgr_req_day', { date }).then(res => {
       if (tok !== S.dayTok || S.date !== date || !live() || !res || !res.by_emp) return;
       put('', res.by_emp);
+      Object.keys(res.by_store || {}).forEach(st => put(st, res.by_store[st] && res.by_store[st].by_emp));      // 總部那組併進來的別家
     }, () => {});
   }
 
@@ -149,7 +150,7 @@ export function renderApprove(ctx) {
 
 function renderEmployees(box, date, employees, failed, retry) {
   box.innerHTML = '';
-  if (S.all) failedStores(box, failed, retry);
+  failedStores(box, failed, retry);
   if (!S.all && S.elsewhere && S.elsewhere.length) box.append(elsewhereCards(S.elsewhere));
   if (!employees || !employees.length) { box.append(h('div', 'card du-center', failed && failed.length ? '讀得到的門市這天沒有任何同仁打卡紀錄。' : '這天沒有任何同仁打卡紀錄。')); return; }
   const pendingCount = employees.filter(e => !e.approved).length;

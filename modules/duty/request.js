@@ -18,7 +18,7 @@ export function renderRequest(ctx) {
       const items = reqTodo(r.items);
       const mine = (Array.isArray(r.items) ? r.items : []).filter(it => it && it.self === true);      // 店長本人自己送的：送上層審核中，放最下面、不算數字（2026-10-29 Eason 4A）
       setReqBadge(items.length);
-      if (S.all) failedStores(box, r.failed, load);           // 全部門市：讀不到的店標出來，其他店照常審
+      failedStores(box, r.failed, load);           // 全部門市，或總部那組併進來的別家：讀不到的店標出來，其他照常審           // 全部門市：讀不到的店標出來，其他店照常審
       const mineCard = () => {
         if (!mine.length) return null;
         const c = h('div', 'du-rq-mine');
