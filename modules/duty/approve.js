@@ -79,6 +79,7 @@ export function renderApprove(ctx) {
     loadDayNow(dateOverride, tok, gate);
   }
   function loadDayNow(dateOverride, tok, gate) {
+    unStale();                     // 上一次的「先顯示上次」還沒換掉就換日期：先解除
     const wait = gate ? gate.then(() => null, () => null) : Promise.resolve(null);
     if (dateOverride && S.dayCache[dateOverride]) {
       wait.then(() => { if (tok === S.dayTok && live()) { drawDay(dateOverride, S.dayCache[dateOverride], []); prefetch(dateOverride); } });
@@ -96,26 +97,28 @@ export function renderApprove(ctx) {
     const body = dateOverride ? { date: dateOverride } : {};
     Promise.all([dayRead(body), wait]).then(([r]) => {
       if (tok !== S.dayTok || !live()) return;
-      box.classList.remove('du-stale');
-      const failed = S.all ? (r.failed || []) : [];
+      unStale();
+      const failed = r.failed || [];          // 單一門市也可能有：總部那組併進來的別家讀不到（不快取、顯示提示）
       if (!S.all) S.elsewhere = Array.isArray(r.elsewhere) ? r.elsewhere : [];      // 捷徑卡（歸屬這組、在別家打卡的人）不隨日期變，快取的日子沿用
       if (!failed.length) { if (cacheable(r.date)) S.dayCache[r.date] = r.employees; else S.recent[r.date] = r.employees; }
       drawDay(r.date, r.employees, failed); prefetch(r.date);
     }, e => {
       if (tok !== S.dayTok || !live()) return;
-      box.classList.remove('du-stale');
+      unStale();
       box.innerHTML = ''; const c = h('div', 'card'); box.append(c);
       failBar(c, '這天的名單', e, () => loadDay(dateOverride));
     });
   }
+  function unStale() { box.classList.remove('du-stale'); box.inert = false; box.removeAttribute('aria-busy'); }
   function markStale() {
-    box.classList.add('du-stale');
+    box.classList.add('du-stale'); box.inert = true; box.setAttribute('aria-busy', 'true');   // inert：鍵盤也按不到（2026-11-02 審查）
     box.prepend(h('div', 'du-stale-note', '先顯示上次看到的資料，正在更新…', { id: 'duStale' }));
   }
   function drawDay(date, employees, failed, quick) {
     S.date = date; dateIn.value = date;
+    const focus = S.focusEmp;
     renderEmployees(box, date, employees, failed, () => { loadPending(); loadDay(date); });
-    if (quick) return;             // 先秀上次的資料：申請、班表等新資料到了再一起套
+    if (quick) { S.focusEmp = focus; return; }   // 先秀上次的資料：申請、班表等新資料到了再一起套；待核定提醒點的那位留給新資料打開
     applyDayRequests(date);
     applyDayPlan(date);
   }

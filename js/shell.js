@@ -295,6 +295,7 @@ async function viewAdmin(s, tab, tok) {
 let SSO_ERR = '';        // 個人登入失敗的白話訊息（登入頁／嵌入等待畫面顯示）
 let PENDING = null;      // 多店要選時：{ select_token, stores }（只放記憶體，不進任何儲存）
 let SSO_BUSY = false;
+let UI_READY = Promise.resolve();   // boot() 讀外觀設定那一次（runTicket 畫面前要等它）
 const TICKET_RE = /^[0-9a-f]{64}$/;
 
 // 網址帶 #sso= 就讀走並「立刻」用 replaceState 清掉（券不留在網址列、歷史紀錄）。回 ticket、'' 表示格式不對、null 表示網址沒有券
@@ -313,8 +314,8 @@ async function runTicket(ticket, fromParent) {
   if (SSO_BUSY) return;
   SSO_BUSY = true; SSO_ERR = '';
   try {
-    let r = await ssoRedeem(ticket);
     const old = getSession();
+    let r = await ssoRedeem(ticket, { only: ONLY || undefined, prefer: fromParent && old ? old.code : undefined });
     if (r.select_token) {
       const list = onlyStores(r.stores);
       if (!list.length) throw new Error(`你的帳號目前沒有可以使用${ONLY_LABEL[ONLY]}的門市，請洽店長或總部`);
@@ -329,7 +330,7 @@ async function runTicket(ticket, fromParent) {
   } catch (e) {
     if (getSession() && fromParent) console.error('嵌入重新握手失敗：' + e.message);   // 已有登入就不打擾，使用者繼續用目前的
     else SSO_ERR = e.message;
-  } finally { SSO_BUSY = false; render(); }
+  } finally { SSO_BUSY = false; await UI_READY; render(); }      // 外觀設定還沒到就先等（握手跟讀外觀同時進行）
 }
 async function onHash() {
   const t = takeTicketFromHash();
@@ -513,10 +514,11 @@ export async function render() {
 async function boot() {
   if (MOCK) { const db = document.getElementById('demoBar'); db.textContent = '示範模式：資料只存在這個瀏覽器，不會送到真的系統'; db.hidden = false; document.body.classList.add('has-demo'); }
   initAuth(() => { location.hash = '#/'; if (EMBED) sendReady(); render(); }, () => render());      // 嵌入時登入過期 → 再對 parent 要一張新券
-  await loadUi();
+  // 外觀設定、身分重查、跟管理系統要入場券三件事同時進行（2026-11-02：原本一件做完才做下一件，每件都要等一趟網路）
+  UI_READY = loadUi();
   window.addEventListener('hashchange', onHash);
   if (EMBED) installEmbed();
-  await refreshMe();
+  await Promise.all([UI_READY, refreshMe()]);
   const t = takeTicketFromHash();                                  // 從管理系統帶券回來：先兌換再畫第一個畫面
   if (t === null) return render();
   if (t) await runTicket(t, false); else { SSO_ERR = '入場券格式不正確，請重新用管理系統帳號登入'; render(); }

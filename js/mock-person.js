@@ -131,6 +131,10 @@ export function publicRoute(db, method, p, b, eff, log) {
     const stores = storesOf(db, per, eff);
     if (!stores.length) return fail('FORBIDDEN', '你的帳號目前沒有可以進入的門市，請洽店長或總部');
     if (stores.length === 1) { log(stores[0].code, 'login', 'sso', true, '', per.name); return ok(sessionBody(db, per, stores[0].code, eff, newSession(db, per, stores[0].code))); }
+    const list = b.only === 'duty' ? stores.filter(x => x.duty !== false) : stores;          // 照伺服器 sso.js：only／prefer 直接發 session
+    const prefer = typeof b.prefer === 'string' ? b.prefer.trim().toUpperCase() : '';
+    const pick = prefer && list.some(x => x.code === prefer) ? prefer : list.length === 1 ? list[0].code : '';
+    if (pick) { log(pick, 'login', 'sso', true, '', per.name); return ok(sessionBody(db, per, pick, eff, newSession(db, per, pick))); }
     const st = hex(32); db.selects[st] = { sub: per.sub, exp: Date.now() + 5 * 60e3 };
     return ok({ select_token: st, stores });
   }

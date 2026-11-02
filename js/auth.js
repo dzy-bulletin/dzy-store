@@ -35,7 +35,7 @@ export async function login(code, password) {
   return d;
 }
 // 個人登入：兌換入場券（回 {select_token, stores} 表示多店要選；否則直接是登入結果）、選店、換店
-export const ssoRedeem = ticket => api('POST', '/sso', { ticket });
+export const ssoRedeem = (ticket, opt) => api('POST', '/sso', Object.assign({ ticket }, opt || {}));   // opt：{only, prefer}（伺服器能直接選店就少一趟 /sso/select）
 export const ssoSelect = (selectToken, store) => api('POST', '/sso/select', { select_token: selectToken, store });
 export const ssoSwitch = store => api('POST', '/sso/switch', { store });
 export const isPerson = s => !!(s && s.person);
@@ -56,7 +56,7 @@ export async function adoptResult(d, keepSame) {
   const same = !!(old && old.person && d.person && old.person.sub === d.person.sub);
   if (keepSame && same && old.code === d.code) {
     setSession(toSession(d));
-    if (old.token && old.token !== d.token) { try { await api('POST', '/logout', {}, old.token); } catch (e) {} }
+    if (old.token && old.token !== d.token) api('POST', '/logout', {}, old.token).catch(() => {});   // 不等它：舊 token 登出不影響畫面（2026-11-02 少等一趟）
     return { session: getSession(), kept: true };
   }
   if (old && old.token && old.token !== d.token) {
