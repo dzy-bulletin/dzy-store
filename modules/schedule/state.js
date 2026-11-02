@@ -1,4 +1,4 @@
-// 自動排班：前端狀態與呼叫。每次修改後整包重讀（伺服器回來的就是最新的檢查結果與版本），不在前端自己拼。
+// 自動排班：前端狀態與呼叫。每次修改後整包重讀（伺服器回來的就是最新的檢查結果與版本；存檔回應直接附上，不用再讀一次），不在前端自己拼。
 import { api } from '../../js/api.js';
 import { periodOf, todayTaipei, shiftPeriod, parseLabel } from './period.js';
 import { LEAVES } from './rules.js';
@@ -40,8 +40,11 @@ export async function load() {
 /** 帶版本的修改：成功後重讀；別人剛改過（CONFLICT）時也重讀並提示 */
 export async function mutate(action, body) {
   try {
-    const r = await call(action, Object.assign({ period: S.period, version: S.data && S.data.meta.version }, body || {}));
-    await load();
+    const r = await call(action, Object.assign({ period: S.period, version: S.data && S.data.meta.version, withLoad: true }, body || {}));
+    if (r && r.load && r.load.meta && r.load.period === S.period) {   // 伺服器存完順便回整包班表（2026-11-02），少等一趟網路；沒附就照舊自己讀
+      S.data = r.load; delete r.load;
+      if (S.data.shifts) S.data.shifts.sort(byShiftName);
+    } else await load();
     return r;
   } catch (e) {
     if (e.code === 'CONFLICT' || e.code === 'LOCKED') { try { await load(); } catch (e2) { /* 留原畫面 */ } }

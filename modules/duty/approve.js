@@ -71,31 +71,51 @@ export function renderApprove(ctx) {
     })();
   }
   const dayRead = body => (S.all ? callAll('mgr_day', typeof body === 'string' ? { date: body } : body) : call('mgr_day', typeof body === 'string' ? { date: body } : body));
-  function loadDay(dateOverride) {
+  // gate＝要等它到了才畫卡片的東西（假別額度）：跟名單同時抓，不再先抓完額度才去抓名單（2026-11-02 Eason：考勤每點一下都要等很久）
+  function loadDay(dateOverride, gate) {
     const tok = ++S.dayTok;
     // 假別額度被清掉（核定過請假）時先重抓，再畫名單：不然新卡片拿不到額度，額度與期限的硬擋整批失效（2026-10-12 Codex 審查）
-    if (S.leaveStale) { S.leaveStale = false; const go = () => { if (tok === S.dayTok && live()) loadDayNow(dateOverride, tok); }; loadLeave().then(go, go); return; }
-    loadDayNow(dateOverride, tok);
+    if (S.leaveStale) { S.leaveStale = false; gate = loadLeave(); }
+    loadDayNow(dateOverride, tok, gate);
   }
-  function loadDayNow(dateOverride, tok) {
-    if (dateOverride && S.dayCache[dateOverride]) { drawDay(dateOverride, S.dayCache[dateOverride], []); prefetch(dateOverride); return; }
-    box.innerHTML = '<div class="card du-center" id="duLoading">載入中…</div>';
+  function loadDayNow(dateOverride, tok, gate) {
+    const wait = gate ? gate.then(() => null, () => null) : Promise.resolve(null);
+    if (dateOverride && S.dayCache[dateOverride]) {
+      wait.then(() => { if (tok === S.dayTok && live()) { drawDay(dateOverride, S.dayCache[dateOverride], []); prefetch(dateOverride); } });
+      return;
+    }
+    const want = dateOverride || C.taipeiToday();
+    // 那天已核准的申請跟名單同時抓（原本等名單回來才抓）
+    const reqBody = { date: want };
+    S.reqPre = { date: want, all: S.all, p: S.all ? callAll('mgr_req_day', reqBody) : call('mgr_req_day', reqBody) };
+    S.reqPre.p.catch(() => {});
+    // 今天、昨天不快取（跨夜班），但上次看到的先秀出來、灰掉不能按，新的到了再換上（2026-11-02）
+    const stale = !gate && S.recent[want];
+    if (stale) { drawDay(want, stale, [], true); markStale(); }
+    else box.innerHTML = '<div class="card du-center" id="duLoading">載入中…</div>';
     const body = dateOverride ? { date: dateOverride } : {};
-    dayRead(body).then(r => {
+    Promise.all([dayRead(body), wait]).then(([r]) => {
       if (tok !== S.dayTok || !live()) return;
-      const failed = r.failed || [];      // 全部門市，或總部那組併進來的別家讀不到
+      box.classList.remove('du-stale');
+      const failed = S.all ? (r.failed || []) : [];
       if (!S.all) S.elsewhere = Array.isArray(r.elsewhere) ? r.elsewhere : [];      // 捷徑卡（歸屬這組、在別家打卡的人）不隨日期變，快取的日子沿用
-      if (cacheable(r.date) && !failed.length) S.dayCache[r.date] = r.employees;
+      if (!failed.length) { if (cacheable(r.date)) S.dayCache[r.date] = r.employees; else S.recent[r.date] = r.employees; }
       drawDay(r.date, r.employees, failed); prefetch(r.date);
     }, e => {
       if (tok !== S.dayTok || !live()) return;
+      box.classList.remove('du-stale');
       box.innerHTML = ''; const c = h('div', 'card'); box.append(c);
       failBar(c, '這天的名單', e, () => loadDay(dateOverride));
     });
   }
-  function drawDay(date, employees, failed) {
+  function markStale() {
+    box.classList.add('du-stale');
+    box.prepend(h('div', 'du-stale-note', '先顯示上次看到的資料，正在更新…', { id: 'duStale' }));
+  }
+  function drawDay(date, employees, failed, quick) {
     S.date = date; dateIn.value = date;
     renderEmployees(box, date, employees, failed, () => { loadPending(); loadDay(date); });
+    if (quick) return;             // 先秀上次的資料：申請、班表等新資料到了再一起套
     applyDayRequests(date);
     applyDayPlan(date);
   }
@@ -122,14 +142,16 @@ export function renderApprove(ctx) {
       const card = [].filter.call(box.querySelectorAll('.du-card'), c => c.dataset.empId === key)[0];
       if (card && card.__applyReq) card.__applyReq(byEmp[id]);
     });
+    const pre = S.reqPre && S.reqPre.date === date && S.reqPre.all === S.all ? S.reqPre.p : null;   // 跟名單同時送出的那一次
+    S.reqPre = null;
     if (S.all) {          // 全部門市：by_store[店].by_emp，各店的 emp_id 分開對（同號員編不會對錯人）
-      callAll('mgr_req_day', { date }).then(res => {
+      (pre || callAll('mgr_req_day', { date })).then(res => {
         if (tok !== S.dayTok || S.date !== date || !live() || !res || !res.by_store) return;
         Object.keys(res.by_store).forEach(st => put(st, res.by_store[st] && res.by_store[st].by_emp));
       }, () => {});
       return;
     }
-    call('mgr_req_day', { date }).then(res => {
+    (pre || call('mgr_req_day', { date })).then(res => {
       if (tok !== S.dayTok || S.date !== date || !live() || !res || !res.by_emp) return;
       put('', res.by_emp);
       Object.keys(res.by_store || {}).forEach(st => put(st, res.by_store[st] && res.by_store[st].by_emp));      // 總部那組併進來的別家
@@ -143,9 +165,8 @@ export function renderApprove(ctx) {
 
   if (S.pend) drawPending();
   loadPending();
-  // 假別清單與額度要在畫員工卡之前到（原頁也是先 loadLeaveOptions 再 loadDay）；失敗不擋人，退回內建清單
-  if (S.leave) loadDay(S.date);
-  else { box.innerHTML = '<div class="card du-center" id="duLoading">載入中…</div>'; loadLeave().then(() => { if (live()) loadDay(S.date); }); }
+  // 假別清單與額度要在畫員工卡之前到（原頁也是先 loadLeaveOptions 再 loadDay；2026-11-02 起兩個同時抓、都到了才畫）；失敗不擋人，退回內建清單
+  loadDay(S.date, S.leave ? null : loadLeave());
 }
 
 function renderEmployees(box, date, employees, failed, retry) {
