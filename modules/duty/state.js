@@ -54,7 +54,7 @@ export function setStore(code, name) {
 // 呼叫 /m/duty/<action>；回應裡的 meta（店別與休息帶）順手記下。核定通行碼失效（後台重設、換了登入）就退回輸入畫面。
 // 讀取類動作（其他動作都算寫入）：寫入後把「上次看到的名單」丟掉，下次一定等新資料（剛核定完不能先秀核定前的樣子）
 const READS = new Set(['all', 'mgr_day', 'mgr_req_day', 'mgr_req_pending', 'mgr_pending_approvals', 'mgr_roster', 'mgr_pending_devices', 'mgr_notices',
-  'mgr_line_binds', 'mgr_qr_token', 'payroll_leave_options', 'payroll_annual_left', 'line_hub_attach_get', 'admin_stores']);
+  'mgr_line_binds', 'mgr_qr_token', 'payroll_leave_options', 'payroll_annual_left', 'line_hub_attach_get', 'admin_stores', 'mgr_req_month']);
 export async function call(action, body) {
   if (!READS.has(action)) { S.recent = {}; S.reqPre = null; }
   try {

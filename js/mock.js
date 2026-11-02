@@ -532,10 +532,13 @@ function dutyStore(code) {
       roster: [{ emp_id: 'E01', name: '王小明', active: true, created_by: '', removed_at: '', removed_by: '' }, { emp_id: 'E21', name: '周小芳', active: true, created_by: '', removed_at: '', removed_by: '' }],
       reqs: [{ id: 'R1', created_at: at(-1, '20:10'), emp_id: 'E21', name: '周小芳', kind: 'ot', date: taipeiDay(-1), leave_type: '', start: '19:00', end: '21:00', hours: 2, miss_type: '', reason: '盤點加班', attach_id: '', status: 'pending' }] };
   }
+  if (!db.duty2[code].month) db.duty2[code].month = clone(((E2E().duty || {}).month || {})[code] || demoMonth(2));     // 申請單彙整（mgr_req_month）的整月資料
   return db.duty2[code];
 }
 function withFake(code, fn) { const prev = curFake; curFake = code && code !== 'TEST1' ? DUTY2_FAKE : null; try { return fn(); } finally { curFake = prev; } }
-const ALL_OPS = { mgr_day: 'employees', mgr_pending_approvals: 'items', mgr_req_pending: 'items', mgr_req_day: null, payroll_leave_options: null };
+const ALL_OPS = { mgr_day: 'employees', mgr_pending_approvals: 'items', mgr_req_pending: 'items', mgr_req_day: null, payroll_leave_options: null, mgr_req_month: 'items' };
+// 合併時要併的清單（mgr_req_month 有兩份：申請 items、核定 leaves）
+const listsOfOp = op => (op === 'mgr_req_month' ? ['items', 'leaves'] : ALL_OPS[op] ? [ALL_OPS[op]] : []);
 // 支援標示（對照 server/proxy/duty.js filterFor 的 support_from，2026-10-26）：示範人物的 support＝{門市代號: {員編: 原單位名稱}}，只在個人登入時加
 const SUPPORT_LISTS = { mgr_day: 'employees', mgr_pending_approvals: 'items', mgr_req_pending: 'items', mgr_roster: 'roster' };
 // 個人例外的歸屬（對照 home_tag，2026-11-01）：示範人物的 homeTag＝{門市代號: {員編: 標示}}；elsewhere＝{門市代號: [捷徑卡]}（只在單一門市的核定工時）
@@ -551,20 +554,22 @@ function dutyAll(b, s) {
   const stores = per ? PM.attStoresOf(db, per) : [];
   if (stores.length < 2) return fail('FORBIDDEN', '你可核定的門市不到兩家，請直接用單一門市');
   if (!Object.prototype.hasOwnProperty.call(ALL_OPS, b.op)) return fail('BAD_INPUT', '這個動作不支援全部門市');
-  const list = ALL_OPS[b.op], out = { stores: [], failed: [] };
-  if (list) out[list] = []; else out.by_store = {};
+  const list = ALL_OPS[b.op], lists = listsOfOp(b.op), out = { stores: [], failed: [] };
+  if (list) lists.forEach(l => { out[l] = []; }); else out.by_store = {};
+  if (b.op === 'mgr_req_month') out.unmatched = 0;
   for (const st of stores) {
     const d = dutyStore(st.code);
     d.calls[b.op] = (d.calls[b.op] || 0) + 1;
     if ((db.dutyDown || []).includes(st.code)) { out.failed.push({ store: st.code, storeName: st.name, message: '打卡系統暫時沒有回應，請稍後再試' }); out.stores.push({ store: st.code, storeName: st.name, ok: false }); continue; }
-    const r = withFake(st.code, () => dutyDo(d, b.op, b.date !== undefined ? { date: b.date } : {}));
+    const r = withFake(st.code, () => dutyDo(d, b.op, b.date !== undefined ? { date: b.date } : b.ym !== undefined ? { ym: b.ym } : {}));
     if (r.ok) markSupport(per, st.code, b.op, r.data);
+    if (r.ok && b.op === 'mgr_req_month') { monthFilter(per, st.code, r.data); out.unmatched += r.data.unmatched; if (out.ym === undefined) out.ym = r.data.ym; }
     if (r.ok && b.op === 'mgr_req_pending' && Array.isArray(d.selfEmps) && d.selfEmps.length) r.data.items = r.data.items.map(it => (d.selfEmps.includes(String(it.emp_id)) ? { ...it, self: true } : it));
     if (!r.ok) { out.failed.push({ store: st.code, storeName: st.name, message: r.message }); out.stores.push({ store: st.code, storeName: st.name, ok: false }); continue; }
     out.stores.push({ store: st.code, storeName: st.name, ok: true, meta: { clockStore: st.code, label: st.name, breakStart: d.brk[0], breakEnd: d.brk[1] } });
     if (b.op === 'mgr_day' && out.date === undefined) out.date = r.data.date;
     if (b.op === 'mgr_pending_approvals') { if (out.ym === undefined) { out.ym = r.data.ym; out.today = r.data.today; } }
-    if (list) r.data[list].forEach(it => out[list].push({ ...it, store: st.code, storeName: st.name })); else { const o = { ...r.data }; delete o.meta; out.by_store[st.code] = o; }
+    if (list) lists.forEach(l => r.data[l].forEach(it => out[l].push({ ...it, store: st.code, storeName: st.name }))); else { const o = { ...r.data }; delete o.meta; out.by_store[st.code] = o; }
   }
   if (out.failed.length === stores.length) return fail('UPSTREAM', '打卡系統暫時沒有回應，請稍後再試');
   return ok(out);
@@ -588,6 +593,7 @@ function dutyDb() {
     DEMO_PLAN_STAFF.forEach(([id, name]) => { if (!db.duty.roster.some(r => r.emp_id === id)) db.duty.roster.push({ emp_id: id, name, active: true, created_by: '', removed_at: '', removed_by: '' }); });
     if (!db.duty.reqs.some(r => r.id === 'R5')) db.duty.reqs.push(planOtReq());
   }
+  if (!db.duty.month) db.duty.month = clone(((E || {}).month || {}).TEST1 || demoMonth(1));     // 申請單彙整（mgr_req_month）：整月申請＋核定的示範（e2e 用 __E2E_DATA.duty.month.TEST1 換掉）
   return db.duty;
 }
 // 加班請假／忘打卡申請的示範資料（對照 ~/mala-clock-in apps-script/Requests.gs）：請假附圖片、加班附 PDF、忘打卡的打卡被擋且定位誤差很大
@@ -622,6 +628,61 @@ function reqSummary(r) {     // Requests.gs reqSummary_
 const reqPublic = r => ({ id: r.id, created_at: r.created_at, emp_id: r.emp_id, name: r.name, kind: r.kind, date: r.date, leave_type: r.leave_type || '', start: r.start || '', end: r.end || '',
   hours: r.hours ?? null, miss_type: r.miss_type || '', reason: r.reason || '', has_attach: !!r.attach_id, status: r.status, decided_at: r.decided_at || '', decided_by: r.decided_by || '',
   reject_reason: r.reject_reason || '', summary: reqSummary(r), ...(r.upper ? { upper: true } : {}) });
+// mgr_req_month 每筆申請的形狀（型別寫死，同打卡端 spec §2）
+const reqMonthPublic = r => ({ id: String(r.id), emp_id: String(r.emp_id), name: r.name, kind: r.kind, date: r.date, leave_type: r.leave_type || '', start: r.start || '', end: r.end || '',
+  hours: r.hours == null || r.hours === '' ? null : Number(r.hours), miss_type: r.miss_type || '', reason: r.reason || '', has_attach: !!r.attach_id, status: r.status,
+  created_at: r.created_at || '', decided_at: r.decided_at || '', decided_by: r.decided_by || '', reject_reason: r.reject_reason || '', voided_at: r.voided_at || '', voided_by: r.voided_by || '',
+  void_reason: r.void_reason || '', summary: reqSummary(r), upper: r.upper === true, upper_kind: r.upper_kind || '' });
+const ymNext = ymd => { const y = +ymd.slice(0, 4), m = +ymd.slice(5, 7); return m === 12 ? (y + 1) + '-01' : y + '-' + String(m + 1).padStart(2, '0'); };
+// 申請單彙整的分資料集權限（對照 server/proxy/duty.js monthFilter；示範人物 monthKeys＝{門市代號: {req:[員編], hours:[員編]}}，沒設＝全部看得到；reqOnly＝沒有核定工時名單）
+//   已核准申請：申請或工時名單有他；其他狀態：申請名單有他；核定結果：工時名單有他；姓名對不到（emp_id 空）：只有店長、人資主管、管理員。門市帳號登入不過濾
+function monthFilter(per, code, data) {
+  if (!per || !data) return;
+  const k = (per.monthKeys || {})[code] || {};
+  const reqL = Array.isArray(k.req) ? k.req : null, hrsL = per.reqOnly ? [] : Array.isArray(k.hours) ? k.hours : null;
+  const inR = e => !reqL || reqL.includes(e), inH = e => !hrsL || hrsL.includes(e);
+  const unit = Object.keys(db.unitMap || {}).find(u => db.unitMap[u] === code);
+  const blankOk = !!(per.admin || per.hr_head || (unit && (per.units_managed || []).includes(unit)) || ((db.accounts[code] || {}).managers || []).includes(per.sub));
+  data.items = data.items.filter(it => (it.status === 'approved' ? inR(it.emp_id) || inH(it.emp_id) : inR(it.emp_id)));
+  data.leaves = data.leaves.filter(x => (x.emp_id === '' ? blankOk : inH(x.emp_id)));
+  data.unmatched = data.leaves.filter(x => x.emp_id === '').length;
+}
+// 申請單彙整的內建示範（沒有 e2e 資料時）：上個月放齊各種對帳情況，本月放幾筆。which＝1（示範店）／2（第二家）
+function demoMonth(which) {
+  const t = taipeiDay(), y = +t.slice(0, 4), mo = +t.slice(5, 7);
+  const pm = mo === 1 ? (y - 1) + '-12' : y + '-' + String(mo - 1).padStart(2, '0'), cm = t.slice(0, 7);
+  const last = new Date(Date.UTC(+pm.slice(0, 4), +pm.slice(5, 7), 0)).getUTCDate();
+  const D = (ym, d) => ym + '-' + String(d).padStart(2, '0'), at = (date, hm) => date + 'T' + hm + ':00+08:00';
+  const MGR = '門市營運系統';
+  let n = 0;
+  const R = (emp, name, kind, date, o) => Object.assign({ id: 'M' + which + '-' + (++n), created_at: at(date, '08:' + String(10 + n).padStart(2, '0')), emp_id: emp, name, kind, date, leave_type: kind === 'trip' ? '出差' : '', start: '', end: '', hours: 8,
+    miss_type: '', reason: '', attach_id: '', status: 'approved', decided_at: at(date, '12:00'), decided_by: MGR }, o);
+  const L = (emp, name, date, type, hours) => ({ id: 'L|' + date + '|' + name.replace(/\s/g, '') + '|' + type, emp_id: emp, name, date, type, hours });
+  if (which === 2) {
+    return { reqs: [R('E21', '周小芳', 'ot', D(pm, 6), { start: '19:00', end: '21:00', hours: 2, reason: '盤點加班' }), R('E21', '周小芳', 'leave', D(pm, 12), { leave_type: '事假', hours: 4, start: '13:00', end: '17:00', reason: '家裡有事' }),
+      R('E01', '王小明', 'trip', D(pm, 20), { hours: 8, reason: '地點：墨竹亭金山店；事由：支援開店' })],
+      leaves: [L('E21', '周小芳', D(pm, 12), '事假', 4), L('E01', '王小明', D(pm, 20), '出差', 8)] };
+  }
+  return {
+    reqs: [
+      R('E01', '王小明', 'leave', D(pm, 3), { leave_type: '事假', reason: '家裡有事', attach_id: 'att-demo-1' }),
+      R('E02', '李小華', 'leave', D(pm, 5), { leave_type: '病假', start: '09:00', end: '13:00', hours: 4, reason: '看醫生（上午）', attach_id: 'att-demo-2' }),
+      R('E02', '李小華', 'leave', D(pm, 5), { leave_type: '病假', start: '14:00', end: '18:00', hours: 4, reason: '看醫生（下午）' }),
+      R('E03', '陳大文', 'leave', D(pm, 8), { leave_type: '特休假', hours: 8, reason: '出國' }),
+      R('E01', '王小明', 'leave', D(pm, 10), { leave_type: '事假', status: 'voided', voided_at: at(D(pm, 11), '10:00'), voided_by: MGR, void_reason: '同仁改上班' }),
+      R('E04', '林小美', 'trip', D(pm, 12), { hours: 4, start: '13:00', end: '17:00', reason: '地點：台中央廚；事由：教育訓練' }),
+      R('E03', '陳大文', 'ot', D(pm, 14), { start: '18:00', end: '20:00', hours: 2, reason: '晚上客人多' }),
+      R('E01', '王小明', 'ot', D(pm, 15), { start: '18:00', end: '19:30', hours: 1.5, reason: '補貨', status: 'rejected', reject_reason: '當天沒有加班需要' }),
+      R('E04', '林小美', 'miss', D(pm, 16), { start: '09:00', end: '', miss_type: 'in', hours: null, reason: '手機沒電' }),
+      R('E02', '李小華', 'leave', D(pm, 18), { leave_type: '事假', hours: 8, reason: '搬家', status: 'pending', decided_at: '', decided_by: '' }),
+      R('E03', '陳大文', 'miss', D(pm, 19), { end: '18:00', miss_type: 'out', hours: null, reason: '忘記按', status: 'cancelled', decided_at: '', decided_by: '' }),
+      R('E01', '王小明', 'ot', D(pm, last), { start: '22:00', end: '02:00', hours: 4, reason: '月底盤點（跨夜）' }),
+      R('E01', '王小明', 'ot', D(cm, 2), { start: '18:00', end: '20:00', hours: 2, reason: '備料' }),
+    ],
+    leaves: [L('E01', '王小明', D(pm, 3), '事假', 8), L('E02', '李小華', D(pm, 5), '病假', 6), L('E01', '王小明', D(pm, 10), '事假', 8), L('E04', '林小美', D(pm, 12), '出差', 4),
+      L('E03', '陳大文', D(pm, 22), '事假', 3), L('', '王 小名', D(pm, 25), '事假', 2)],
+  };
+}
 // 示範附件：圖片用 canvas 畫一張「示範附件」；PDF 給一小段 PDF 檔頭（只是讓下載連結出得來）
 function mockAttach(id) {
   if (/pdf/.test(id)) return { mime: 'application/pdf', data: btoa('%PDF-1.4\n% mock attachment ' + id + '\n%%EOF\n') };
@@ -676,6 +737,8 @@ function duty(action, me, s, b) {
   if (fault && fault.once) d.faults.splice(fi, 1);
   if (fault && fault.mode === 'timeout') return fail('TIMEOUT', '打卡系統回應太久，請稍後再試');
   if (fault && fault.mode === 'down') return fail('UPSTREAM', '打卡系統暫時沒有回應，請稍後再試');
+  if (fault && fault.mode === 'unknown') return fail('NOT_FOUND', '找不到這個功能');     // 舊營運系統（還沒更新到這個動作）
+  if (fault && fault.mode === 'clock_old') return fail('UPSTREAM', '這家店的打卡系統還沒更新到這個功能，請聯絡管理者。');
   const ms = markSelf(d, action, b);
   if (ms && ms.deny) return ms.deny;
   const r = tgt ? withFake(tgt, () => dutyDo(d, action, b)) : dutyDo(d, action, b);
@@ -686,6 +749,7 @@ function duty(action, me, s, b) {
   if (r.ok && me.person) {
     const per = PM && PM.personaOf(db, s.sub);
     markSupport(per, tgt || s.code, action, r.data);
+    if (action === 'mgr_req_month') monthFilter(per, tgt || s.code, r.data);
     // 總部那組直接列（對照 server/proxy/duty.js mergeHome，2026-11-02）：per.elsewhere[本店]＝歸屬這組、在別家打卡的人 → 單一門市讀取把他們那家的資料併進來
     const els = !tgt && Object.prototype.hasOwnProperty.call(ALL_OPS, action) && per && per.elsewhere && per.elsewhere[s.code];
     if (Array.isArray(els) && els.length) mockMergeHome(per, action, b, r.data, els);
@@ -694,18 +758,20 @@ function duty(action, me, s, b) {
   return r;
 }
 function mockMergeHome(per, action, b, data, els) {
-  const list = ALL_OPS[action], groups = new Map();
+  const list = ALL_OPS[action], lists = listsOfOp(action), groups = new Map();
   for (const x of els) { if (!groups.has(x.store)) groups.set(x.store, { name: x.storeName, emps: new Set() }); groups.get(x.store).emps.add(String(x.emp_id)); }
   data.home_stores = []; data.failed = [];
   for (const [code, g] of groups) {
     if ((db.dutyDown || []).includes(code)) { data.failed.push({ store: code, storeName: g.name, message: '打卡系統暫時沒有回應，請稍後再試' }); data.home_stores.push({ store: code, storeName: g.name, ok: false }); continue; }
     const d = dutyStore(code);
     const sub = {}; if (b.date !== undefined || data.date) sub.date = data.date || b.date;
+    if (b.ym !== undefined) sub.ym = b.ym;
     const r = withFake(code, () => dutyDo(d, action, sub));
+    if (r.ok && action === 'mgr_req_month') monthFilter(per, code, r.data);
     if (!r.ok) { data.failed.push({ store: code, storeName: g.name, message: r.message || '暫時讀不到' }); data.home_stores.push({ store: code, storeName: g.name, ok: false }); continue; }
     markSupport(per, code, action, r.data);
     data.home_stores.push({ store: code, storeName: g.name, ok: true, meta: { clockStore: code, label: g.name, breakStart: d.brk[0], breakEnd: d.brk[1] } });
-    if (list) for (const it of r.data[list] || []) { if (it && g.emps.has(String(it.emp_id))) data[list].push({ ...it, store: code, storeName: g.name }); }
+    if (list) for (const l of lists) for (const it of r.data[l] || []) { if (it && g.emps.has(String(it.emp_id))) data[l].push({ ...it, store: code, storeName: g.name }); }
     else {
       const o = Object.assign({}, r.data); delete o.meta;
       for (const m of ['by_emp', 'quotas', 'events']) if (o[m] && typeof o[m] === 'object') o[m] = Object.fromEntries(Object.entries(o[m]).filter(([k]) => g.emps.has(k)));
@@ -812,6 +878,21 @@ function dutyDo(d, action, b) {
     const by_emp = {};
     d.reqs.filter(r => r.date === date && r.status === 'approved').forEach(r => { const o = reqPublic(r); o.attach_id = r.attach_id || ''; (by_emp[r.emp_id] = by_emp[r.emp_id] || []).push(o); });   // attach_id：核定工時看證明（2026-10-30）
     return ok({ date, by_emp });
+  }
+  if (action === 'mgr_req_month') {             // 申請單彙整（docs/req-print/spec.md §2）：整月申請（全部狀態，跨夜單只看開始日）＋核定結果（leave 分頁）
+    const ym = String(b.ym || '');
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(ym) || ym > ymNext(today)) return fail('BAD_INPUT', '月份格式不對，或超過下個月');
+    const m = d.month || { reqs: [], leaves: [] };
+    const items = d.reqs.concat(m.reqs || []).filter(r => String(r.date).slice(0, 7) === ym)
+      .sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : x.created_at < y.created_at ? -1 : 1)).map(reqMonthPublic);
+    const leaves = (m.leaves || []).filter(x => String(x.date).slice(0, 7) === ym).map(x => ({ id: String(x.id), emp_id: String(x.emp_id || ''), name: x.name, date: x.date, type: x.type, hours: Number(x.hours) || 0 }));
+    for (const k of Object.keys(d.leave)) {        // 核定工時送出寫的假別（同 leave 分頁）
+      const date = k.slice(0, 10), emp = k.slice(10);
+      if (date.slice(0, 7) !== ym) continue;
+      const nm = (d.roster.find(r => r.emp_id === emp) || {}).name || emp;
+      leaveList(d.leave[k]).forEach(x => leaves.push({ id: 'L|' + date + '|' + String(nm).replace(/\s/g, '') + '|' + x.type, emp_id: emp, name: nm, date, type: x.type, hours: x.hours === '' ? 0 : Number(x.hours) }));
+    }
+    return ok({ ym, items, leaves, unmatched: leaves.filter(x => !x.emp_id).length });
   }
   if (action === 'mgr_req_void') {               // Requests.gs handleMgrReqVoid_（2026-10-26）：只能作廢已核准的、理由必填
     const reason = String(b.reason ?? '').trim().slice(0, 100);
