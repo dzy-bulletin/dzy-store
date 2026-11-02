@@ -59,18 +59,32 @@ function shiftCardHtml(D) {
   const desc = (s) => `${esc(shiftCode(s.name))} ${esc(timeText(s))}（${s.segs ? '分段班' : `休息 ${s.break_min} 分`}）`;
   const list = D.shifts.length ? `<div class="sc-dlist" id="hqShList">${D.shifts.map((s) => `<div class="row hq-shrow"><span class="grow">${desc(s)}</span><button type="button" class="hq-shEdit btn sm ghost" data-id="${esc(s.id)}">修改</button></div>`).join('')}</div>`
     : '<p class="hint">還沒有班別，同仁沒有班可以選。</p>';
-  const v = ed || { name: '', start: '09:00', end: '18:00', break_min: 60 };
-  const segLock = ed && ed.segs ? ' disabled' : '';      // 分段班的時段在門市排班「班別與設定」頁改，這裡只改名稱
+  // 中間休息不打卡（2026-11-02 Eason：財務 09–18、14–15 吃飯不打卡）＝填「中間休息」就存成兩段（09:00–14:00＋15:00–18:00），核定頁才會預填兩段、空檔不算工時。
+  // 兩段、各段沒有另外的休息＝這裡改得到；三段或段內另有休息的分段班仍只能改名稱（在門市排班「班別與設定」頁改時段）
+  const gapOf = (s) => (s && s.segs && s.segs.length === 2 && s.segs.every((x) => !Number(x.break_min)) ? { start: s.segs[0].start, end: s.segs[1].end, gs: s.segs[0].end, ge: s.segs[1].start } : null);
+  const g = gapOf(ed);
+  const v = g ? Object.assign({}, ed, { start: g.start, end: g.end, break_min: 0 }) : ed || { name: '', start: '09:00', end: '18:00', break_min: 60 };
+  const segLock = ed && ed.segs && !g ? ' disabled' : '';
   return `<div class="card" id="hqShifts"><h2>總部班別</h2>${list}
-      ${ed ? `<p class="hint mt" id="hqShEditing">修改「${esc(ed.name)}」${ed.segs ? '（分段班：這裡只能改名稱）' : ''}；已經用在已鎖定班表的班別不能改時間，請新增一個班別。</p>` : '<p class="hint mt">總部班別是大家共用的一份清單，新增、修改都會留紀錄。</p>'}
+      ${ed ? `<p class="hint mt" id="hqShEditing">修改「${esc(ed.name)}」${segLock ? '（分段班：這裡只能改名稱）' : ''}；已經用在已鎖定班表的班別不能改時間，請新增一個班別。</p>` : '<p class="hint mt">總部班別是大家共用的一份清單，新增、修改都會留紀錄。</p>'}
       <div class="row"><input id="hqShName" placeholder="班別名稱" maxlength="12" aria-label="班別名稱" style="width:110px" value="${esc(v.name)}"><input id="hqShStart" type="time" value="${esc(v.start)}" aria-label="上班時間"${segLock}><input id="hqShEnd" type="time" value="${esc(v.end)}" aria-label="下班時間"${segLock}>
-      <input id="hqShBrk" type="number" min="0" max="600" value="${Number(v.break_min) || 0}" aria-label="休息分鐘" style="width:70px"${segLock}>${ed ? '<button type="button" class="btn sm" id="hqShSave">儲存修改</button><button type="button" class="btn sm ghost" id="hqShCancel">取消</button>' : '<button type="button" class="btn sm" id="hqShAdd">新增班別</button>'}</div></div>`;
+      <input id="hqShBrk" type="number" min="0" max="600" value="${Number(v.break_min) || 0}" aria-label="休息分鐘" style="width:70px"${segLock || (g ? ' disabled' : '')}>${ed ? '<button type="button" class="btn sm" id="hqShSave">儲存修改</button><button type="button" class="btn sm ghost" id="hqShCancel">取消</button>' : '<button type="button" class="btn sm" id="hqShAdd">新增班別</button>'}</div>
+      ${segLock ? '' : `<div class="row mt"><span>中間休息不打卡（選填）</span><input id="hqShGapS" type="time" value="${esc(g ? g.gs : '')}" aria-label="中間休息開始"><span>到</span><input id="hqShGapE" type="time" value="${esc(g ? g.ge : '')}" aria-label="中間休息結束"></div>
+      <p class="hint">填了＝存成兩段（例：09:00–14:00＋15:00–18:00），核定頁預填兩段、中間不算工時，休息分鐘不用填。</p>`}</div>`;
 }
 function bindShiftCard(ctx, el, D) {
   const q = (s) => el.querySelector(s);
   if (!q('#hqShifts')) return;
   const done = async (okMsg) => { H.shEdit = null; try { await reload(); say(okMsg); } catch (e) { say(e.message, true); } ctx.rerender(); };
-  const form = () => ({ name: q('#hqShName').value.trim(), start: q('#hqShStart').value, end: q('#hqShEnd').value, break_min: Number(q('#hqShBrk').value) || 0 });
+  const form = () => {
+    const f = { name: q('#hqShName').value.trim(), start: q('#hqShStart').value, end: q('#hqShEnd').value, break_min: Number(q('#hqShBrk').value) || 0 };
+    const gs = q('#hqShGapS') ? q('#hqShGapS').value : '', ge = q('#hqShGapE') ? q('#hqShGapE').value : '';
+    if (!gs && !ge) return f;
+    if (!gs || !ge) throw new Error('中間休息的開始、結束都要填（不分兩段就兩格都清空）');
+    return Object.assign(f, { break_min: 0, segs: [{ start: f.start, end: gs, break_min: 0 }, { start: ge, end: f.end, break_min: 0 }] });
+  };
+  const syncBrk = () => { if (q('#hqShGapS') && !q('#hqShStart').disabled) q('#hqShBrk').disabled = !!(q('#hqShGapS').value || q('#hqShGapE').value); };
+  ['#hqShGapS', '#hqShGapE'].forEach((id) => { if (q(id)) q(id).oninput = syncBrk; });
   el.querySelectorAll('button.hq-shEdit').forEach((b) => { b.onclick = () => { H.shEdit = b.dataset.id; say(''); ctx.rerender(); }; });
   if (q('#hqShCancel')) q('#hqShCancel').onclick = () => { H.shEdit = null; say(''); ctx.rerender(); };
   if (q('#hqShAdd')) q('#hqShAdd').onclick = () => busy(q('#hqShAdd'), async () => {
@@ -79,10 +93,12 @@ function bindShiftCard(ctx, el, D) {
   if (q('#hqShSave')) q('#hqShSave').onclick = () => busy(q('#hqShSave'), async () => {
     const cur = D.shifts.find((s) => s.id === H.shEdit);
     if (!cur) { H.shEdit = null; return ctx.rerender(); }
-    // 只送畫面上改得到的欄位，顏色、排序原樣送回（不送會被清成預設）；分段班照原本的分段（伺服器由分段推算上下班）
-    const f = form();
-    const shift = Object.assign({ id: cur.id, color: cur.color || '', sort: cur.sort || 0, active: true }, cur.segs ? { name: f.name, start: cur.start, end: cur.end, break_min: cur.break_min, segs: cur.segs } : f);
-    try { await call('saveShift', { shift }); await done(`已修改班別「${f.name}」`); } catch (e) { say(e.message, true); ctx.rerender(); }
+    // 只送畫面上改得到的欄位，顏色、排序原樣送回（不送會被清成預設）；只能改名稱的分段班照原本的分段（伺服器由分段推算上下班）
+    try {
+      const f = form();
+      const shift = Object.assign({ id: cur.id, color: cur.color || '', sort: cur.sort || 0, active: true }, q('#hqShStart').disabled ? { name: f.name, start: cur.start, end: cur.end, break_min: cur.break_min, segs: cur.segs } : f);
+      await call('saveShift', { shift }); await done(`已修改班別「${f.name}」`);
+    } catch (e) { say(e.message, true); ctx.rerender(); }
   });
 }
 
