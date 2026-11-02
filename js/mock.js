@@ -621,6 +621,7 @@ function reqSummary(r) {     // Requests.gs reqSummary_
     return md + ' 出差' + (r.start ? ' ' + r.start + '–' + r.end : ' 整天') + ' ' + Number(r.hours) + ' 小時' + (place ? '（地點：' + place + '）' : '');
   }
   const parts = [];
+  if (r.miss_type === 'break') return md + ' 忘打卡補登（中間休息：下班 ' + r.end + '、回來上班 ' + r.start + '）';
   if (r.miss_type === 'in' || r.miss_type === 'both') parts.push('上班 ' + r.start);
   if (r.miss_type === 'out' || r.miss_type === 'both') parts.push('下班 ' + r.end);
   return md + ' 忘打卡補登（' + parts.join('、') + '）';

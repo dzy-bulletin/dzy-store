@@ -190,7 +190,14 @@ export function round15(hm, up) {
 // 忘打卡預填：當天打卡段（取整）＋申請補的那一邊；只有上下班都齊的段才成為時段列。回 [{start,end}]（空陣列＝不動畫面）
 export function missPeriods(segments, r) {
   const segs = (segments || []).map(x => ({ in: round15(x.in, true), out: round15(x.out, false) }));
-  if (r.miss_type === 'both') segs.push({ in: r.start, out: r.end });
+  if (r.miss_type === 'break') {
+    // 中間休息沒打卡（2026-11-02，打卡系統 mala-clock-in 同名功能）：end＝休息開始、start＝回來上班；
+    // 把含休息開始的那段拆兩段：上班卡～休息開始、回來上班～下班卡（同 manager.html）
+    const rel = (hm, base) => (hhmmToMin(hm) - hhmmToMin(base) + 1440) % 1440;
+    let bi = -1;
+    segs.forEach((x, i) => { if (x.in && rel(r.end, x.in) > 0 && (!x.out || rel(r.end, x.in) < rel(x.out, x.in))) bi = i; });
+    if (bi >= 0) segs.splice(bi, 1, { in: segs[bi].in, out: r.end }, { in: r.start, out: segs[bi].out });
+  } else if (r.miss_type === 'both') segs.push({ in: r.start, out: r.end });
   else if (r.miss_type === 'out') { const o = segs.filter(x => x.in && !x.out).pop(); if (o) o.out = r.end; else segs.push({ in: null, out: r.end }); }
   else { const q = segs.filter(x => x.out && !x.in)[0]; if (q) q.in = r.start; else segs.push({ in: r.start, out: null }); }
   return segs.filter(x => x.in && x.out).map(x => ({ start: x.in, end: x.out }));
