@@ -225,6 +225,7 @@ select{min-height:44px}
 .du-punch{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
 .du-mini{flex:none;font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;background:#eef1f4;color:#556}
 .du-mini.pending{background:#fff4d6;color:#8a6100}
+.du-mini.absent{background:#eef1f4;color:#8a8f98}
 .du-mini.normal{background:#e6f3ea;color:var(--ok)}
 .du-mini.warn{background:#fdf0ee;color:var(--bad)}
 .du-chev{flex:none;color:var(--muted);font-size:11px;transition:transform .15s}

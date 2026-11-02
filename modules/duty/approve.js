@@ -177,9 +177,8 @@ function renderEmployees(box, date, employees, failed, retry) {
   failedStores(box, failed, retry);
   if (!S.all && S.elsewhere && S.elsewhere.length) box.append(elsewhereCards(S.elsewhere));
   if (!employees || !employees.length) { box.append(h('div', 'card du-center', failed && failed.length ? '讀得到的門市這天沒有任何同仁打卡紀錄。' : '這天沒有任何同仁打卡紀錄。')); return; }
-  const pendingCount = employees.filter(e => !e.approved).length;
   const bar = h('div', 'du-listbar');
-  const count = h('span', 'du-count'); count.innerHTML = '共 ' + employees.length + ' 人・待核定 <b>' + pendingCount + '</b> 人';
+  const count = h('span', 'du-count');
   const toggleAll = h('button', 'btn sm ghost', '全部展開', { type: 'button', id: 'duToggleAll' });
   let allOpen = false;
   toggleAll.onclick = () => { allOpen = !allOpen; toggleAll.textContent = allOpen ? '全部收合' : '全部展開'; list.querySelectorAll('.du-card').forEach(c => c.__setExpanded(allOpen)); };
@@ -187,6 +186,9 @@ function renderEmployees(box, date, employees, failed, retry) {
   const list = h('div', 'du-list');
   box.append(bar, list);
   employees.forEach(emp => list.append(buildCard(emp, date)));
+  // 待核定人數不算「未出勤」（沒打卡也沒排上班）的人（2026-11-02 Eason）
+  const pendingLeft = () => [].filter.call(list.querySelectorAll('.du-card'), c => c.__pending && !c.__absent).length;
+  count.innerHTML = '共 ' + employees.length + ' 人・待核定 <b>' + pendingLeft() + '</b> 人';
 
   // 一次只展開一位：開著「下一位要核定的人」，核完自動收起來翻到下一位（manager.html:1520–1560）
   const nextPending = () => [].filter.call(list.querySelectorAll('.du-card'), c => c.__pending && c.__hasPunch)[0];
@@ -200,8 +202,7 @@ function renderEmployees(box, date, employees, failed, retry) {
     if (e.target && e.target.__setExpanded) e.target.__setExpanded(false);
     const nx = openNext();
     if (nx && nx.scrollIntoView) nx.scrollIntoView({ block: 'center' });
-    const left = [].filter.call(list.querySelectorAll('.du-card'), c => c.__pending).length;
-    count.innerHTML = '共 ' + employees.length + ' 人・待核定 <b>' + left + '</b> 人';
+    count.innerHTML = '共 ' + employees.length + ' 人・待核定 <b>' + pendingLeft() + '</b> 人';
   });
 }
 
@@ -245,6 +246,8 @@ function buildCard(emp, date) {
   card.__segments = emp.segments || [];
   const pv = C.planPrefill(emp, emp.plan, br);                        // 那天的班表優先，沒排班才用個人預設時間（2026-10-29 Eason 選 A）
   const offDay = pv.mode === 'off';
+  const hasPunch = !!(emp.segments && emp.segments.length) || emp.attempts > 0;
+  const absent = !hasPunch && pv.mode !== 'plan';                     // 沒打卡、也沒排上班（例假／休息／沒班表）：右側寫「未出勤」不寫「待核定」（2026-11-02 Eason）
 
   // ---- 頭部（收合時看得到：姓名、班別、打卡摘要、精簡徽章）----
   const nameEl = h('div', 'du-name', emp.name);
@@ -281,7 +284,8 @@ function buildCard(emp, date) {
       badge.className = 'du-badge ' + C.badgeClass(approved.status_text);
       badge.textContent = '已核定 ' + approved.approved_hours + ' 小時・' + approved.status_text + C.leavesSuffix(leaves) + '（' + approved.manager_name + '）';
       mini.className = 'du-mini ' + C.badgeClass(approved.status_text); mini.textContent = '✓ ' + approved.approved_hours + ' 小時';
-    } else { badge.className = 'du-badge pending'; badge.textContent = '待核定'; mini.className = 'du-mini pending'; mini.textContent = '待核定'; }
+    } else if (absent) { badge.className = 'du-badge absent'; badge.textContent = '未出勤'; mini.className = 'du-mini absent'; mini.textContent = '未出勤'; }
+    else { badge.className = 'du-badge pending'; badge.textContent = '待核定'; mini.className = 'du-mini pending'; mini.textContent = '待核定'; }
     badge.hidden = !approved;                       // 未核定時頭部的精簡徽章已寫「待核定」，不必再重複一顆
   }
   body.append(badge);
@@ -467,7 +471,8 @@ function buildCard(emp, date) {
   setBadge(emp.approved, initLeaves);
   setExpanded(false);
   card.__pending = !emp.approved;
-  card.__hasPunch = !!(emp.segments && emp.segments.length) || emp.attempts > 0;
+  card.__hasPunch = hasPunch;
+  card.__absent = absent;
   card.__setExpanded = setExpanded;
 
   // ---- 已核准的申請（2026-10-09，照 manager.html __applyReq）：還沒核定就幫主管預填；已核定過不覆蓋，改給一顆「依申請重新填」。
