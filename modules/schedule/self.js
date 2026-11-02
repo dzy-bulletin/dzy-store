@@ -130,7 +130,7 @@ function drawSelf(ctx) {
   const acts = `<div class="row sc-acts">
     ${st === 'draft' || st === 'rejected' ? '<button type="button" class="btn" id="hqSubmit">送出給主管核准</button>' : ''}
     ${st === 'submitted' ? '<button type="button" class="btn ghost" id="hqWithdraw">撤回（改完再送）</button>' : ''}
-    ${st === 'draft' || st === 'rejected' ? `<span class="grow"></span><label class="sc-chk" for="hqFillShift">快速填入空白的天：平日</label><select id="hqFillShift" aria-label="平日上哪個班">${shifts.map((s) => `<option value="${esc(s.id)}">${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('')}</select><button type="button" class="btn ghost" id="hqFill">填入（週六休息日、週日例假）</button>` : ''}
+    ${(st === 'draft' || st === 'rejected') && shifts.length ? `<span class="grow"></span><label class="sc-chk" for="hqFillShift">快速填入空白（或沒選班別）的天：平日</label><select id="hqFillShift" aria-label="平日上哪個班">${shifts.map((s) => `<option value="${esc(s.id)}">${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('')}</select><button type="button" class="btn ghost" id="hqFill">填入（週六休息日、週日例假）</button>` : ''}
   </div>`;
   const hint = st === 'submitted' ? '<p class="hint mt">已送出，主管核准前不能修改；要改請先撤回。</p>' : st === 'approved' ? '<p class="hint mt">已核准。之後再改的日子會標「待核准」，主管核准後才生效。</p>' : '<p class="hint mt">點日期選班別或休假；每週至少 1 天例假＋1 天休息日，填完整個月才能送出。</p>';
   const empPick = D.me.length > 1 ? `<div class="row mt"><label class="sc-chk" for="hqEmpSel">員編</label><select id="hqEmpSel" aria-label="要看哪個員編的班表">${D.me.map((x) => `<option value="${esc(x)}" ${x === emp ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div>` : '';
@@ -162,8 +162,10 @@ function drawSelf(ctx) {
   if (q('#hqCellOk')) q('#hqCellOk').onclick = () => busy(q('#hqCellOk'), () => save({ [H.sel]: cellOfValue(q('#hqCellSel').value) }, st === 'approved' ? '已記下，等主管核准後生效' : '已存'));
   if (q('#hqFill')) q('#hqFill').onclick = () => busy(q('#hqFill'), async () => {
     const sid = q('#hqFillShift').value, out = {};
+    if (!sid) { say('還沒有總部班別，請先請主管新增班別', true); return ctx.rerender(); }
     for (const d of monthDates(H.month)) {
-      if ((cells[d] || {}).t) continue;
+      const c = cells[d] || {};
+      if (c.t && !(c.t === 'W' && !c.s)) continue;      // 上班但沒選班別（2026-11-02 張淳：總部還沒建班別時按填入，平日全是沒班別的「班」）也當空白補上
       const w = weekday(d);
       out[d] = w === 6 ? { t: 'H' } : w === 0 ? { t: 'R' } : { t: 'W', s: sid };
     }
