@@ -241,7 +241,8 @@ export function planPrefill(emp, plan, br) {
   const brTag = (a, b) => (shiftCoversBreak(br, a, b) ? '・休' + breakHoursText(br) + 'h' : '');
   if (planSegsOk(plan)) {
     const segs = plan.segs.map(s => ({ start: s.start, end: s.end }));
-    const text = '班表 ' + segs.map(s => s.start + '–' + s.end).join('／') + (segs.length === 1 ? brTag(segs[0].start, segs[0].end) : '');
+    const text = '班表 ' + (plan.shift_name ? plan.shift_name + ' ' : '') + segs.map(s => s.start + '–' + s.end).join('／') + (segs.length === 1 ? brTag(segs[0].start, segs[0].end) : '')
+      + (plan.station ? '・' + plan.station : '');      // 班別名稱、工作站從下面比對那行搬上來（2026-11-03 Eason：班表不要顯示兩次）
     return { mode: 'plan', text, initial: keep || (segs.length === 1 ? one(segs[0].start, segs[0].end) : segs), offPunch: false };
   }
   if (plan && plan.work === false) {

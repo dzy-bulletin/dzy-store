@@ -19,7 +19,7 @@ export function comparePlan(plan, segments, opts) {
   const times = multi ? plan.segs.map((x) => x[0] + '–' + x[1]).join('、') : `${plan.start}–${plan.end}`;
   const text = `班表：${plan.shift_name || ''} ${times}`.replace('：  ', '：') + (plan.station ? '・' + plan.station : '');   // 有排工作站別時後面加「・炒鍋」
   if (!punched) return { text, flags: past ? ['有排班沒打卡'] : [] };
-  if (multi) return { text, flags: compareSegs(plan.segs, segs, past) };
+  if (multi) return { text, flags: compareSegs(plan.segs, segs, past, opts && opts.brk) };
   const flags = [];
   const s = toMin(plan.start);
   let e = toMin(plan.end);
@@ -38,8 +38,8 @@ export function comparePlan(plan, segments, opts) {
 
 const CN = ['一', '二', '三'];
 /** 分段班：每段各比一次上班、下班（Eason 2026-10-27 第 3 題）。打卡段跟班表哪一段重疊就算那一段的；
- *  一筆打卡跨過兩段（中間沒打下班卡）提醒「中間沒打卡離開」。 */
-function compareSegs(planSegs, punches, past) {
+ *  一筆打卡跨過兩段（中間沒打下班卡）提醒「中間沒打卡離開」；中間空檔剛好是這家店的不打卡休息時段（brk，央廚 12–13、總部 14–15）就不提醒（2026-11-03 Eason）。 */
+function compareSegs(planSegs, punches, past, brk) {
   // 班表各段換成分鐘（照先後，跨夜往後加一天）
   const P = []; let prev = -1;
   for (const [a0, b0] of planSegs) {
@@ -63,6 +63,7 @@ function compareSegs(planSegs, punches, past) {
   });
   for (let k = 0; k + 1 < P.length; k++) {
     const gapA = P[k][1], gapB = P[k + 1][0];
+    if (brk && toMin(brk.start) !== null && gapA % 1440 === toMin(brk.start) && gapB % 1440 === toMin(brk.end)) continue;
     if (I.some(([i, o]) => i !== null && o !== null && i < gapA && o > gapB)) flags.push(`第${CN[k]}段和第${CN[k + 1]}段中間沒打卡離開`);
   }
   return flags;

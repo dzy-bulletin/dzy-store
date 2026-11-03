@@ -131,7 +131,7 @@ export function renderApprove(ctx) {
       if (tok !== S.dayTok || S.date !== date || !live() || !res || !res.plan) return;
       const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);   // 台北今天
       box.querySelectorAll('.du-card').forEach(card => {
-        const r = comparePlan(res.plan[card.dataset.empId], card.__segments, { past: date <= today });
+        const r = comparePlan(res.plan[card.dataset.empId], card.__segments, { past: date <= today, brk: brk(card.dataset.store) });
         if (!r || !card.__showPlan) return;
         card.__showPlan(r);
       });
@@ -266,7 +266,9 @@ function buildCard(emp, date) {
   head.append(hmain, mini, chev);
   card.__showPlan = (r) => {                                  // 自動排班比對（只提示）
     const old = hmain.querySelector('.du-plan'); if (old) old.remove();
-    const line = h('div', 'du-plan', r.text);
+    const top = pv.mode === 'plan' || pv.mode === 'off';      // 名字旁已經寫了班表 → 這行只留提醒、沒提醒就不畫（2026-11-03 Eason：班表不要顯示兩次）
+    if (top && !r.flags.length) return;
+    const line = h('div', 'du-plan', top ? null : r.text);
     r.flags.forEach(f => line.append(h('span', 'du-planflag', f)));
     hmain.append(line);
   };
