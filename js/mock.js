@@ -893,6 +893,8 @@ function dutyDo(d, action, b) {
       const nm = (d.roster.find(r => r.emp_id === emp) || {}).name || emp;
       leaveList(d.leave[k]).forEach(x => leaves.push({ id: 'L|' + date + '|' + String(nm).replace(/\s/g, '') + '|' + x.type, emp_id: emp, name: nm, date, type: x.type, hours: x.hours === '' ? 0 : Number(x.hours) }));
     }
+    const seenId = {};                            // 同 Requests.gs：同日同人同假別第二列起 id 加 |2、|3（2026-11-03 審查）
+    leaves.forEach(x => { seenId[x.id] = (seenId[x.id] || 0) + 1; if (seenId[x.id] > 1) x.id += '|' + seenId[x.id]; });
     return ok({ ym, items, leaves, unmatched: leaves.filter(x => !x.emp_id).length });
   }
   if (action === 'mgr_req_void') {               // Requests.gs handleMgrReqVoid_（2026-10-26）：只能作廢已核准的、理由必填

@@ -107,9 +107,10 @@ export function buildRows(data, opts) {
   }
   for (const g of groups.values()) {
     const appr = sortRows(g.reqs.filter(r => r.status === 'approved'));
-    if (appr.length) {
+    const A = r2(appr.reduce((a, r) => a + (r.reqHours || 0), 0));
+    if (A > 0) {                                                // spec §4.1：A＝核准申請時數加總 > 0 才對帳（時數 0／空白的核准單照一般申請列，不掛核定）
       if (!g.finals.length) { appr.forEach(r => { setFlag(r, 'unfinal'); r.finalText = '—'; }); continue; }
-      const A = r2(appr.reduce((a, r) => a + (r.reqHours || 0), 0)), F = r2(g.finals.reduce((a, r) => a + (r.finalHours || 0), 0));
+      const F = r2(g.finals.reduce((a, r) => a + (r.finalHours || 0), 0));
       appr.forEach((r, i) => { if (A !== F) setFlag(r, 'diff'); if (i === 0) r.finalHours = F; else r.finalText = MERGED; });
       continue;                                                 // 核定列併進申請列，不另成一列
     }

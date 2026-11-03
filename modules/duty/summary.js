@@ -265,8 +265,10 @@ const printDate = () => { const d = taipeiToday(); return d.slice(0, 4) + '/' + 
 const statusWord = () => (SM.f.status === 'all' ? '全部' : '已核准');
 
 // 依門市分節（列已照門市排序）；全部門市時每家店另起新頁
+// 全部門市：先照勾選、讀得到的門市開節（篩選後零筆的店也要有一節「這個月沒有符合的資料」，2026-11-03 審查）
 function byStore(rows) {
   const m = new Map();
+  if (S.all) for (const x of SM.storeList || []) if (!SM.f.stores || SM.f.stores.indexOf(x.code) >= 0) m.set(x.code, { name: x.name, rows: [] });
   for (const r of rows) { if (!m.has(r.store)) m.set(r.store, { name: r.storeName || storeNameOf(), rows: [] }); m.get(r.store).rows.push(r); }
   return [...m.values()];
 }
@@ -370,7 +372,7 @@ async function exportXlsx(rows, failed, btn, msg) {
     X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(miss.concat([head], body)), '明細');
     const tot = [['申請單彙整合計'], ['月份', ymLabel(SM.ym)], ['狀態篩選', statusWord()]];
     const secs = byStore(rows);
-    const block = (title, rs) => { tot.push([]); tot.push([title]); totLines(totals(rs)).forEach(x => tot.push(safe(x))); };
+    const block = (title, rs) => { tot.push([]); tot.push(safe([title])); totLines(totals(rs)).forEach(x => tot.push(safe(x))); };
     if (secs.length > 1) secs.forEach(sec => block(sec.name || '—', sec.rows));
     block(secs.length > 1 ? '全部合計' : (secs[0] ? secs[0].name : storeNameOf()) || '合計', rows);
     X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(miss.concat(tot)), '合計');
