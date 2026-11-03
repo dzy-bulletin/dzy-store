@@ -2,16 +2,18 @@
 // 檢查直接用 rules.js 的 checkSelfMonth。簡化處（真伺服器才有）：fixed 的「1 分鐘合併重送」這裡改成立刻入列；每期開始前 10 天自動產生下一期改成每次動作前補產（同伺服器 tick 的補產規則，不看 06:00）。
 // 央廚（fixed）上線就自動切換（modeFrom＝MODE_FROM，開起來就已經有班表；2026-10-27 起畫面與產生都以 T 期為單位）；沒設固定班別的人平日空白，fixedShift 設好後自動補上他從明天起的平日。
 // e2e 看發布：db.sched[<店>].pubs[<期>]＝[{seq, kind:'publish', status, payload:{cells…}}]。
-import { checkSelfMonth, comboError, employed, holName } from '../modules/schedule/rules.js';
-import { periodOf, periodNo, periodDates, periodStart, periodEnd, label, addDays, weekday, todayTaipei, parseLabel } from '../modules/schedule/period.js';
+import { checkSelfMonth, checkSelfPeriod, comboError, employed, holName } from '../modules/schedule/rules.js';
+import { periodOf, periodNo, periodDates, periodStart, periodEnd, label, addDays, diffDays, weekday, todayTaipei, parseLabel } from '../modules/schedule/period.js';
 
 const ok = (data) => ({ ok: true, data: data === undefined ? {} : data });
 const fail = (error, message) => ({ ok: false, error, message });
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
-const AUTO_BY = '自動（不需核准）';
 const monthDates = (m) => { const o = []; for (let d = m + '-01'; d.slice(0, 7) === m; d = addDays(d, 1)) o.push(d); return o; };
 const nextMonth = (m) => addDays(m + '-01', 32).slice(0, 7);
 const prevMonth = (m) => addDays(m + '-01', -1).slice(0, 7);
+// 總部自填 2026-11-03 起以期別（T01…）為單位；selfMonths 的鍵是期別
+const isP = (k) => /^T\d{2,}$/.test(k);
+const spanD = (k) => (isP(k) ? periodDates(k) : monthDates(k));
 const toCell = (c) => { const o = { t: c.day_type }; if (c.shift_id) o.s = c.shift_id; if (c.leave) o.l = c.leave; return o; };
 const sameCell = (a, b) => !!a && !!b && a.day_type === b.day_type && (a.shift_id || null) === (b.shift_id || null) && (a.leave || null) === (b.leave || null);
 const MODE_FROM = '2026-11-01';
@@ -97,14 +99,14 @@ function generate(st, span, hol) {
   return { generated, kept };
 }
 
-const periodsOfMonth = (m) => { const s = new Set(); for (const d of monthDates(m)) { const p = periodOf(d); if (p && parseLabel(p) >= 1) s.add(p); } return [...s].sort(); };
-// 發布：每個重疊的 T 期入列一筆（self 只放已核准月份的格子）
+const periodsOfMonth = (m) => { if (isP(m)) return [m]; const s = new Set(); for (const d of monthDates(m)) { const p = periodOf(d); if (p && parseLabel(p) >= 1) s.add(p); } return [...s].sort(); };
+// 發布：每個重疊的 T 期入列一筆
 export function publishPeriod(st, p) {
   const dates = periodDates(p);
   const rows = st.staff.map((e) => ({ emp_id: e.emp_id, name: e.name, cells: dates.map((d) => {
     const c = (st.days[e.emp_id] || {})[d];
     if (!c) return { t: '' };
-    if (st.mode === 'self') { const r = (st.selfMonths[e.emp_id] || {})[d.slice(0, 7)]; if (!(r && r.status === 'approved' && d >= st.modeFrom)) return { t: '' }; }
+    if (st.mode === 'self' && d < st.modeFrom) return { t: '' };      // 總部 2026-11-03 起存檔即生效：起用日以後都送
     return Object.assign(toCell(c), c.shift_id && c.station_id ? { w: c.station_id } : {});      // 站別（payload 的 w）
   }) })).filter((r) => st.mode !== 'self' || r.cells.some((c) => c.t));
   const list = st.pubs[p] = st.pubs[p] || [];
@@ -121,26 +123,21 @@ function putMonth(st, e, m, patch) {
   return n;
 }
 const holDefault = () => ({ day_type: 'L', shift_id: null, leave: '國' });
-const holDates = (m, hol) => monthDates(m).filter((d) => holName(hol, d) && weekday(d) >= 1 && weekday(d) <= 5);      // 國定假日＋補假（days＋gov.off）
+const holDates = (m, hol) => spanD(m).filter((d) => holName(hol, d) && weekday(d) >= 1 && weekday(d) <= 5);      // 國定假日＋補假（days＋gov.off）
 
 function effective(st, e, month, hol) {
-  const r = mrow(st, e, month);
   const days = {};
   const mine = st.days[e] || {};
-  for (const d of monthDates(month)) if (mine[d]) days[d] = mine[d];
-  if (r.status === 'approved') { const p = (st.pending[e] || {}); for (const d of monthDates(month)) if (p[d]) days[d] = p[d]; }
-  else for (const d of holDates(month, hol)) if (!days[d]) days[d] = holDefault();
-  for (const [m, from, to] of [[prevMonth(month), addDays(month + '-01', -7), addDays(month + '-01', -1)], [nextMonth(month), addDays(monthDates(month).slice(-1)[0], 1), addDays(monthDates(month).slice(-1)[0], 7)]]) {
-    const rr = mrow(st, e, m);
-    if (rr.status === 'approved' || rr.status === 'submitted') for (let d = from; d <= to; d = addDays(d, 1)) { if (mine[d]) days[d] = mine[d]; if (rr.status === 'approved' && (st.pending[e] || {})[d]) days[d] = st.pending[e][d]; }      // 相鄰月份核准後又改、還在等核准的變更也算
-  }
+  const ds = spanD(month), first = ds[0], last = ds[ds.length - 1];
+  for (let d = addDays(first, -13); d <= addDays(last, 7); d = addDays(d, 1)) if (mine[d]) days[d] = mine[d];
+  for (const d of holDates(month, hol)) if (!days[d]) days[d] = holDefault();
   return days;
 }
 function results(st, emps, month, hol) {
-  const staff = st.staff.filter((s) => emps.includes(s.emp_id));
+  const staff = st.staff.filter((s) => emps.includes(s.emp_id)).map((s) => (st.modeFrom && !(s.hire_date && s.hire_date > st.modeFrom) ? Object.assign({}, s, { hire_date: st.modeFrom }) : s));
   const days = {};
   for (const s of staff) days[s.emp_id] = effective(st, s.emp_id, month, hol);
-  return checkSelfMonth({ month, staff, shifts: st.shifts, days, holidays: hol, from: st.modeFrom || undefined });
+  return checkSelfPeriod({ period: month, staff, shifts: st.shifts, days, holidays: hol });
 }
 
 export function hqAction(action, me, b, db, hol, pa) {
@@ -149,7 +146,9 @@ export function hqAction(action, me, b, db, hol, pa) {
   if (!person) return fail('FORBIDDEN', '排班請用管理系統個人帳號：人資部門 → 排班管理');
   const today = todayTaipei();
   const monthArg = () => (typeof b.month === 'string' && MONTH_RE.test(b.month) ? b.month : null);
-  const month = monthArg();
+  // 總部自填：畫面送 period（T01…，2026-11-03 起四週一期）
+  if (action.startsWith('self') && (typeof b.period !== 'string' || !PERIOD_RE.test(b.period) || parseLabel(b.period) < 1)) return fail('BAD_INPUT', '期別格式不對');
+  const month = action.startsWith('self') ? b.period : monthArg();
   // 央廚：畫面送 period（T01…，2026-10-27 起），舊的 month 照樣收（同伺服器 spanArg）
   const hasPeriod = action.startsWith('fixed') && b.period !== undefined;
   if (hasPeriod && (typeof b.period !== 'string' || !PERIOD_RE.test(b.period) || parseLabel(b.period) < 1)) return fail('BAD_INPUT', '期別格式不對（要是 T01 以後）');
@@ -159,8 +158,6 @@ export function hqAction(action, me, b, db, hol, pa) {
   const shiftList = () => Object.values(st.shifts).filter((s) => s.active).map((s) => ({ id: s.id, name: s.name, start: s.start, end: s.end, break_min: s.break_min }));
   const mine = pa.selfIds || [];
   if (st.mode === 'self') for (const e of mine) if (!st.staff.some((x) => x.emp_id === e)) st.staff.push({ emp_id: e, name: person.name, hire_date: null, leave_date: null, birthday: null, phone: null, sort: st.staff.length, fixed_shift: null });      // 同 server ensureStaff：本人的員編沒有列就建
-  const canApproveEmp = (e) => (pa.approveAll || (pa.approveIds || []).includes(e)) && !mine.includes(e);
-  const isAuto = (e) => (pa.selfAuto || []).includes(e);
 
   if (action.startsWith('fixed')) {
     if (st.mode !== 'fixed') return fail('BAD_INPUT', '這家店不是央廚固定排班');
@@ -275,33 +272,33 @@ export function hqAction(action, me, b, db, hol, pa) {
     return fail('NOT_FOUND', '找不到這個功能');
   }
 
-  // ---- self ----
+  // ---- self ----（2026-11-03 起四週一期、存檔就生效，同 server schedule-hq.js）
   if (st.mode !== 'self') return fail('BAD_INPUT', '這家店不是總部自填排班');
-  const canApprove = !!(pa.approveAll || (pa.approveIds || []).length);
+  const canView = !!(pa.approveAll || (pa.approveIds || []).length);
   const window_ = () => {
-    const cur = today.slice(0, 7), lo = st.modeFrom.slice(0, 7);
-    if (month < (cur > lo ? cur : lo)) return fail('BAD_INPUT', '這個月份已經過了，不能修改');
-    if (month > nextMonth(cur)) return fail('BAD_INPUT', '只能填到下個月');
-    if (month === nextMonth(cur) && Number(today.slice(8, 10)) < 20) return fail('BAD_INPUT', '下個月的班表 20 號起才能填');
+    const n = parseLabel(month), cur = Math.max(1, periodNo(today) || 0), lo = Math.max(cur, periodNo(st.modeFrom) || 1);
+    if (n < lo) return fail('BAD_INPUT', '這一期已經過了，不能修改');
+    if (n > cur + 1) return fail('BAD_INPUT', '只能填到下一期');
+    const open = addDays(periodStart(month), -14);
+    if (n === cur + 1 && today < open) return fail('BAD_INPUT', `下一期（${month}）的班表 ${+open.slice(5, 7)}/${+open.slice(8, 10)} 起才能填`);
     return null;
   };
   if (action === 'selfLoad') {      // 班別同 server selfLoad：多帶 color、sort（班別卡修改時原樣送回）
-    if (!mine.length && !canApprove && !pa.shiftAdmin) return fail('FORBIDDEN', '你沒有這家店的排班權限');      // 同 server：總部總監沒有員編也能讀班別清單
+    if (!mine.length && !canView && !pa.shiftAdmin) return fail('FORBIDDEN', '你沒有這家店的排班權限');      // 同 server：總部總監沒有員編也能讀班別清單
     const ids = new Set(mine);
     if (pa.approveAll) st.staff.forEach((s) => ids.add(s.emp_id)); else (pa.approveIds || []).forEach((e) => ids.add(e));
     const rows = st.staff.filter((s) => ids.has(s.emp_id)).sort((a, c) => (mine.includes(c.emp_id) ? 1 : 0) - (mine.includes(a.emp_id) ? 1 : 0));
-    const dates = monthDates(month), staff = [], cells = {};
+    const dates = spanD(month), staff = [], cells = {};
     for (const s of rows) {
-      const r = mrow(st, s.emp_id, month), pend = st.pending[s.emp_id] || {};
-      const pd = dates.filter((d) => pend[d]);
-      staff.push({ emp_id: s.emp_id, name: s.name, status: r.status, version: r.version, submitted_at: r.submitted_at, decided_at: r.decided_at, decided_by: r.decided_by, reject_reason: r.reject_reason, pendingDays: pd.length });
+      const r = mrow(st, s.emp_id, month);
       const base = Object.assign({}, st.days[s.emp_id] || {});
-      if (r.status !== 'approved') for (const d of holDates(month, hol)) if (!base[d]) base[d] = holDefault();
+      for (const d of holDates(month, hol)) if (!base[d]) base[d] = holDefault();
       const out = {};
-      for (const d of dates) { const c = base[d]; if (!c && !pend[d]) continue; const o = c ? toCell(c) : { t: '' }; if (pend[d]) o.pending = toCell(pend[d]); out[d] = o; }
+      for (const d of dates) if (base[d]) out[d] = toCell(base[d]);
       cells[s.emp_id] = out;
+      staff.push({ emp_id: s.emp_id, name: s.name, version: r.version, filled: dates.filter((d) => base[d] && employed(s, d)).length, days: dates.filter((d) => employed(s, d)).length });
     }
-    return ok({ month, mode: 'self', me: mine, canApprove, shifts: Object.values(st.shifts).filter((s) => s.active).map((s) => ({ id: s.id, name: s.name, start: s.start, end: s.end, break_min: s.break_min, color: s.color || '', sort: s.sort || 0, ...(s.segs ? { segs: s.segs } : {}) })), holidays: Object.fromEntries(Object.entries(Object.assign({}, (hol.gov && hol.gov.off) || {}, hol.days)).filter(([k]) => k.slice(0, 7) === month)),
+    return ok({ period: month, from: dates[0], to: dates[dates.length - 1], curPeriod: label(Math.max(1, periodNo(today) || 0)), mode: 'self', me: mine, canView, shifts: Object.values(st.shifts).filter((s) => s.active).map((s) => ({ id: s.id, name: s.name, start: s.start, end: s.end, break_min: s.break_min, color: s.color || '', sort: s.sort || 0, ...(s.segs ? { segs: s.segs } : {}) })), holidays: Object.fromEntries(Object.entries(Object.assign({}, (hol.gov && hol.gov.off) || {}, hol.days)).filter(([k]) => k >= dates[0] && k <= dates[dates.length - 1])),
       staff, cells, results: results(st, rows.map((s) => s.emp_id), month, hol), mode_from: st.modeFrom });
   }
   const own = () => (typeof b.emp_id === 'string' && mine.includes(b.emp_id) ? null : fail('FORBIDDEN', '只能改自己的班表'));
@@ -310,11 +307,10 @@ export function hqAction(action, me, b, db, hol, pa) {
     const f = own(); if (f) return f;
     const w = window_(); if (w) return w;
     const e = b.emp_id, row = mrow(st, e, month);
-    if (row.version !== Number(b.version)) return fail('CONFLICT', '別人剛改過這個月的班表，請重新整理後再改');
-    if (row.status === 'submitted') return fail('CONFLICT', '已送出，要先撤回才能修改');
+    if (row.version !== Number(b.version)) return fail('CONFLICT', '別人剛改過這一期的班表，請重新整理後再改');
     const items = [];
     for (const d of Object.keys(b.cells || {})) {
-      if (d.slice(0, 7) !== month) return fail('BAD_INPUT', '格子的日期不在這個月');
+      if (!spanD(month).includes(d)) return fail('BAD_INPUT', '格子的日期不在這一期');
       if (d < st.modeFrom) return fail('BAD_INPUT', `${st.modeFrom} 以前的日子不在這套排班`);
       const c = b.cells[d];
       if (c && c.t === '') { items.push([d, null]); continue; }
@@ -324,64 +320,12 @@ export function hqAction(action, me, b, db, hol, pa) {
       items.push([d, cell]);
     }
     if (!items.length) return fail('BAD_INPUT', '沒有要存的格子');
-    st.days[e] = st.days[e] || {};
-    let pub = false;
-    if (row.status === 'approved' && !isAuto(e)) {
-      const pend = st.pending[e] = st.pending[e] || {};
-      for (const [d, c] of items) {
-        if (!c) return fail('BAD_INPUT', '核准後的班表不能清空，請選一種班別或假別');
-        if (sameCell(st.days[e][d], c)) delete pend[d]; else pend[d] = c;
-      }
-    } else {
-      if (row.status !== 'approved') prefill(e);
-      for (const [d, c] of items) { if (!c) delete st.days[e][d]; else putDay(st, e, d, c, 'self'); }
-      if (row.status === 'approved') pub = true;
-    }
-    const n = putMonth(st, e, month, {});
-    if (pub) publish(st, month);
+    prefill(e);
+    for (const [d, c] of items) { if (!c) delete st.days[e][d]; else putDay(st, e, d, c, 'self'); }
+    const n = putMonth(st, e, month, { status: 'approved' });
+    publish(st, month);      // 真伺服器是 1 分鐘合併重送；示範模式立刻送
     return ok({ version: n.version, results: results(st, [e], month, hol) });
   }
-  if (action === 'selfSubmit') {
-    const f = own(); if (f) return f;
-    const w = window_(); if (w) return w;
-    const e = b.emp_id, row = mrow(st, e, month);
-    if (row.version !== Number(b.version)) return fail('CONFLICT', '別人剛改過這個月的班表，請重新整理後再改');
-    if (row.status !== 'draft' && row.status !== 'rejected') return fail('CONFLICT', row.status === 'submitted' ? '已經送出了' : '這個月已經核准，修改請直接改格子');
-    prefill(e);
-    const blocks = results(st, [e], month, hol).filter((r) => r.level === 'block');
-    if (blocks.length) return fail('BAD_INPUT', `還有 ${blocks.length} 個地方不合規定，不能送出：` + blocks.slice(0, 3).map((x) => x.msg).join('；'));
-    const t = new Date().toISOString();
-    if (isAuto(e)) { const n = putMonth(st, e, month, { status: 'approved', submitted_at: t, decided_at: t, decided_by: AUTO_BY, reject_reason: null }); publish(st, month); return ok({ status: 'approved', version: n.version }); }
-    const n = putMonth(st, e, month, { status: 'submitted', submitted_at: t, reject_reason: null });
-    return ok({ status: 'submitted', version: n.version });
-  }
-  if (action === 'selfWithdraw') {
-    const f = own(); if (f) return f;
-    const e = b.emp_id, row = mrow(st, e, month);
-    if (row.version !== Number(b.version)) return fail('CONFLICT', '別人剛改過這個月的班表，請重新整理後再改');
-    if (row.status !== 'submitted') return fail('CONFLICT', '只有已送出、還沒核准的班表可以撤回');
-    const n = putMonth(st, e, month, { status: 'draft', submitted_at: null });
-    return ok({ status: 'draft', version: n.version });
-  }
-  if (action === 'selfApprove' || action === 'selfReject') {
-    const e = typeof b.emp_id === 'string' ? b.emp_id : '';
-    if (!e || !canApproveEmp(e)) return fail('FORBIDDEN', mine.includes(e) ? '不能核准自己的班表' : '你不能核准這位同仁的班表');
-    const row = mrow(st, e, month), pend = st.pending[e] || {};
-    const pd = monthDates(month).filter((d) => pend[d]);
-    if (row.version !== Number(b.version)) return fail('CONFLICT', '別人剛改過這個月的班表，請重新整理後再核准');
-    if (action === 'selfApprove') {
-      if (!(row.status === 'submitted' || (row.status === 'approved' && pd.length))) return fail('CONFLICT', '這份班表現在沒有等待核准的內容');
-      st.days[e] = st.days[e] || {};
-      for (const d of pd) { putDay(st, e, d, pend[d], 'self'); delete pend[d]; }
-      const n = putMonth(st, e, month, { status: 'approved', decided_at: new Date().toISOString(), decided_by: person.name, reject_reason: null });
-      publish(st, month);
-      return ok({ status: 'approved', version: n.version });
-    }
-    const reason = typeof b.reason === 'string' ? b.reason.trim() : '';
-    if (!reason || reason.length > 200) return fail('BAD_INPUT', '退回要寫原因（1–200 字）');
-    if (row.status === 'submitted') { const n = putMonth(st, e, month, { status: 'rejected', decided_at: new Date().toISOString(), decided_by: person.name, reject_reason: reason }); return ok({ status: 'rejected', version: n.version }); }
-    if (row.status === 'approved' && pd.length) { for (const d of pd) delete pend[d]; const n = putMonth(st, e, month, { decided_at: new Date().toISOString(), decided_by: person.name, reject_reason: reason }); return ok({ status: 'rejected', version: n.version }); }
-    return fail('CONFLICT', '這份班表現在沒有等待核准的內容');
-  }
+  if (action === 'selfSubmit' || action === 'selfWithdraw' || action === 'selfApprove' || action === 'selfReject') return fail('BAD_INPUT', '總部班表存檔就生效，不用送出或核准，請重新整理');
   return fail('NOT_FOUND', '找不到這個功能');
 }

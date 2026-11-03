@@ -3,7 +3,7 @@
 import { esc } from '../../js/ui.js';
 import { timeText, shiftCode } from './hours.js';
 import { api } from '../../js/api.js';
-import { addDays, weekday, todayTaipei } from './period.js';
+import { addDays, weekday, todayTaipei, periodNo, periodStart, label, diffDays } from './period.js';
 
 export const call = (action, body) => api('POST', '/m/schedule/' + action, body || {});
 export const WD = ['日', '一', '二', '三', '四', '五', '六'];
@@ -13,10 +13,11 @@ export const prevMonth = (m) => addDays(m + '-01', -1).slice(0, 7);
 export const mLabel = (m) => `${m.slice(0, 4)} 年 ${+m.slice(5)} 月`;
 export const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
 export const curMonth = () => todayTaipei().slice(0, 7);
-/** 總部自填的預設月份：20 號起看下個月，之前看當月（至少到起用月） */
-export function defaultSelfMonth() {
-  const t = todayTaipei();
-  return Number(t.slice(8, 10)) >= 20 ? nextMonth(t.slice(0, 7)) : t.slice(0, 7);
+/** 總部自填的預設期別（2026-11-03 起四週一期）：下一期開放填寫（開始前 SELF_OPEN 天）起看下一期，之前看本期 */
+export const SELF_OPEN = 14;
+export function defaultSelfPeriod() {
+  const t = todayTaipei(), n = Math.max(1, periodNo(t) || 0);
+  return label(diffDays(t, periodStart(label(n + 1))) <= SELF_OPEN ? n + 1 : n);
 }
 
 export const STATUS_TEXT = { draft: '草稿（還沒送出）', submitted: '已送出，等主管核准', approved: '已核准', rejected: '已退回，請修改後再送出' };
@@ -55,7 +56,7 @@ export function cellOptions(shifts, cur, withClear) {
 /** 月曆（日～六）；editable＝每格是可點的按鈕。cells: {date: {t,s?,l?,pending?}}；issue: {date: 'block'|'warn'} */
 export function calHtml(month, cells, shiftMap, holidays, opt) {
   opt = opt || {};
-  const dates = monthDates(month);
+  const dates = Array.isArray(month) ? month : monthDates(month);      // 總部自填傳一期的日期清單（四週一期）
   const lead = weekday(dates[0]);
   const all = Array(lead).fill(null).concat(dates);
   while (all.length % 7) all.push(null);

@@ -420,7 +420,7 @@ async function autoSwitch(s, code, hash) {
   catch (e) { frame(s, `<div class="card"><div class="err" id="autoSwitchErr" role="alert">${esc(e.message)}</div></div>`, '', { cur, title }); }
 }
 // 排班管理：網址／頁頂點的分頁屬於別種排班的店，但這個人在那邊沒有排班權限
-const SCHED_TAB_LABEL = { board: '門市班表', needs: '指定與需求', staff: '門市同仁', shifts: '班別與設定', self: '我的班表', approve: '部屬核准', fixed: '央廚班表', fixedstaff: '固定班別' };
+const SCHED_TAB_LABEL = { board: '門市班表', needs: '指定與需求', staff: '門市同仁', shifts: '班別與設定', self: '我的班表', approve: '部屬班表', fixed: '央廚班表', fixedstaff: '固定班別' };
 function viewSchedNoAccess(s, tab) {
   frame(s, `<div class="card"><h2>排班管理</h2><p class="hint" id="schedNoAccess">你沒有「${esc(SCHED_TAB_LABEL[tab] || '這個頁面')}」的排班權限。</p>
     <a class="btn ghost" href="#/schedule/" id="schedNoAccessBack">回到這家店的排班</a></div>`, '', { cur: '', title: '排班管理' });

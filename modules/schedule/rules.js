@@ -346,6 +346,16 @@ export function checkPeriod(ctx) {
 
 export const blocks = (results) => results.filter(r => r.level === 'block');
 
+// 總部自填排班（2026-11-03 Eason：總部同仁也照四週變形，一期 28 天，規則照門市正職）：每人當成從頭就是正職，其餘照 checkPeriod。
+// ctx：{ period, staff, shifts, days（含前 LOOKBACK 天）, holidays, monthOtMin? }；沒有人力需求、站別、指定、配對；「沒有前期出勤資料」那條不列（同仁自己填，看了只會困惑）
+export function checkSelfPeriod(ctx) {
+  const ft = [{ from_date: '0000-01-01', kind: 'ft', target_min: null, week_min: null, same_days: 0, allowed_shifts: [], allowed_shifts_hol: [], backup: 0 }];
+  const terms = {};
+  for (const st of ctx.staff) terms[st.emp_id] = ft;
+  return checkPeriod(Object.assign({ actuals: {}, demand: {}, pins: {}, pairs: [], monthOtMin: {}, stations: {}, stationNeed: {} }, ctx, { terms }))
+    .filter(r => r.code !== 'N0');
+}
+
 // ---------------------------------------------------------------------------
 // 總部自填排班／央廚固定排班：整月檢查（docs/schedule-hq/spec.md §3.3、§4）。純函式，伺服器（存檔、送出、載入）、央廚固定排班與前端共用。
 //
