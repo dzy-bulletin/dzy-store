@@ -71,7 +71,8 @@ export function calHtml(month, cells, shiftMap, holidays, opt) {
       const cls = `hq-day ${x.cls}${hol ? ' hol' : ''}${p ? ' pend' : ''}${iss ? ' i-' + iss : ''}${opt.sel === d ? ' sel' : ''}${c && c.src === 'manual' ? ' man' : ''}`;
       const inner = `<b>${+d.slice(8)}</b><span class="hq-v">${esc(x.t)}</span>${hol ? `<small>${esc(hol)}</small>` : ''}${p ? `<i class="hq-pend">待核准：${esc(p.t)}</i>` : ''}`;
       const label = `${md(d)} ${x.t || '還沒選'}${p ? '，待核准改成 ' + p.t : ''}`;
-      return `<td>${opt.editable ? `<button type="button" class="${cls}" data-date="${d}" aria-label="${esc(label)}">${inner}</button>` : `<div class="${cls}" aria-label="${esc(label)}">${inner}</div>`}</td>`;
+      const canClick = opt.editable && !(opt.lockBefore && d < opt.lockBefore) && !(opt.off && opt.off(d));      // 鎖住的日子（在別家打卡的人切換日以前、不在職）只顯示
+      return `<td>${canClick ? `<button type="button" class="${cls}" data-date="${d}" aria-label="${esc(label)}">${inner}</button>` : `<div class="${cls}" aria-label="${esc(label)}">${inner}</div>`}</td>`;
     }).join('') + '</tr>';
   }
   return `<table class="hq-cal"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;

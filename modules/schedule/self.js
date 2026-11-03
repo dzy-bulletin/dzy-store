@@ -111,6 +111,9 @@ export function renderSelf(ctx) {
   return shell(ctx, () => { if (ctx.el.isConnected) drawSelf(ctx); });
 }
 
+/** 固定規則的一格：週六休息日、週日例假、平日國定假日（含補假）國定假日假、其他平日上 sid */
+const patternCell = (d, sid) => { const w = weekday(d); return w === 6 ? { t: 'H' } : w === 0 ? { t: 'R' } : (H.data.holidays || {})[d] ? { t: 'L', l: '國' } : { t: 'W', s: sid }; };
+
 /** 這一期能不能改：本期（起用期以後）；下一期要開始前 SELF_OPEN 天起（同伺服器 selfWindow） */
 function canFill(D) {
   const n = parseLabel(H.period), cur = parseLabel(D.curPeriod || 'T01');
@@ -129,18 +132,22 @@ function drawSelf(ctx) {
     bindShiftCard(ctx, el, D);
     return;
   }
-  const shifts = D.shifts, shiftMap = Object.fromEntries(shifts.map((s) => [s.id, s]));
+  const shifts = D.shifts, shiftMap = Object.fromEntries(shifts.concat(D.extShifts || []).map((s) => [s.id, s]));
   const cells = D.cells[emp] || {};
   const editable = canFill(D);
+  // 能改的日子：在職（到職日～離職日）、起用日以後、在別家打卡的人切換日以後
+  const off = (d) => (row.hire_date && d < row.hire_date) || (row.leave_date && d > row.leave_date) || (D.mode_from && d < D.mode_from);
+  const openDay = (d) => !off(d) && !(row.lockBefore && d < row.lockBefore);
   const fillTag = `<span class="tag ${row.filled >= row.days ? 'on' : ''}" id="hqStatus">${row.filled >= row.days ? '這一期填完了' : `已填 ${row.filled}／${row.days} 天`}</span>`;
-  const acts = editable && shifts.length ? `<div class="row sc-acts"><label class="sc-chk" for="hqFillShift">快速填入空白（或沒選班別）的天：平日</label><select id="hqFillShift" aria-label="平日上哪個班">${shifts.map((s) => `<option value="${esc(s.id)}">${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('')}</select><button type="button" class="btn ghost" id="hqFill">填入（週六休息日、週日例假）</button></div>` : '';
+  const acts = editable && shifts.length ? `<div class="row sc-acts"><label class="sc-chk" for="hqFillShift">平日上</label><select id="hqFillShift" aria-label="平日上哪個班">${shifts.map((s) => `<option value="${esc(s.id)}">${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('')}</select><button type="button" class="btn ghost" id="hqFill">填入空白的天</button><button type="button" class="btn ghost" id="hqRedo">重新排這一期</button></div><p class="hint">週六休息日、週日例假、平日國定假日放假；「重新排」會把這一期整個蓋掉重填（請假保留）。</p>` : '';
   const hint = editable
     ? '<p class="hint mt">點日期選班別或休假，存了就生效，約 1 分鐘內送到 LINE。四週變形：這一期（28 天）要有 4 天例假、4 天休息日，每兩週至少 2 天例假、最多連上 12 天；不合規定的地方會在上面紅字提醒。</p>'
     : `<p class="hint mt" id="hqLocked">${parseLabel(H.period) < parseLabel(D.curPeriod || 'T01') ? '這一期已經過了，只能看不能改。' : `下一期開始前 ${SELF_OPEN} 天起才能填。`}</p>`;
   const empPick = D.me.length > 1 ? `<div class="row mt"><label class="sc-chk" for="hqEmpSel">員編</label><select id="hqEmpSel" aria-label="要看哪個員編的班表">${D.me.map((x) => `<option value="${esc(x)}" ${x === emp ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div>` : '';
-  el.innerHTML = head(D, `${row.name}・${emp}`, `${empPick}<div class="sc-state mt">${fillTag}</div>${acts}${hint}`)
+  const lockNote = row.lockBefore && periodDates(H.period)[0] < row.lockBefore ? `<p class="hint" id="hqLockNote">${md(row.lockBefore)} 以前的班在${esc(row.lockStore || '打卡的店')}，這裡只能看。</p>` : '';
+  el.innerHTML = head(D, `${row.name}・${emp}`, `${empPick}<div class="sc-state mt">${fillTag}</div>${acts}${hint}${lockNote}`)
     + resultsHtml(D.results, emp)
-    + `<div class="card hq-calcard">${calHtml(periodDates(H.period), cells, shiftMap, D.holidays, { editable, sel: H.sel, issue: issueMap(D.results, emp) })}</div>`
+    + `<div class="card hq-calcard">${calHtml(periodDates(H.period), cells, shiftMap, D.holidays, { editable, sel: H.sel, issue: issueMap(D.results, emp), off: (d) => !openDay(d) })}</div>`
     + (shiftsInSelf(ctx.session) ? shiftCardHtml(D) : '');
 
   if (H.sel && editable) {
@@ -164,14 +171,27 @@ function drawSelf(ctx) {
     const sid = q('#hqFillShift').value, out = {};
     if (!sid) { say('還沒有總部班別，請先請主管新增班別', true); return ctx.rerender(); }
     for (const d of periodDates(H.period)) {
-      if (D.mode_from && d < D.mode_from) continue;
+      if (!openDay(d)) continue;
       const c = cells[d] || {};
       if (c.t && !(c.t === 'W' && !c.s)) continue;      // 上班但沒選班別（2026-11-02 張淳：總部還沒建班別時按填入，平日全是沒班別的「班」）也當空白補上
-      const w = weekday(d);
-      out[d] = w === 6 ? { t: 'H' } : w === 0 ? { t: 'R' } : { t: 'W', s: sid };
+      out[d] = patternCell(d, sid);
     }
     if (!Object.keys(out).length) { say('沒有空白的天'); return ctx.rerender(); }
     await save(out, '已填入空白的天，約 1 分鐘內送到 LINE；檢查一下上面的提醒');
+  });
+  // 重新排這一期（2026-11-03 Eason）：整期照固定規則蓋掉重填，請假（國定假日假以外的 L）保留
+  if (q('#hqRedo')) q('#hqRedo').onclick = () => busy(q('#hqRedo'), async () => {
+    const sid = q('#hqFillShift').value, out = {};
+    if (!sid) { say('還沒有總部班別，請先請主管新增班別', true); return ctx.rerender(); }
+    if (!window.confirm(`把 ${H.period} 整期重新排成「平日 ${(shiftMap[sid] || {}).name || ''}、週六休息日、週日例假」？已排的請假會保留。`)) return;
+    for (const d of periodDates(H.period)) {
+      if (!openDay(d)) continue;
+      const c = cells[d] || {};
+      if (c.t === 'L' && c.l !== '國') continue;
+      out[d] = patternCell(d, sid);
+    }
+    if (!Object.keys(out).length) { say('這一期沒有可以重排的天'); return ctx.rerender(); }
+    await save(out, '已重新排這一期，約 1 分鐘內送到 LINE；檢查一下上面的提醒');
   });
 }
 

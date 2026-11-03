@@ -8,7 +8,8 @@ const MOVED = {
 };
 const ONLY_LABEL = { duty: '出勤核定', schedule: '排班' };
 // 考勤管理（?only=duty）的選店／換店只列有出勤核定的店（伺服器每家店帶 duty；舊版伺服器沒帶＝不過濾）。2026-10-26
-const onlyStores = list => (ONLY === 'duty' ? (list || []).filter(x => x.duty !== false) : (list || []));
+// 考勤管理／排班管理只列有那個功能的店（2026-11-03：財務同仁因收支、貨單進得去門市，排班管理卻列出門市）；舊伺服器沒帶旗標＝不過濾
+const onlyStores = list => (ONLY === 'duty' ? (list || []).filter(x => x.duty !== false) : ONLY === 'schedule' ? (list || []).filter(x => x.schedule !== false) : (list || []));
 const attLinkAttr = () => (EMBED ? 'target="_top"' : 'target="_blank" rel="noopener"');
 import { api } from './api.js';
 import { whileLeaving } from './leaving.js';

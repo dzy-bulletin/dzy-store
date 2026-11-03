@@ -296,7 +296,7 @@ export function hqAction(action, me, b, db, hol, pa) {
       const out = {};
       for (const d of dates) if (base[d]) out[d] = toCell(base[d]);
       cells[s.emp_id] = out;
-      staff.push({ emp_id: s.emp_id, name: s.name, version: r.version, filled: dates.filter((d) => base[d] && employed(s, d)).length, days: dates.filter((d) => employed(s, d)).length });
+      staff.push({ emp_id: s.emp_id, name: s.name, version: r.version, filled: dates.filter((d) => base[d] && employed(s, d)).length, days: dates.filter((d) => employed(s, d)).length, hire_date: s.hire_date || null, leave_date: s.leave_date || null });
     }
     return ok({ period: month, from: dates[0], to: dates[dates.length - 1], curPeriod: label(Math.max(1, periodNo(today) || 0)), mode: 'self', me: mine, canView, shifts: Object.values(st.shifts).filter((s) => s.active).map((s) => ({ id: s.id, name: s.name, start: s.start, end: s.end, break_min: s.break_min, color: s.color || '', sort: s.sort || 0, ...(s.segs ? { segs: s.segs } : {}) })), holidays: Object.fromEntries(Object.entries(Object.assign({}, (hol.gov && hol.gov.off) || {}, hol.days)).filter(([k]) => k >= dates[0] && k <= dates[dates.length - 1])),
       staff, cells, results: results(st, rows.map((s) => s.emp_id), month, hol), mode_from: st.modeFrom });
