@@ -429,10 +429,15 @@ export function checkSelfMonth(ctx) {
       const lack = (rs < 1 ? 1 : 0) + (hs < 1 ? 1 : 0);
       const at = wk.find((d) => d >= first && d <= last);
       if (rs < 1 && missing < lack) add('W1', 'block', e, at, `${who} ${md(wk[0])} 這週沒有例假，每週至少要 1 天例假`);
-      if (hs < 1 && missing < lack) add('W2', 'block', e, at, `${who} ${md(wk[0])} 這週沒有休息日，每週至少要 1 天休息日`);
+      const hOt = known.find((d) => d >= first && d <= last && mine[d].day_type === 'H' && mine[d].shift_id);      // 休息日排了加班：照樣不算休息日，但講清楚是哪一天
+      if (hs < 1 && missing < lack) add('W2', 'block', e, hOt || at, hOt ? `${who} ${md(hOt)} 休息日加班（要付加班費），${md(wk[0])} 這週就沒有休息日了` : `${who} ${md(wk[0])} 這週沒有休息日，每週至少要 1 天休息日`);
       const mins = known.reduce((a, d) => a + (mine[d].shift_id && shifts[mine[d].shift_id] ? shiftMinutes(shifts[mine[d].shift_id]) : 0), 0);
       if (mins > WEEK_NORMAL) add('W3', 'warn', e, at, `${who} ${md(wk[0])} 這週排了 ${hm(mins)}，超過 40 小時的部分算加班`);
     }
+
+    // 休息日加班超過 FT_OT_MAX 天（同門市正職 F8，只提醒）
+    const otDays = inMonth.filter((d) => mine[d] && mine[d].day_type === 'H' && mine[d].shift_id);
+    if (otDays.length > FT_OT_MAX) add('F8', 'warn', e, otDays[FT_OT_MAX], `${who} 這期排了 ${otDays.length} 天休息日加班，超過每期 ${FT_OT_MAX} 天（要付加班費）`);
 
     // 國定假日（含補假）上班：提醒工資加倍（同門市 C8）；「國定假日假」只能排在國定假日或補假當天（同門市 C7，總部是每週制、沒有同期別可移）
     for (const d of inMonth) {

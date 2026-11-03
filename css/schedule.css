@@ -148,7 +148,7 @@ button.hq-day{cursor:pointer}
 .hq-day small{display:block;font-size:9px;color:#c0392b;line-height:1.2;white-space:normal;overflow-wrap:anywhere;word-break:break-all}      /* 假日名稱換行，不要被切成「開國紀」 */
 .hq-day.empty{background:#fdf6e8;border-style:dashed}
 .hq-day.rest .hq-v,.hq-day.off .hq-v{color:var(--sc-off-ink,#c0392b)} .hq-day.leave .hq-v{color:#3f6aa8}
-.hq-day.hol{background:#fbeeec}
+.hq-day.hol{background:#fbeeec} .hq-day.ot{background:#fdf1dc}
 .hq-day.pend{border-color:#e8a33d;box-shadow:inset 0 0 0 1px #e8a33d}
 .hq-day .hq-pend{display:block;font-style:normal;font-size:9px;color:#b26a00;line-height:1.2}
 .hq-day.i-block{outline:2px solid var(--bad);outline-offset:-2px} .hq-day.i-warn{outline:2px solid #e8a33d;outline-offset:-2px}

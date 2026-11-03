@@ -27,28 +27,33 @@ const LEAVE = { '特': '特休', '補': '補休', '國': '國定' };
 export function cellInfo(c, shiftMap) {
   if (!c || !c.t) return { t: '', cls: 'empty' };
   if (c.t === 'W') { const sh = shiftMap[c.s]; return { t: sh ? shiftCode(sh.name) : (c.s || '班'), cls: 'work' }; }
-  if (c.t === 'H') { if (c.s) { const sh = shiftMap[c.s]; return { t: (sh ? shiftCode(sh.name) : '班') + '(休息日)', cls: 'work ot' }; } return { t: '休', cls: 'off' }; }
+  if (c.t === 'H') { if (c.s) { const sh = shiftMap[c.s]; return { t: sh ? shiftCode(sh.name) : c.s, cls: 'work ot', ot: true }; } return { t: '休', cls: 'off' }; }      // 休息日加班：班別＋橘色「休加」（otTag，同門市班表）
   if (c.t === 'R') return { t: '例', cls: 'rest' };
   if (c.t === 'L') return { t: LEAVE[c.l] || '假', cls: 'leave' };
   return { t: '', cls: 'empty' };
 }
-/** 選單值 → 格子（'S:<班別>'、'R'、'H'、'L:特'…、'CLEAR'） */
+export const otTag = (x) => (x.ot ? '<i class="sc-ot">休加</i>' : '');
+/** 選單值 → 格子（'S:<班別>'、'O:<班別>'＝休息日加班、'R'、'H'、'L:特'…、'CLEAR'） */
 export function cellOfValue(v) {
   if (v === 'CLEAR') return { t: '' };
   if (v.startsWith('S:')) return { t: 'W', s: v.slice(2) };
+  if (v.startsWith('O:')) return { t: 'H', s: v.slice(2) };
   if (v.startsWith('L:')) return { t: 'L', l: v.slice(2) };
   return { t: v };
 }
 export function valueOfCell(c) {
   if (!c || !c.t) return '';
   if (c.t === 'W') return 'S:' + c.s;
+  if (c.t === 'H' && c.s) return 'O:' + c.s;
   if (c.t === 'L') return 'L:' + c.l;
   return c.t;
 }
-/** 格子可選的內容（班別、休息日、例假、特休、補休、國定假日假） */
+/** 格子可選的內容（班別、休息日、休息日加班（班別，2026-11-03 Eason：總部、央廚都照門市正職）、例假、特休、補休、國定假日假） */
 export function cellOptions(shifts, cur, withClear) {
   const o = shifts.map((s) => `<option value="S:${esc(s.id)}">${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('')
-    + '<option value="H">休息日</option><option value="R">例假</option><option value="L:特">特休</option><option value="L:補">補休</option><option value="L:國">國定假日假</option>'
+    + '<option value="H">休息日</option>'
+    + shifts.map((s) => `<option value="O:${esc(s.id)}">${esc(shiftCode(s.name))} ${esc(timeText(s))}（休息日加班）</option>`).join('')
+    + '<option value="R">例假</option><option value="L:特">特休</option><option value="L:補">補休</option><option value="L:國">國定假日假</option>'
     + (withClear ? '<option value="CLEAR">清空</option>' : '');
   return cur ? o.replace(`value="${esc(cur)}"`, `value="${esc(cur)}" selected`) : o;
 }
@@ -67,10 +72,11 @@ export function calHtml(month, cells, shiftMap, holidays, opt) {
       if (!d) return '<td class="hq-na"></td>';
       const c = (cells || {})[d], x = cellInfo(c, shiftMap), hol = (holidays || {})[d];
       const p = c && c.pending ? cellInfo(c.pending, shiftMap) : null;
+      const xt = x.t + (x.ot ? '（休息日加班）' : ''), pt = p ? p.t + (p.ot ? '（休息日加班）' : '') : '';
       const iss = (opt.issue || {})[d];
       const cls = `hq-day ${x.cls}${hol ? ' hol' : ''}${p ? ' pend' : ''}${iss ? ' i-' + iss : ''}${opt.sel === d ? ' sel' : ''}${c && c.src === 'manual' ? ' man' : ''}`;
-      const inner = `<b>${+d.slice(8)}</b><span class="hq-v">${esc(x.t)}</span>${hol ? `<small>${esc(hol)}</small>` : ''}${p ? `<i class="hq-pend">待核准：${esc(p.t)}</i>` : ''}`;
-      const label = `${md(d)} ${x.t || '還沒選'}${p ? '，待核准改成 ' + p.t : ''}`;
+      const inner = `<b>${+d.slice(8)}</b><span class="hq-v">${esc(x.t)}</span>${otTag(x)}${hol ? `<small>${esc(hol)}</small>` : ''}${p ? `<i class="hq-pend">待核准：${esc(pt)}</i>` : ''}`;
+      const label = `${md(d)} ${xt || '還沒選'}${p ? '，待核准改成 ' + pt : ''}`;
       const canClick = opt.editable && !(opt.lockBefore && d < opt.lockBefore) && !(opt.off && opt.off(d));      // 鎖住的日子（在別家打卡的人切換日以前、不在職）只顯示
       return `<td>${canClick ? `<button type="button" class="${cls}" data-date="${d}" aria-label="${esc(label)}">${inner}</button>` : `<div class="${cls}" aria-label="${esc(label)}">${inner}</div>`}</td>`;
     }).join('') + '</tr>';

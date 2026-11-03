@@ -3,7 +3,7 @@
 // 廠長改格子立即生效，系統約 1 分鐘內合併重送 LINE。2026-10-27 Eason 改「央廚用 T01」：畫面跟門市排班一樣 ‹ T01 › 一期 28 天，跨月那欄標月份。
 import { esc, busy } from '../../js/ui.js';
 import { timeText, shiftCode } from './hours.js';
-import { call, cellInfo, cellOptions, cellOfValue, valueOfCell, md, resultsHtml, WD } from './hq.js';
+import { call, cellInfo, cellOptions, cellOfValue, valueOfCell, otTag, md, resultsHtml, WD } from './hq.js';
 import { weekday, periodOf, periodNo, periodStart, periodEnd, periodDates, shiftPeriod, parseLabel, label, todayTaipei } from './period.js';
 import { stHidden, setStHidden, stToggleHtml } from './stview.js';
 
@@ -87,7 +87,7 @@ function drawFixed(ctx) {
       const c = (D.cells[st.emp_id] || {})[d], x = cellInfo(c, shiftMap), lv = byCell[st.emp_id + '|' + d];
       const sel = F.sel && F.sel.emp === st.emp_id && F.sel.date === d;
       const cls = `sc-c ${x.cls}${[0, 6].includes(weekday(d)) || D.holidays[d] ? ' we' : ''}${lv ? ' i-' + lv : ''}${sel ? ' sel' : ''}${c && c.src === 'manual' ? ' man' : ''}${mb(d, i)}`;
-      return `<td class="${cls}" data-emp="${esc(st.emp_id)}" data-date="${d}">${esc(x.t)}${stTag(c)}</td>`;
+      return `<td class="${cls}" data-emp="${esc(st.emp_id)}" data-date="${d}">${esc(x.t)}${otTag(x)}${stTag(c)}</td>`;
     }).join('');
     return `<tr><th class="sc-name" scope="row">${esc(st.name)}${st.fixed_shift ? `<small class="sc-al">${esc(shiftCode((shiftMap[st.fixed_shift] || {}).name) || st.fixed_shift)}</small>` : '<small class="sc-al">未設固定班別</small>'}</th>${tds}</tr>`;
   }).join('');
