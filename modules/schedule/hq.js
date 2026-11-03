@@ -24,10 +24,11 @@ export const STATUS_TEXT = { draft: '草稿（還沒送出）', submitted: '已�
 const LEAVE = { '特': '特休', '補': '補休', '國': '國定' };
 
 /** 格子的顯示文字與樣式 */
+const shColor = (sh) => (sh && /^#[0-9A-Fa-f]{6}$/.test(sh.color || '') ? sh.color : '');      // 班別顏色（2026-11-03 Eason：三個班表都依班別上色，取代 10/12「班別不分顏色」）
 export function cellInfo(c, shiftMap) {
   if (!c || !c.t) return { t: '', cls: 'empty' };
-  if (c.t === 'W') { const sh = shiftMap[c.s]; return { t: sh ? shiftCode(sh.name) : (c.s || '班'), cls: 'work' }; }
-  if (c.t === 'H') { if (c.s) { const sh = shiftMap[c.s]; return { t: sh ? shiftCode(sh.name) : c.s, cls: 'work ot', ot: true }; } return { t: '休', cls: 'off' }; }      // 休息日加班：班別＋橘色「休加」（otTag，同門市班表）
+  if (c.t === 'W') { const sh = shiftMap[c.s]; return { t: sh ? shiftCode(sh.name) : (c.s || '班'), cls: 'work', color: shColor(sh) }; }
+  if (c.t === 'H') { if (c.s) { const sh = shiftMap[c.s]; return { t: sh ? shiftCode(sh.name) : c.s, cls: 'work ot', ot: true, color: shColor(sh) }; } return { t: '休', cls: 'off' }; }      // 休息日加班：班別＋橘色「休加」（otTag，同門市班表）
   if (c.t === 'R') return { t: '例', cls: 'rest' };
   if (c.t === 'L') return { t: LEAVE[c.l] || '假', cls: 'leave' };
   return { t: '', cls: 'empty' };
@@ -74,11 +75,12 @@ export function calHtml(month, cells, shiftMap, holidays, opt) {
       const p = c && c.pending ? cellInfo(c.pending, shiftMap) : null;
       const xt = x.t + (x.ot ? '（休息日加班）' : ''), pt = p ? p.t + (p.ot ? '（休息日加班）' : '') : '';
       const iss = (opt.issue || {})[d];
-      const cls = `hq-day ${x.cls}${hol ? ' hol' : ''}${p ? ' pend' : ''}${iss ? ' i-' + iss : ''}${opt.sel === d ? ' sel' : ''}${c && c.src === 'manual' ? ' man' : ''}`;
+      const cls = `hq-day ${x.cls}${x.color ? ' shc' : ''}${hol ? ' hol' : ''}${p ? ' pend' : ''}${iss ? ' i-' + iss : ''}${opt.sel === d ? ' sel' : ''}${c && c.src === 'manual' ? ' man' : ''}`;
       const inner = `<b>${+d.slice(8)}</b><span class="hq-v">${esc(x.t)}</span>${otTag(x)}${hol ? `<small>${esc(hol)}</small>` : ''}${p ? `<i class="hq-pend">待核准：${esc(pt)}</i>` : ''}`;
       const label = `${md(d)} ${xt || '還沒選'}${p ? '，待核准改成 ' + pt : ''}`;
       const canClick = opt.editable && !(opt.lockBefore && d < opt.lockBefore) && !(opt.off && opt.off(d));      // 鎖住的日子（在別家打卡的人切換日以前、不在職）只顯示
-      return `<td>${canClick ? `<button type="button" class="${cls}" data-date="${d}" aria-label="${esc(label)}">${inner}</button>` : `<div class="${cls}" aria-label="${esc(label)}">${inner}</div>`}</td>`;
+      const sty = x.color ? ` style="--shc:${x.color}"` : '';
+      return `<td>${canClick ? `<button type="button" class="${cls}"${sty} data-date="${d}" aria-label="${esc(label)}">${inner}</button>` : `<div class="${cls}"${sty} aria-label="${esc(label)}">${inner}</div>`}</td>`;
     }).join('') + '</tr>';
   }
   return `<table class="hq-cal"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;

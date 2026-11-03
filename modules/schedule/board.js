@@ -11,9 +11,10 @@ import { getSession } from '../../js/auth.js';
 
 const PUB_TEXT = { pending: '等待送到 LINE', sent: '已發布到 LINE', failed: '送 LINE 失敗', stale: '已被較新版本取代' };
 
+const shColor = (sh) => (sh && /^#[0-9A-Fa-f]{6}$/.test(sh.color || '') ? sh.color : '');      // 班別顏色（2026-11-03 Eason：三個班表都依班別上色，取代 10/12「班別不分顏色」）
 function cellText(c, shifts) {
   if (!c) return { t: '', cls: 'empty' };
-  if (c.shift_id) { const s = shifts[c.shift_id]; return { t: s ? shiftCode(s.name) : c.shift_id, cls: 'work' + (c.day_type === 'H' ? ' ot' : ''), ot: c.day_type === 'H' }; }
+  if (c.shift_id) { const s = shifts[c.shift_id]; return { t: s ? shiftCode(s.name) : c.shift_id, cls: 'work' + (c.day_type === 'H' ? ' ot' : ''), ot: c.day_type === 'H', color: shColor(s) }; }
   if (c.day_type === 'L') return { t: LEAVE_LABEL[c.leave] || '假', cls: 'leave' };
   if (c.day_type === 'W') return { t: '?', cls: 'empty' };
   return { t: DAY_LABEL[c.day_type] || '', cls: c.day_type === 'R' ? 'rest' : 'off' };
@@ -167,7 +168,7 @@ export function renderBoard(ctx) {
         const pin = (D.pins[st.emp_id] || {})[d];
         const sel = S.sel && S.sel.emp === st.emp_id && S.sel.date === d;
         const pinCls = !pin ? '' : pin.kind === 'off' ? ' pin-off' : ' pin';   // 指定休假：黃底；指定上班／班別：右上小黑點
-        return `<td class="sc-c ${x.cls}${isWe(d) ? ' we' : ''}${bday(st, d) ? ' bd' : ''}${lv ? ' i-' + lv : ''}${sel ? ' sel' : ''}${pinCls}" data-emp="${esc(st.emp_id)}" data-date="${d}" title="${esc(iss.map((r) => r.msg).concat(pin && pin.kind === 'off' ? ['指定休假'] : [], x.ot ? ['休息日加班'] : []).join('\n'))}">${esc(x.t)}${otTag(x)}${stTag(c)}${bday(st, d) ? '<i class="sc-bd" title="生日">生日</i>' : ''}</td>`;
+        return `<td class="sc-c ${x.cls}${x.color ? ' shc' : ''}${isWe(d) ? ' we' : ''}${bday(st, d) ? ' bd' : ''}${lv ? ' i-' + lv : ''}${sel ? ' sel' : ''}${pinCls}"${x.color ? ` style="--shc:${x.color}"` : ''} data-emp="${esc(st.emp_id)}" data-date="${d}" title="${esc(iss.map((r) => r.msg).concat(pin && pin.kind === 'off' ? ['指定休假'] : [], x.ot ? ['休息日加班'] : []).join('\n'))}">${esc(x.t)}${otTag(x)}${stTag(c)}${bday(st, d) ? '<i class="sc-bd" title="生日">生日</i>' : ''}</td>`;
       }).join('');
       const o = offOf(st), lvs = Object.entries(o.lv).map(([k, v]) => k + ' ' + v).join('・');
       return `<tr><th class="sc-name" scope="row">${esc(st.name)}${annualTxt(st)}</th>${tds}<td class="sc-off"><b>${o.n}</b>${lvs ? `<small>${esc(lvs)}</small>` : ''}</td><td class="sc-hr"><b>${+(hoursOf(st) / 60).toFixed(2)}</b></td></tr>`;

@@ -195,3 +195,9 @@ button.hq-day{cursor:pointer}
   .fx-hint,#fxMsg{display:none!important}
   .sc-grid th.mb,.sc-grid td.mb{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
+
+/* 班別顏色（2026-11-03 Eason：門市／央廚／總部班表都依班別上色）：底色＝班別顏色混白，列印照印 */
+.sc-c.shc,.sc-c.shc.we,.sc-c.shc.bd,.sc-c.shc.ot{background:color-mix(in srgb,var(--shc) 60%,#fff);-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.hq-day.shc,.hq-day.shc.hol,.hq-day.shc.ot{background:color-mix(in srgb,var(--shc) 60%,#fff);-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.hq-swatch{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid var(--line);margin-right:6px;vertical-align:-1px;background:#fff}
+#hqShColor{width:44px;height:34px;padding:2px;border:1px solid var(--line);border-radius:8px;background:#fff}
