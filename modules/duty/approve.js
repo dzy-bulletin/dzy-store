@@ -185,7 +185,9 @@ function renderEmployees(box, date, employees, failed, retry) {
   bar.append(count, toggleAll);
   const list = h('div', 'du-list');
   box.append(bar, list);
-  employees.forEach(emp => list.append(buildCard(emp, date)));
+  // 排序（2026-11-04 Eason）：待核定在最上面、已核定其次、未出勤（還沒核定）放最下面，同組照原順序；只在畫面時排一次，核完不跳位置
+  const rank = c => c.__pending && !c.__absent ? 0 : (c.__pending ? 2 : 1);
+  employees.map(emp => buildCard(emp, date)).map((c, i) => [rank(c), i, c]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).forEach(x => list.append(x[2]));
   // 待核定人數不算「未出勤」（沒打卡也沒排上班）的人（2026-11-02 Eason）
   const pendingLeft = () => [].filter.call(list.querySelectorAll('.du-card'), c => c.__pending && !c.__absent).length;
   count.innerHTML = '共 ' + employees.length + ' 人・待核定 <b>' + pendingLeft() + '</b> 人';
