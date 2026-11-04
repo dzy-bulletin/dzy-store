@@ -109,7 +109,7 @@ th { background:var(--surface); font-weight:600; color:var(--ink-bright); white-
     <a href="#login"><span>1</span>登入、進考勤管理、換店換日期</a>
     <a href="#hours"><span>2</span>核定工時</a>
     <a href="#requests"><span>3</span>申請審核</a>
-    <a href="#upper"><span>4</span>值班主管本人的單</a>
+    <a href="#upper"><span>4</span>誰核誰（11/4 起）</a>
     <a href="#faq"><span>5</span>常見狀況</a>
   </nav>
 </div></header>
@@ -331,20 +331,24 @@ th { background:var(--surface); font-weight:600; color:var(--ink-bright); white-
 </section>
 
 <section id="upper">
-  <h2><span class="no">4</span>值班主管本人的單（10/30 起）</h2>
-  <p class="sub">規則很簡單：<b>沒有人核自己的申請</b>。</p>
+  <h2><span class="no">4</span>誰核誰（11/4 起）</h2>
+  <p class="sub">規則：<b>在哪家店打卡，工時和忘打卡單就給那家店的店長核</b>（薪資跟打卡門市請款）；<b>加班、請假、出差單給本人原單位的上層審</b>。</p>
 
-  <div class="who"><div class="box">店裡計時、正職同仁的申請</div><div class="to">→</div><div class="box on"><b>店長</b>審</div></div>
-  <div class="who"><div class="box"><b>店長自己</b>的加班、請假、忘打卡單</div><div class="to">→</div><div class="box on"><b>同店區經理、區域負責人（督導或區經理）或總監</b>審</div></div>
+  <div class="who"><div class="box">在你店裡打卡的<b>所有人</b>（不管職稱，督導、行政、總部同仁也一樣）的<b>工時、忘打卡單</b></div><div class="to">→</div><div class="box on"><b>打卡那家店的店長（或兼任店長）</b>核</div></div>
+  <div class="who"><div class="box"><b>店長自己</b>的工時、忘打卡單</div><div class="to">→</div><div class="box on"><b>店長自己</b>核</div></div>
+  <div class="who"><div class="box">店裡計時、正職同仁的加班、請假、出差單</div><div class="to">→</div><div class="box on"><b>本店店長</b>審</div></div>
+  <div class="who"><div class="box"><b>店長自己</b>的加班、請假、出差單</div><div class="to">→</div><div class="box on"><b>同店區經理、區域負責人（督導或區經理）或總監</b>審</div></div>
+  <div class="who"><div class="box">督導、行政的加班、請假、出差單</div><div class="to">→</div><div class="box on"><b>品牌總監</b>審</div></div>
   <div class="who"><div class="box">同仁<b>兼值班主管</b>的申請</div><div class="to">→</div><div class="box on">一樣往上給<b>區域負責人或總監</b></div></div>
   <div class="who"><div class="box"><b>區經理自己</b>的申請（11/3 起）</div><div class="to">→</div><div class="box on">只給<b>品牌總監</b>審（督導不審）</div></div>
 
   <div class="row">
   <ul class="dots">
-    <li>你自己的單會放在「申請審核」<b>最下面「我自己送出的」</b>，標「<b>送上層審核中</b>」。核准、退回、作廢的按鈕都按不下去，這是正常的。</li>
+    <li>你自己的<b>加班、請假、出差單</b>會放在「申請審核」<b>最下面「我自己送出的」</b>，標「<b>送上層審核中</b>」。核准、退回、作廢的按鈕都按不下去，這是正常的。你自己的<b>忘打卡單</b>跟同仁的放在一起，自己核。</li>
     <li>這些單<b>不算進</b>申請審核的紅色數字，也不會出現在首頁待辦。</li>
     <li>上層主管會在他們的考勤管理裡看到，標「值班主管本人」。區域負責人（督導或區經理）、總監可以核准、退回，也可以作廢。區域負責人由人資在「同仁名單 → 區域」設定。</li>
     <li>上面都沒有人的店，由<b>人資主管</b>審。</li>
+    <li>店裡<b>沒有店長也沒有兼任店長</b>：工時和忘打卡單只剩人資主管能核，區經理、督導、總監都不會補上。請人資到「權限設定 → 個別例外」設兼任店長。</li>
     <li><b>你自己的工時照舊自己核</b>，在「核定工時」跟同仁一樣處理。</li>
     <li>單子狀態：在 LINE 按圖文選單的「加班請假」，打開卡片後切到「我的申請」看。</li>
   </ul>
@@ -365,8 +369,8 @@ th { background:var(--surface); font-weight:600; color:var(--ink-bright); white-
 
   <h3>跨店支援的同仁</h3>
   <ul class="dots">
-    <li>同仁到別家店支援打卡，那幾天的<b>工時和申請都由支援的那家店核</b>。卡片會標「支援（原單位）」。</li>
-    <li>你店裡的人去別店支援，你只看得到、不能改。有問題請跟那家店的店長說。</li>
+    <li>同仁到別家店打卡（包含督導、行政、總部同仁），那幾天的<b>工時和忘打卡單由打卡那家店的店長核</b>；<b>加班、請假、出差單還是回原單位主管審</b>。卡片會標「支援（原單位）」。</li>
+    <li>你店裡的人去別店支援：他在那邊的工時你只看得到、不能改；他的加班、請假、出差單還是你審。有問題請跟那家店的店長說。</li>
   </ul>
 
   <h3>打卡一直說「不在範圍內」</h3>
