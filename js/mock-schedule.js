@@ -89,8 +89,11 @@ export async function schedule(action, me, b, db, s, hooks) {
     list.push({ seq: list.length + 1, kind, status: failNow ? 'failed' : 'sent', attempts: 1, last_error: failNow ? '連不上打卡系統' : null, created_at: new Date().toISOString(), sent_at: failNow ? null : new Date().toISOString() });
   };
   const dates = periodDates(period);
+  // 鎖定紀錄（照 server/schedule.js lockLog：個人登入記姓名、門市帳號記代號；新的在前）
+  const lockLogAdd = (act, detail) => { st.lockLog = st.lockLog || []; st.lockLog.push({ id: st.lockLog.length + 1, period, at: new Date().toISOString(), who: (me.person && me.person.name) || me.code, action: act, detail }); };
 
   switch (action) {
+    case 'lockLog': return ok({ log: (st.lockLog || []).slice().reverse() });
     case 'load': {
       const ctx = ctxOf(st, period, hol);
       const r = prow(st, period);
@@ -412,6 +415,7 @@ export async function schedule(action, me, b, db, s, hooks) {
       Object.assign(prow(st, period), { locked: true, locked_at: new Date().toISOString(), locked_by: me.code, needs_recheck: false });
       const publish = clockAlias !== null && parseLabel(period) >= 1;
       if (publish) pubSet('publish');
+      lockLogAdd('lock', publish ? '送 LINE' : (clockAlias === null ? '這家店沒有 LINE 打卡，不送' : '試排期不送 LINE'));
       return ok({ version: bump(), publish });
     }
     case 'unlock': {
@@ -420,6 +424,7 @@ export async function schedule(action, me, b, db, s, hooks) {
       Object.assign(prow(st, period), { locked: false, locked_at: null, locked_by: null });
       const withdraw = clockAlias !== null && (st.pubs[period] || []).some((x) => x.kind === 'publish');
       if (withdraw) pubSet('unpublish');
+      lockLogAdd('unlock', withdraw ? '從 LINE 撤下' : '');
       return ok({ version: bump(), withdraw });
     }
     case 'resend': {

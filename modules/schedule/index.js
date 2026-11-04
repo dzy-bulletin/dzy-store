@@ -9,6 +9,7 @@ import { renderStaff } from './staff.js';
 import { renderShifts } from './shifts.js';
 import { renderSelf, renderApprove } from './self.js';
 import { renderFixed, renderFixedStaff } from './fixed.js';
+import { renderLockLog } from './locklog.js';
 import { ssoSwitch, setSession, toSession, pickSchedStore } from '../../js/auth.js';
 
 const VIEWS = { board: renderBoard, needs: renderNeeds, staff: renderStaff, shifts: renderShifts };
@@ -33,7 +34,7 @@ function ensureCss() {
 }
 
 // 頁頂分頁（docs/schedule-hq/spec.md §5）：依「目前所在的店」的排班方式送不同的分頁；跨入口分頁 go-store／go-hq／go-cf 點了就換店（整頁重載）
-const STORE_TABS = [{ id: 'board', label: '班表' }, { id: 'needs', label: '指定與需求' }, { id: 'staff', label: '同仁' }, { id: 'shifts', label: '班別與設定' }];
+const STORE_TABS = [{ id: 'board', label: '班表' }, { id: 'needs', label: '指定與需求' }, { id: 'staff', label: '同仁' }, { id: 'shifts', label: '班別與設定' }, { id: 'locklog', label: '鎖定紀錄' }];   // 鎖定紀錄 2026-11-05
 const GO = { 'go-store': ['store', '門市排班'], 'go-hq': ['self', '總部排班'], 'go-cf': ['fixed', '央廚排班'] };
 export function tabsFor(s) {
   const mode = (s && s.schedMode) || 'store';
@@ -65,6 +66,7 @@ export default {
     if (ctx.tab === 'approve') return renderApprove(ctx);
     if (ctx.tab === 'fixed') return renderFixed(ctx);
     if (ctx.tab === 'fixedstaff') return renderFixedStaff(ctx);
+    if (ctx.tab === 'locklog') return renderLockLog(ctx);           // 只讀，看得到班表的人都看得到（不套 lockDown：篩選欄要能用）
     const key = ctx.session.token || ctx.session.code;
     if (S.key !== key) reset(key);                                   // 換了登入就重來，不留上一家店的資料
     const draw = () => {

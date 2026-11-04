@@ -201,3 +201,17 @@ button.hq-day{cursor:pointer}
 .hq-day.shc,.hq-day.shc.hol,.hq-day.shc.ot{background:color-mix(in srgb,var(--shc) 60%,#fff);-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .hq-swatch{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid var(--line);margin-right:6px;vertical-align:-1px;background:#fff}
 #hqShColor{width:44px;height:34px;padding:2px;border:1px solid var(--line);border-radius:8px;background:#fff}
+
+/* 鎖定紀錄（2026-11-05） */
+.sc-ll-bar { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 8px 0 12px; }
+.sc-ll-bar label { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+.sc-ll-bar select, .sc-ll-bar input { max-width: 100%; }
+.sc-ll-wrap { overflow-x: auto; }
+.sc-ll { width: 100%; border-collapse: collapse; font-size: 14px; }
+.sc-ll th, .sc-ll td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e5e5e5; white-space: nowrap; }
+.sc-ll td:last-child { white-space: normal; }
+.sc-ll th { font-weight: 600; color: #555; }
+.sc-ll-act { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 13px; }
+.sc-ll-act.lock { background: #e3f1e6; color: #1e6b33; }
+.sc-ll-act.unlock { background: #fdecd9; color: #9a4b00; }
+@media (max-width: 480px) { .sc-ll { font-size: 13px; } .sc-ll th, .sc-ll td { padding: 4px 6px; line-height: 1.35; } }

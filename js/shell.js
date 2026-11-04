@@ -409,7 +409,7 @@ function viewSwitch(s) {
   });
 }
 // 排班管理的頁頂分頁屬於哪種排班（docs/schedule-hq/spec.md §5）；跨入口分頁（go-*）不在表裡，由模組自己處理
-const SCHED_TAB_MODE = { board: 'store', needs: 'store', staff: 'store', shifts: 'store', self: 'self', approve: 'self', fixed: 'fixed', fixedstaff: 'fixed' };
+const SCHED_TAB_MODE = { board: 'store', needs: 'store', staff: 'store', shifts: 'store', locklog: 'store', self: 'self', approve: 'self', fixed: 'fixed', fixedstaff: 'fixed' };
 // 自動換店的保險：5 秒內不對同一家店重複換（權限或設定對不上時不要無限重載）
 const AUTO_SW = 'dzystore_autosw';
 function autoSwitchOk(code) { try { const x = JSON.parse(sessionStorage.getItem(AUTO_SW) || 'null'); return !(x && x.code === code && Date.now() - x.at < 5000); } catch (e) { return true; } }
@@ -421,7 +421,7 @@ async function autoSwitch(s, code, hash) {
   catch (e) { frame(s, `<div class="card"><div class="err" id="autoSwitchErr" role="alert">${esc(e.message)}</div></div>`, '', { cur, title }); }
 }
 // 排班管理：網址／頁頂點的分頁屬於別種排班的店，但這個人在那邊沒有排班權限
-const SCHED_TAB_LABEL = { board: '門市班表', needs: '指定與需求', staff: '門市同仁', shifts: '班別與設定', self: '我的班表', approve: '部屬班表', fixed: '央廚班表', fixedstaff: '固定班別' };
+const SCHED_TAB_LABEL = { board: '門市班表', needs: '指定與需求', staff: '門市同仁', shifts: '班別與設定', locklog: '鎖定紀錄', self: '我的班表', approve: '部屬班表', fixed: '央廚班表', fixedstaff: '固定班別' };
 function viewSchedNoAccess(s, tab) {
   frame(s, `<div class="card"><h2>排班管理</h2><p class="hint" id="schedNoAccess">你沒有「${esc(SCHED_TAB_LABEL[tab] || '這個頁面')}」的排班權限。</p>
     <a class="btn ghost" href="#/schedule/" id="schedNoAccessBack">回到這家店的排班</a></div>`, '', { cur: '', title: '排班管理' });
