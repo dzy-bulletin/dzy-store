@@ -6,6 +6,7 @@ import { renderRoster } from './roster.js';
 import { renderNotice } from './notice.js';
 import { renderRequest } from './request.js';
 import { renderSummary } from './summary.js';
+import { renderAuditLog } from './auditlog.js';
 import { api } from '../../js/api.js';
 import { busy, setMsg } from '../../js/ui.js';
 import { getSession } from '../../js/auth.js';
@@ -15,7 +16,7 @@ const KEY = 'dzystore_dutyok';
 const flag = () => { try { return sessionStorage.getItem(KEY) || ''; } catch (e) { return ''; } };
 const setFlag = v => { try { if (v) sessionStorage.setItem(KEY, v); else sessionStorage.removeItem(KEY); } catch (e) {} };
 
-const TABS = [{ id: 'approve', label: '核定工時' }, { id: 'request', label: '申請審核' }, { id: 'device', label: '裝置核准' }, { id: 'roster', label: '員工名冊' }, { id: 'notice', label: '公告' }, { id: 'summary', label: '申請單彙整' }];
+const TABS = [{ id: 'approve', label: '核定工時' }, { id: 'request', label: '申請審核' }, { id: 'device', label: '裝置核准' }, { id: 'roster', label: '員工名冊' }, { id: 'notice', label: '公告' }, { id: 'summary', label: '申請單彙整' }, { id: 'auditlog', label: '核定紀錄' }];
 
 export default {
   id: 'duty',
@@ -25,8 +26,8 @@ export default {
   // 只看的人（這家店只有 att.view_people）：只剩核定工時、申請審核、員工名冊（都是唯讀），沒有裝置核准、公告（2026-10-25）
   // 只有申請審核權的人（dutyHours=false）不顯示「核定工時」，第一格就是申請審核（嵌入管理系統時頁頂選單也跟著少一格）
   // 申請單彙整（2026-11-02）：看得到核定工時、申請審核、員工名冊任一分頁的人都有（只讀，伺服器依人分資料集過濾）；全部門市模式也有
-  tabsFor: s => { let t = dutyManager(s) ? TABS : TABS.filter(x => x.id !== 'notice'); if (!dutyHours(s)) t = t.filter(x => x.id !== 'approve'); if (viewNoHoursStore(s)) t = t.filter(x => x.id === 'approve' || x.id === 'request' || x.id === 'roster' || x.id === 'summary'); if (allModeOf(s)) t = t.filter(x => x.id === 'approve' || x.id === 'request' || x.id === 'summary');
-    if (!t.some(x => x.id === 'approve' || x.id === 'request' || x.id === 'roster')) t = t.filter(x => x.id !== 'summary');
+  tabsFor: s => { let t = dutyManager(s) ? TABS : TABS.filter(x => x.id !== 'notice'); if (!dutyHours(s)) t = t.filter(x => x.id !== 'approve'); if (viewNoHoursStore(s)) t = t.filter(x => x.id === 'approve' || x.id === 'request' || x.id === 'roster' || x.id === 'summary' || x.id === 'auditlog'); if (allModeOf(s)) t = t.filter(x => x.id === 'approve' || x.id === 'request' || x.id === 'summary' || x.id === 'auditlog');
+    if (!t.some(x => x.id === 'approve' || x.id === 'request' || x.id === 'roster')) t = t.filter(x => x.id !== 'summary' && x.id !== 'auditlog');
     return s && s.role === 'admin' ? [{ id: 'overview', label: '各店總覽' }, ...t] : t; },
   // 個人登入（管理系統帳號）：有出勤核定入口就已解鎖，不問核定密碼、也沒有「改核定密碼」
   locked: () => { const s = getSession(); return !(s && s.person && s.dutyUnlocked) && flag() !== '1'; },
@@ -47,7 +48,7 @@ export default {
     if (multi) ctx = Object.assign({}, ctx, { el: personStoreBar(ctx) });
     if ((ctx.tab === 'device' || ctx.tab === 'notice') && viewNoHoursStore(ctx.session)) ctx = Object.assign({}, ctx, { tab: 'approve' });
     if (ctx.tab === 'notice' && !dutyManager(ctx.session)) ctx = Object.assign({}, ctx, { tab: 'approve' });
-    ({ approve: renderApprove, request: renderRequest, device: renderDevice, roster: renderRoster, notice: renderNotice, summary: renderSummary }[ctx.tab] || renderApprove)(ctx);
+    ({ approve: renderApprove, request: renderRequest, device: renderDevice, roster: renderRoster, notice: renderNotice, summary: renderSummary, auditlog: renderAuditLog }[ctx.tab] || renderApprove)(ctx);
     if (ctx.tab !== 'request') refreshReqBadge();      // 申請審核分頁自己讀清單時會更新，不重複問
   },
 };

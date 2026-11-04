@@ -6,7 +6,7 @@ import { taipeiToday, tsLabel, shortDate } from './calc.js';
 import { buildRows, filterRows, totals, empKey, defaultYm, ymAdd, ymLabel, xlsSafe, KIND_LABEL, KIND_ORDER, SLIP_TITLE, MERGED, OT_NOTE } from './summary-calc.js';
 
 // 樣式另放 summary.css（畫面、手機卡片、列印），第一次進來才掛上（同耗損登記 loss.css 的掛法）
-function css() {
+export function css() {
   if (document.getElementById('smCss')) return;
   const l = document.createElement('link');
   l.id = 'smCss'; l.rel = 'stylesheet'; l.href = new URL('./summary.css', import.meta.url).href;
@@ -347,7 +347,7 @@ function slipDoc(rows) {
 
 // ---- 匯出 Excel（spec §5 C）：SheetJS mini 版按了才載入；明細＋合計兩個分頁；讀不到的店寫在兩個分頁第一列；文字開頭 = + - @ 補單引號 ----
 let xlsxP = null;
-function loadXlsx() {
+export function loadXlsx() {
   if (window.XLSX) return Promise.resolve(window.XLSX);
   if (xlsxP) return xlsxP;
   xlsxP = new Promise((res, rej) => {

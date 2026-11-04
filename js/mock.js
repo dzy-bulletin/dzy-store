@@ -538,7 +538,7 @@ function dutyStore(code) {
 function withFake(code, fn) { const prev = curFake; curFake = code && code !== 'TEST1' ? DUTY2_FAKE : null; try { return fn(); } finally { curFake = prev; } }
 const ALL_OPS = { mgr_day: 'employees', mgr_pending_approvals: 'items', mgr_req_pending: 'items', mgr_req_day: null, payroll_leave_options: null, mgr_req_month: 'items' };
 // 合併時要併的清單（mgr_req_month 有兩份：申請 items、核定 leaves）
-const listsOfOp = op => (op === 'mgr_req_month' ? ['items', 'leaves'] : ALL_OPS[op] ? [ALL_OPS[op]] : []);
+const listsOfOp = op => (op === 'mgr_req_month' ? ['items', 'leaves', 'log'] : ALL_OPS[op] ? [ALL_OPS[op]] : []);
 // 支援標示（對照 server/proxy/duty.js filterFor 的 support_from，2026-10-26）：示範人物的 support＝{門市代號: {員編: 原單位名稱}}，只在個人登入時加
 const SUPPORT_LISTS = { mgr_day: 'employees', mgr_pending_approvals: 'items', mgr_req_pending: 'items', mgr_roster: 'roster' };
 // 個人例外的歸屬（對照 home_tag，2026-11-01）：示範人物的 homeTag＝{門市代號: {員編: 標示}}；elsewhere＝{門市代號: [捷徑卡]}（只在單一門市的核定工時）
@@ -646,6 +646,8 @@ function monthFilter(per, code, data) {
   const blankOk = !!(per.admin || per.hr_head || (unit && (per.units_managed || []).includes(unit)) || ((db.accounts[code] || {}).managers || []).includes(per.sub));
   data.items = data.items.filter(it => (it.status === 'approved' ? inR(it.emp_id) || inH(it.emp_id) : inR(it.emp_id)));
   data.leaves = data.leaves.filter(x => (x.emp_id === '' ? blankOk : inH(x.emp_id)));
+  const visReq = new Set(data.items.map(it => 'R|' + it.id));
+  data.log = (data.log || []).filter(e => (e.kind === 'req' ? visReq.has(e.ref) : inH(e.emp_id)));
   data.unmatched = data.leaves.filter(x => x.emp_id === '').length;
 }
 // 申請單彙整的內建示範（沒有 e2e 資料時）：上個月放齊各種對帳情況，本月放幾筆。which＝1（示範店）／2（第二家）
@@ -835,6 +837,7 @@ function dutyDo(d, action, b) {
     }
     const rec = { periods: periods.map(p => ({ ...p })), approved_hours: hours, status_text: status, manager_name: MGR };
     d.approved[date + emp.emp_id] = rec; d.leave[date + emp.emp_id] = leaves;
+    (d.hlog = d.hlog || []).push({ at: new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 19) + '+08:00', date, emp_id: emp.emp_id, name: emp.name, hours, status, periods: periods.map(p => p.start + '-' + p.end).join(','), by: MGR });   // 核定紀錄（打卡端 approved 分頁只追加）
     return ok({ date, emp_id: emp.emp_id, name: emp.name, periods, approved_hours: hours, ...leaveOut(leaves), status_text: status, manager_name: MGR });
   }
   if (action === 'payroll_leave_options') {      // 薪酬假別表＋額度＋期限事件日；e2e 可把 d.leaveOpts 換成自己的（含 blocked、window_days、events）
@@ -895,7 +898,21 @@ function dutyDo(d, action, b) {
     }
     const seenId = {};                            // 同 Requests.gs：同日同人同假別第二列起 id 加 |2、|3（2026-11-03 審查）
     leaves.forEach(x => { seenId[x.id] = (seenId[x.id] || 0) + 1; if (seenId[x.id] > 1) x.id += '|' + seenId[x.id]; });
-    return ok({ ym, items, leaves, unmatched: leaves.filter(x => !x.emp_id).length });
+    // 核定紀錄（Requests.gs reqAuditLog_ 的示範版）：工時核定、申請送出／核准／退回／取消／作廢
+    const log = [];
+    (d.hlog || []).filter(x => x.date.slice(0, 7) === ym).forEach(x => log.push({ at: x.at, kind: 'hours', action: 'hours', emp_id: x.emp_id, name: x.name, date: x.date, ref: 'H|' + x.date + '|' + x.emp_id, by: x.by, system: false, detail: { hours: x.hours, status: x.status, periods: x.periods } }));
+    const firstH = {};
+    log.slice().sort((a, c) => (a.at < c.at ? -1 : 1)).forEach(e => { if (firstH[e.ref]) e.action = 'rehours'; else firstH[e.ref] = true; });
+    items.forEach(r => {
+      const base = { kind: 'req', emp_id: r.emp_id, name: r.name, date: r.date, ref: 'R|' + r.id, system: false }, put = o => log.push({ ...base, ...o });
+      put({ at: r.created_at, action: 'submit', by: r.name, detail: { summary: r.summary } });
+      if (r.status === 'approved' || r.status === 'voided') put({ at: r.decided_at, action: 'approve', by: r.decided_by, detail: { summary: r.summary } });
+      else if (r.status === 'rejected') put({ at: r.decided_at, action: 'reject', by: r.decided_by, detail: { summary: r.summary, reason: r.reject_reason } });
+      else if (r.status === 'cancelled') put({ at: r.decided_at || r.created_at, action: 'cancel', by: r.decided_by || '本人取消', detail: { summary: r.summary } });
+      if (r.status === 'voided') put({ at: r.voided_at, action: 'void', by: r.voided_by, detail: { summary: r.summary, reason: r.void_reason } });
+    });
+    log.sort((a, c) => (a.at < c.at ? 1 : a.at > c.at ? -1 : 0));
+    return ok({ ym, items, leaves, log: log.filter(e => e.at), unmatched: leaves.filter(x => !x.emp_id).length });
   }
   if (action === 'mgr_req_void') {               // Requests.gs handleMgrReqVoid_（2026-10-26）：只能作廢已核准的、理由必填
     const reason = String(b.reason ?? '').trim().slice(0, 100);
