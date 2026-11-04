@@ -127,7 +127,7 @@ export async function schedule(action, me, b, db, s, hooks) {
         if (c.clear) { if (otLocked) return fail('BAD_INPUT', '這天是休息日加班，不能清空；不需要上班請改回休息日'); if (st.days[c.emp_id]) delete st.days[c.emp_id][c.date]; continue; }
         const cell = { day_type: c.day_type, shift_id: c.shift_id || null, leave: c.leave || null };
         const err = comboError(cell, hol, c.date); if (err) return fail('BAD_INPUT', err);
-        if (otLocked && cell.day_type === 'W') return fail('BAD_INPUT', '這天是休息日加班（要付加班費），不能改成一般工作日；不需要上班可以改回休息日');
+        if (otLocked && cell.day_type !== 'H') return fail('BAD_INPUT', '這天是休息日加班（要付加班費），只能改回休息日；不能改成工作日、例假或請假');   // 同 server/schedule.js saveDays
         putDay(st, c.emp_id, c.date, cell, 'manual');
       }
       const v = bump(); recheckNext(); return ok({ version: v });

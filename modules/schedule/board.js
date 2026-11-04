@@ -137,7 +137,7 @@ export function renderBoard(ctx) {
     </div>
     ${checkHtml}
     <div class="row sc-acts">
-      ${locked || !canLock ? '' : `<button type="button" class="btn" id="scAuto"${ck.blockers.length ? ' disabled' : ''}>${ck.blockers.length ? `自動排班（先完成：${esc(ck.blockers.join('、'))}）` : '自動排班'}</button><label class="sc-chk"><input type="checkbox" id="scAll"> 連手動改過的也重排</label>`}
+      ${locked || !canLock ? '' : `<button type="button" class="btn" id="scAuto"${ck.blockers.length ? ' disabled' : ''}>${ck.blockers.length ? `自動排班（先完成：${esc(ck.blockers.join('、'))}）` : '自動排班'}</button><label class="sc-chk"><input type="checkbox" id="scAll"> 連手動改過的也重排</label><button type="button" class="btn ghost" id="scClear">清空這一期</button>`}
       ${canLock ? `<button type="button" class="btn ${locked ? 'ghost' : ''}" id="scLock">${locked ? '解除鎖定' : '鎖定並發布'}</button>` : ''}
       ${canLock && pub && (pub.status === 'failed' || pub.status === 'pending') ? '<button type="button" class="btn ghost" id="scResend">立即重送</button>' : ''}
       <button type="button" class="btn ghost" id="scPdf">匯出 PDF</button>
@@ -338,6 +338,26 @@ export function renderBoard(ctx) {
       const r = await mutate('auto', { keepManual: !all });
       if (r.ok) say(r.problems && r.problems.length ? '排好了，有幾個地方要注意：' + r.problems.join('；') : '排好了');
       else say('排不出來：' + r.problems.slice(0, 5).join('；'), true);
+    } catch (e) { say(e.message, true); }
+    rerender();
+  });
+
+  // 清空這一期（2026-11-04 Eason：門市排班跟總部一樣要能整期清空）：每一格清成空白（請假也清）；指定休假（pins）保留，下次自動排班照用。
+  // 休息日加班伺服器不准直接清空，先改回休息日再清（只留著「休」的話是手動格，自動排班會當成指定休、排不到他；2026-11-05 Fable 審查）
+  if (q('#scClear')) q('#scClear').onclick = () => busy(q('#scClear'), async () => {
+    const cells = [], ot = [];
+    for (const st of D.staff) for (const d of D.dates) {
+      const c = (D.days[st.emp_id] || {})[d];
+      if (!c) continue;
+      if (c.day_type === 'H' && c.shift_id) ot.push({ emp_id: st.emp_id, date: d });
+      cells.push({ emp_id: st.emp_id, date: d });
+    }
+    if (!cells.length) { say('這一期已經是空白的'); return rerender(); }
+    if (!(await confirmBox(`把 ${S.period} 這一期全部清空？請假和休息日加班也會一起清掉，指定休假會保留；清完再按「自動排班」或自己排。`, '全部清空'))) return;
+    try {
+      if (ot.length) await mutate('saveDays', { cells: ot.map((c) => Object.assign({ day_type: 'H' }, c)) });
+      await mutate('saveDays', { cells: cells.map((c) => Object.assign({ clear: true }, c)) });
+      say('已清空這一期');
     } catch (e) { say(e.message, true); }
     rerender();
   });
