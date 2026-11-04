@@ -68,7 +68,7 @@ function finalRow(lv, store, storeName) {
   return {
     key: 'L|' + store + '|' + String(lv.id), src: 'final', id: String(lv.id), store, storeName,
     emp_id: String(lv.emp_id || ''), name: String(lv.name || ''), date: String(lv.date || ''),
-    kind: trip ? 'trip' : 'leave', kindLabel: trip ? '出差' : '請假', type: trip ? '' : String(lv.type || ''),
+    kind: trip ? 'trip' : 'leave', kindLabel: trip ? '出差' : '請假', type: trip ? '' : String(lv.type == null ? '' : lv.type).trim(),
     time: '', reqHours: null, finalHours: h, finalText: '',
     place: '', reason: '', attach: null, status: 'finalized', statusLabel: STATUS_LABEL.finalized,
     flag: '', flagLabel: '', created_at: '', decided_by: '', decided_at: '', reject_reason: '', void_reason: '', self: false, standalone: true,
