@@ -384,6 +384,8 @@ function buildCard(emp, date) {
       const over = total + th > C.DAY_MAX_H;        // 照實核定、只標紅（光復每天 09:00 列進通知匣）
       totalBox.classList.toggle('over', over);
       if (over) totalBox.append(h('div', 'du-total-over', '超過一天 ' + C.DAY_MAX_H + ' 小時上限（照實核定，會列進每日通知）'));
+      const cw = C.contBreakWarn(rows);             // 連續 4 小時沒休 30 分（2026-11-06）：黃字、不擋
+      if (cw) totalBox.append(h('div', 'du-total-cont', C.contBreakText(cw)));
     } else totalBox.classList.remove('over');
     breakToggle.hidden = true;                      // 一顆鈕在「併成一段」與「插入休息」之間切換，兩個方向都回得去
     if (C.hasBreak(br)) {
@@ -451,6 +453,8 @@ function buildCard(emp, date) {
       let msg = '即將核定 ' + emp.name + '：\n' + segs.map(s => s.start + '–' + s.end).join('、')
         + (t2 ? '\n上班 ' + totalH + ' 小時＋出差 ' + t2 + ' 小時\n核定時數共 ' + C.round2(totalH + t2) + ' 小時' : '\n核定時數共 ' + totalH + ' 小時');
       if (totalH + t2 > C.DAY_MAX_H) msg += '\n⚠ 超過一天 ' + C.DAY_MAX_H + ' 小時上限（照實核定，會列進每日通知）';
+      const cw2 = C.contBreakWarn(periods);
+      if (cw2) msg += '\n⚠ ' + C.contBreakText(cw2);
       if (periodRows.querySelector('.du-break')) msg += '\n（休息 ' + br.start + '–' + br.end + ' 不計入）';
       const noted = lv.filter(x => !(x.type === '出差' && Number(x.hours) > 0));      // 沒算進核定的假別（出差以外、或沒填時數的出差）列出來給主管看
       if (noted.length) msg += '\n' + (noted.every(x => x.type === '出差') ? '註記' : '請假') + '：' + C.leavesText(noted);

@@ -4,7 +4,7 @@
 // 核准申請「不會」直接寫入核定：只是讓那天的核定頁先幫主管填好，主管核定那天時確認送出才算數（見 approve.js 的 __applyReq）。
 import { confirmBox } from '../../js/ui.js';
 import { S, call, callAll, h, failBar, failedStores, setReqBadge, loadLeave, leaveFor, canWriteRow, supportTag, reqTodo } from './state.js';
-import { tsLabel, shortDate, punchEvidence, compBalanceNote, REQ_KIND_LABEL, REQ_BATCH_MAX } from './calc.js';
+import { tsLabel, shortDate, punchEvidence, compBalanceNote, reqWarnLines, REQ_KIND_LABEL, REQ_BATCH_MAX } from './calc.js';
 
 export function renderRequest(ctx) {
   const el = ctx.el;
@@ -132,6 +132,8 @@ function buildItem(it, card, title) {
   el.append(l1, h('div', 'du-rq-l2', it.summary + (it.reason ? '\n原因：' + it.reason : '') + compBalanceNote(leaveFor(it.store), it) + '\n送出：' + tsLabel(it.created_at)));
   const ev = punchEvidence(it);
   if (ev) el.append(h('div', 'du-rq-evid', ev));
+  const wl = reqWarnLines(it);                    // 事假前一天／出差前一週／本月事假第 3 次起／本月第 N 次忘刷（2026-11-06，提醒不擋）
+  if (wl.length) el.append(h('div', 'du-rq-warn', wl.map(w => '⚠ ' + w).join('\n') + '（提醒，不影響核准）'));
 
   const acts = h('div', 'du-rq-acts');
   const ok = h('button', 'du-rq-ok btn', '核准', { type: 'button' }), no = h('button', 'du-rq-no btn ghost', '退回', { type: 'button' });

@@ -83,6 +83,31 @@ export function sumPeriods(rows) {
 }
 export const round2 = n => Math.round(n * 100) / 100;
 export const DAY_MAX_H = 10;   // 單日上限（2026-11-01 Eason）：照實核定、超過標紅；與打卡 Rest.gs、排班 rules.js 同一個數字
+// 連續工作 4 小時要休息 30 分鐘（勞基法 §35；2026-11-06 Eason：核定頁黃字提醒、不擋）。與打卡 manager.html contBreakWarn 同一套：
+// 時段照開始排序，中間空檔不到 30 分鐘就當接著上；接起來超過 4 小時的第一塊 → {start, end, h}，沒有回 null。
+export const CONT_MAX_MIN = 240, CONT_BREAK_MIN = 30;
+export function contBreakWarn(periods) {
+  const segs = (periods || []).map(p => {
+    const s0 = hhmmToMin(p.start); let e0 = hhmmToMin(p.end);
+    if (s0 == null || e0 == null) return null;
+    if (e0 <= s0) e0 += 1440;
+    return { s: s0, e: e0, start: p.start, end: p.end };
+  }).filter(Boolean).sort((a, b) => a.s - b.s);
+  let cur = null;
+  for (const g of segs) {
+    if (cur && g.s - cur.e < CONT_BREAK_MIN) { if (g.e > cur.e) { cur.e = g.e; cur.end = g.end; } }
+    else cur = { s: g.s, e: g.e, start: g.start, end: g.end };
+    if (cur.e - cur.s > CONT_MAX_MIN) return { start: cur.start, end: cur.end, h: round2((cur.e - cur.s) / 60) };
+  }
+  return null;
+}
+export const contBreakText = w => '連續上班 ' + w.h + ' 小時沒休息 30 分鐘（' + w.start + '–' + w.end + '；每 4 小時要休 30 分，提醒不擋）';
+// 申請的黃字提醒（2026-11-06，打卡 Requests.gs reqWarns_／miss_n）：舊打卡後端沒有這兩欄＝不顯示
+export function reqWarnLines(it) {
+  const out = (it && Array.isArray(it.warns) ? it.warns : []).slice();
+  if (it && it.kind === 'miss' && it.miss_n) out.unshift('本月第 ' + it.miss_n + ' 次忘刷' + (it.miss_n >= 3 ? '（第 3 次起出勤紀錄表會標記）' : ''));
+  return out;
+}
 
 // manager.html:1368–1400：送出前的確認資訊——總時數、跨夜提醒、時段重疊（含「長段包兩短段」的掃描法）
 export function analyzePeriods(periods) {
