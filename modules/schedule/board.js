@@ -353,10 +353,10 @@ export function renderBoard(ctx) {
       cells.push({ emp_id: st.emp_id, date: d });
     }
     if (!cells.length) { say('這一期已經是空白的'); return rerender(); }
-    if (!(await confirmBox(`把 ${S.period} 這一期全部清空？請假和休息日加班也會一起清掉，指定休假會保留；清完再按「自動排班」或自己排。`, '全部清空'))) return;
+    if (!(await confirmBox(`把 ${S.period} 這一期全部清空？請假（包含在「指定與需求」頁點的特休、事假）和休息日加班也會一起清掉，指定休假會保留；清完再按「自動排班」或自己排。`, '全部清空'))) return;
     try {
       if (ot.length) await mutate('saveDays', { cells: ot.map((c) => Object.assign({ day_type: 'H' }, c)) });
-      await mutate('saveDays', { cells: cells.map((c) => Object.assign({ clear: true }, c)) });
+      await mutate('saveDays', { cells: cells.map((c) => Object.assign({ clear: true }, c)), reason: 'clearPeriod' });
       say('已清空這一期');
     } catch (e) { say(e.message, true); }
     rerender();

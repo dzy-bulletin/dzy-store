@@ -77,7 +77,8 @@ export async function schedule(action, me, b, db, s, hooks) {
     return null;
   };
   const bump = () => { prow(st, period).version++; return prow(st, period).version; };
-  const needDuty = () => (!s.duty ? fail('FORBIDDEN', '請先輸入出勤核定通行碼') : s.dutyMust ? fail('DUTY_MUST_CHANGE', '請先把出勤核定通行碼改成自己的') : null);
+  // 個人帳號看排班管理權（店長、人資主管、管理員、排班單位），不看出勤核定通行碼——同 server/schedule.js needDutyPass（2026-11-05 Fable 審查）
+  const needDuty = () => (me.person ? (me.scheduleAdmin ? null : fail('FORBIDDEN', '只有店長、人資主管或管理員可以鎖定、解鎖或重送班表')) : !s.duty ? fail('FORBIDDEN', '請先輸入出勤核定通行碼') : s.dutyMust ? fail('DUTY_MUST_CHANGE', '請先把出勤核定通行碼改成自己的') : null);
   const recheckNext = () => {
     const nx = shiftPeriod(period, 1), r = st.periods[nx];
     if (!r || !r.locked) return;
@@ -120,16 +121,23 @@ export async function schedule(action, me, b, db, s, hooks) {
     }
     case 'saveDays': {
       const g = guard(false); if (g) return g;
-      for (const c of b.cells || []) {
-        if (!dates.includes(c.date) || !st.staff.some((x) => x.emp_id === c.emp_id)) return fail('BAD_INPUT', '格子的人或日期不在這一期');
+      const cells = b.cells || [];
+      if (!cells.length) return fail('BAD_INPUT', '沒有要存的格子');
+      if (cells.length > 2000) return fail('BAD_INPUT', '一次最多改 2000 格');
+      for (const c of cells) {
+        const sf = st.staff.find((x) => x.emp_id === c.emp_id);
+        if (!dates.includes(c.date) || !sf) return fail('BAD_INPUT', '格子的人或日期不在這一期');
         const pv = (st.days[c.emp_id] || {})[c.date];
         const otLocked = pv && pv.day_type === 'H' && pv.shift_id;
         if (c.clear) { if (otLocked) return fail('BAD_INPUT', '這天是休息日加班，不能清空；不需要上班請改回休息日'); if (st.days[c.emp_id]) delete st.days[c.emp_id][c.date]; continue; }
         const cell = { day_type: c.day_type, shift_id: c.shift_id || null, leave: c.leave || null };
         const err = comboError(cell, hol, c.date); if (err) return fail('BAD_INPUT', err);
         if (otLocked && cell.day_type !== 'H') return fail('BAD_INPUT', '這天是休息日加班（要付加班費），只能改回休息日；不能改成工作日、例假或請假');   // 同 server/schedule.js saveDays
+        if (cell.shift_id && !((!sf.hire_date || sf.hire_date <= c.date) && (!sf.leave_date || c.date <= sf.leave_date))) return fail('BAD_INPUT', `${+c.date.slice(5, 7)}/${+c.date.slice(8, 10)} 不在職，不能排班`);
         putDay(st, c.emp_id, c.date, cell, 'manual');
       }
+      const allClear = cells.every((c) => c.clear);
+      st.log.push({ period, who: me.code, action: 'save', detail: (allClear && b.reason === 'clearPeriod' ? '整期清空 ' : allClear ? '清空 ' : '') + cells.length + ' 格' });
       const v = bump(); recheckNext(); return ok({ version: v });
     }
     case 'auto': {
@@ -170,6 +178,8 @@ export async function schedule(action, me, b, db, s, hooks) {
     case 'savePins': {
       const g = guard(false); if (g) return g;
       for (const p of b.pins || []) {
+        if (p.kind && !['off', 'work', 'shift'].includes(p.kind)) return fail('BAD_INPUT', '指定只能是休假、上班或某個班');   // 同 server/schedule.js savePins
+        if (p.kind === 'shift' && !st.shifts[p.shift_id]) return fail('BAD_INPUT', '指定的班別不存在');
         st.pins[p.emp_id] = st.pins[p.emp_id] || {};
         if (!p.kind) delete st.pins[p.emp_id][p.date]; else st.pins[p.emp_id][p.date] = { kind: p.kind, shift_id: p.kind === 'shift' ? p.shift_id : null };
       }
@@ -380,7 +390,8 @@ export async function schedule(action, me, b, db, s, hooks) {
     case 'setStation': {                  // 鎖定中也能改、不要求核定密碼；已鎖定且會送 LINE 的期重送一筆
       const g = guard(null); if (g) return g;
       const cells = b.cells || [];
-      if (!cells.length || cells.length > 2000) return fail('BAD_INPUT', '沒有要存的格子');
+      if (!cells.length) return fail('BAD_INPUT', '沒有要存的格子');
+      if (cells.length > 2000) return fail('BAD_INPUT', '一次最多改 2000 格');
       let changed = 0;
       const todo = [];
       const seen = new Set();

@@ -1,6 +1,6 @@
 // 總部自填排班：「我的班表」（同仁每期自己選班，存了就生效）與「部屬班表」（主管唯讀看部屬每一期）。2026-11-03 起四週一期、不用核准。
 // 規格 docs/schedule-hq/spec.md §3、§5、§10.1。資料一律整包重讀（selfLoad 回來的就是最新的狀態、版本與檢查結果），畫面不自己拼。
-import { esc, busy } from '../../js/ui.js';
+import { esc, busy, confirmBox } from '../../js/ui.js';
 import { timeText, shiftCode } from './hours.js';
 import { call, calHtml, resultsHtml, issueMap, cellOptions, cellOfValue, valueOfCell, md, defaultSelfPeriod, SELF_OPEN, WD } from './hq.js';
 import { weekday, periodOf, periodNo, periodStart, periodEnd, periodDates, shiftPeriod, parseLabel, diffDays, todayTaipei } from './period.js';
@@ -184,7 +184,7 @@ function drawSelf(ctx) {
     const out = {};
     for (const d of periodDates(H.period)) if (openDay(d) && cells[d] && cells[d].t) out[d] = { t: '' };
     if (!Object.keys(out).length) { say('這一期已經是空白的'); return ctx.rerender(); }
-    if (!window.confirm(`把 ${H.period} 這一期全部清空？請假也會一起清掉，清完再用「填入空白的天」重新填。`)) return;
+    if (!(await confirmBox(`把 ${H.period} 這一期全部清空？請假也會一起清掉，清完再用「填入空白的天」重新填。`, '全部清空'))) return;   // 跟門市同一種確認框（2026-11-05 Fable 審查）
     await save(out, '已清空這一期，用「填入空白的天」重新填；約 1 分鐘內送到 LINE');
   });
 }
