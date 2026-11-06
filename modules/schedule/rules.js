@@ -17,7 +17,7 @@
 // }
 // 回傳 [{ code, level:'block'|'warn'|'info', emp_id, date, msg }]
 import { periodDates, addDays, diffDays, weekday } from './period.js';
-import { shiftMinutes, gapMinutes } from './hours.js';
+import { shiftMinutes, gapMinutes, cellShift, cellShiftIds, combineShifts } from './hours.js';
 
 export const H = 60;
 const FT_DAY_NORMAL = 10 * H, PT_DAY_NORMAL = 8 * H;
@@ -80,6 +80,8 @@ export const employed = (st, d) => (!st.hire_date || st.hire_date <= d) && (!st.
 export function comboError(c, hol, d) {
   if (!c) return null;
   const s = !!c.shift_id;
+  if (c.shift2_id && !s) return '要先選第一個班別才能加第二班';
+  if (c.shift2_id && c.shift2_id === c.shift_id) return '第二班不能跟第一班一樣';
   switch (c.day_type) {
     case 'W': return c.leave ? '工作日不能填假別' : null;
     case 'R': return s ? '例假不能排班' : (c.leave ? '例假不能填假別' : null);
@@ -92,6 +94,33 @@ export function comboError(c, hol, d) {
   }
 }
 
+/** 第二班（一天兩個班別，2026-11-07）：班別要存在、時間不能重疊、合起來最多 3 段；回傳錯誤字串或 null */
+export function twoError(shifts, c) {
+  if (!c || !c.shift2_id) return null;
+  if (!c.shift_id) return '要先選第一個班別才能加第二班';
+  const a = shifts[c.shift_id], b = shifts[c.shift2_id];
+  if (!b) return '第二班的班別已不存在';
+  if (!a) return null;
+  try { combineShifts(a, b); return null; } catch (e) { return e.message; }
+}
+
+/** 存檔前整理第二班：開始較早的放 shift_id；有錯回 { err }（重疊、超過 3 段、合計超過 DAY_MAX），沒錯回 { cell }。伺服器與示範後端共用 */
+export function orderTwo(shifts, c) {
+  if (!c || !c.shift2_id) return { cell: Object.assign({}, c, { shift2_id: null }) };
+  const base = comboError(c);
+  if (base) return { err: base };
+  let a = shifts[c.shift_id], b = shifts[c.shift2_id];
+  if (!a || !b) return { err: '班別不存在' };
+  const cell = Object.assign({}, c);
+  const m = (x) => { const [h, mm] = String(x.start).split(':'); return +h * 60 + +mm; };
+  if (m(b) < m(a)) { cell.shift_id = c.shift2_id; cell.shift2_id = c.shift_id; [a, b] = [b, a]; }
+  const err = twoError(shifts, cell);
+  if (err) return { err };
+  const mins = shiftMinutes(cellShift(shifts, cell));
+  if (mins > DAY_MAX) return { err: `兩個班合起來 ${hm(mins)}，一天最多 ${DAY_MAX / H} 小時` };
+  return { cell };
+}
+
 /** 一人逐日分鐘：{date: {work, normal, ot}}；照 spec 第 3 節分正常與加班（四週變形：日 10 小時、期 160 小時；每週制：日 8、週 40） */
 export function minutesOf(ctx, emp, dates) {
   const out = {};
@@ -99,7 +128,7 @@ export function minutesOf(ctx, emp, dates) {
   const weekNormal = {};
   for (const d of dates) {
     const c = (ctx.days[emp] || {})[d];
-    const sh = c && c.shift_id ? ctx.shifts[c.shift_id] : null;
+    const sh = cellShift(ctx.shifts, c);
     const work = sh ? shiftMinutes(sh) : 0;
     let normal = 0, ot = 0;
     if (work) {
@@ -129,7 +158,7 @@ function workedOn(ctx, emp, d) {
   const a = (ctx.actuals && ctx.actuals[emp] || {})[d];
   if (a && ctx.period && d < periodDates(ctx.period)[0]) return { date: d, shift: { start: a.start, end: a.end, break_min: 0 } };   // 前期有實際出勤就以實際為準（GPT 上線前審查 6）
   const c = (ctx.days[emp] || {})[d];
-  if (c) return c.shift_id ? { date: d, shift: ctx.shifts[c.shift_id] } : null;
+  if (c) return c.shift_id ? { date: d, shift: cellShift(ctx.shifts, c) || undefined } : null;
   return a ? { date: d, shift: { start: a.start, end: a.end, break_min: 0 } } : null;
 }
 function hasPrior(ctx, emp, start) {
@@ -179,6 +208,8 @@ export function checkPeriod(ctx) {
       if (err) { add('V0', 'block', e, d, `${who} ${md(d)}：${err}`); continue; }
       if (c.day_type === 'W' && !c.shift_id) add('V1', 'block', e, d, `${who} ${md(d)} 是工作日但沒有排班`);
       if (c.shift_id && !ctx.shifts[c.shift_id]) add('V0', 'block', e, d, `${who} ${md(d)} 的班別已不存在`);
+      const e2 = twoError(ctx.shifts, c);
+      if (e2) add('V0', 'block', e, d, `${who} ${md(d)}：${e2}`);
     }
 
     // 單日總工時（兩種制度都擋 DAY_MAX＝10 小時）
@@ -286,13 +317,13 @@ export function checkPeriod(ctx) {
       const c = mine[d];
       const t = termAt(ctx.terms, e, d);
       const al = allowedList(t, ctx.holidays, d);
-      if (c && c.shift_id && al.length && !al.includes(c.shift_id))
-        add('D3', 'block', e, d, `${who} ${isRedDay(ctx.holidays, d) && t.allowed_shifts_hol && t.allowed_shifts_hol.length ? '假日' : ''}不能上${(ctx.shifts[c.shift_id] || {}).name || c.shift_id}（${md(d)}）`);
+      for (const sid of cellShiftIds(c)) if (al.length && !al.includes(sid))
+        add('D3', 'block', e, d, `${who} ${isRedDay(ctx.holidays, d) && t.allowed_shifts_hol && t.allowed_shifts_hol.length ? '假日' : ''}不能上${(ctx.shifts[sid] || {}).name || sid}（${md(d)}）`);
       const p = (ctx.pins && ctx.pins[e] || {})[d];
       if (!p || !c) continue;
       if (p.kind === 'off' && c.shift_id) add('D4', 'block', e, d, `${who} ${md(d)} 指定休假，卻排了班`);
       if (p.kind === 'work' && !c.shift_id) add('D4', 'block', e, d, `${who} ${md(d)} 指定上班，卻沒有排班`);
-      if (p.kind === 'shift' && c.shift_id !== p.shift_id) add('D4', 'block', e, d, `${who} ${md(d)} 指定上${(ctx.shifts[p.shift_id] || {}).name || p.shift_id}，卻排了別的`);
+      if (p.kind === 'shift' && !cellShiftIds(c).includes(p.shift_id)) add('D4', 'block', e, d, `${who} ${md(d)} 指定上${(ctx.shifts[p.shift_id] || {}).name || p.shift_id}，卻排了別的`);
     }
 
     // 備援這期被自動叫來補的日子（手動排、指定上班／班別的不算）：放進提醒清單，重新整理也看得到（2026-10-28）
@@ -310,7 +341,7 @@ export function checkPeriod(ctx) {
     for (const st of ctx.staff) {
       if (!employed(st, d)) continue;                                  // 不在職的人就算格子有班也不算人力
       const c = (ctx.days[st.emp_id] || {})[d];
-      if (c && c.shift_id) { count[c.shift_id] = (count[c.shift_id] || 0) + 1; (onShift[c.shift_id] = onShift[c.shift_id] || []).push(st.emp_id); }
+      for (const sid of cellShiftIds(c)) { count[sid] = (count[sid] || 0) + 1; (onShift[sid] = onShift[sid] || []).push(st.emp_id); }      // 一天兩班：兩個班各算一人次
     }
     for (const sid in need) {
       const n = count[sid] || 0, sh = (ctx.shifts[sid] || {}).name || sid;
@@ -334,6 +365,7 @@ export function checkPeriod(ctx) {
       for (const st of ctx.staff) {
         const c = employed(st, d) ? (ctx.days[st.emp_id] || {})[d] : null;
         if (c && c.shift_id && c.station_id) count[c.station_id] = (count[c.station_id] || 0) + 1;
+        if (c && c.shift2_id && c.station2_id) count[c.station2_id] = (count[c.station2_id] || 0) + 1;      // 第二班各選各的站、各算一人次
       }
       const lack = Object.keys(need).filter(id => stations[id] && stations[id].active && (count[id] || 0) < need[id])
         .sort((a, b) => (stations[a].sort || 0) - (stations[b].sort || 0) || (a < b ? -1 : 1))
@@ -398,18 +430,20 @@ export function checkSelfMonth(ctx) {
       if (err) { add('V0', 'block', e, d, `${who} ${md(d)}：${err}`); continue; }
       if (c.day_type === 'W' && !c.shift_id) add('V1', 'block', e, d, `${who} ${md(d)} 是工作日但沒有選班別`);
       if (c.shift_id && !shifts[c.shift_id]) add('V0', 'block', e, d, `${who} ${md(d)} 的班別已不存在`);
+      const e2 = twoError(shifts, c);
+      if (e2) add('V0', 'block', e, d, `${who} ${md(d)}：${e2}`);
     }
 
     // 單日超過 DAY_MAX（10 小時）
     for (const d of inMonth) {
-      const c = mine[d], sh = c && c.shift_id ? shifts[c.shift_id] : null;
+      const c = mine[d], sh = cellShift(shifts, c);
       if (sh && shiftMinutes(sh) > DAY_MAX) add('F4', 'block', e, d, `${who} ${md(d)} 一天 ${hm(shiftMinutes(sh))}，超過 ${DAY_MAX / H} 小時`);
     }
 
     // 換班間隔 MIN_GAP（11 小時，含跨月：月初前、月底後各 3 天的相鄰格）
     let prev = null;
     for (let d = addDays(first, -3); d <= addDays(last, 3); d = addDays(d, 1)) {
-      const c = mine[d], sh = c && c.shift_id ? shifts[c.shift_id] : null;
+      const c = mine[d], sh = cellShift(shifts, c);
       if (!sh) continue;
       if (prev) {
         const g = gapMinutes(prev.date, prev.shift, d, sh);
@@ -431,7 +465,7 @@ export function checkSelfMonth(ctx) {
       if (rs < 1 && missing < lack) add('W1', 'block', e, at, `${who} ${md(wk[0])} 這週沒有例假，每週至少要 1 天例假`);
       const hOt = known.find((d) => d >= first && d <= last && mine[d].day_type === 'H' && mine[d].shift_id);      // 休息日排了加班：照樣不算休息日，但講清楚是哪一天
       if (hs < 1 && missing < lack) add('W2', 'block', e, hOt || at, hOt ? `${who} ${md(hOt)} 休息日加班（要付加班費），${md(wk[0])} 這週就沒有休息日了` : `${who} ${md(wk[0])} 這週沒有休息日，每週至少要 1 天休息日`);
-      const mins = known.reduce((a, d) => a + (mine[d].shift_id && shifts[mine[d].shift_id] ? shiftMinutes(shifts[mine[d].shift_id]) : 0), 0);
+      const mins = known.reduce((a, d) => { const sh = cellShift(shifts, mine[d]); return a + (sh ? shiftMinutes(sh) : 0); }, 0);
       if (mins > WEEK_NORMAL) add('W3', 'warn', e, at, `${who} ${md(wk[0])} 這週排了 ${hm(mins)}，超過 40 小時的部分算加班`);
     }
 

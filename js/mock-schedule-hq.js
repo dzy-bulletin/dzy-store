@@ -2,7 +2,7 @@
 // 檢查直接用 rules.js 的 checkSelfMonth。簡化處（真伺服器才有）：fixed 的「1 分鐘合併重送」這裡改成立刻入列；每期開始前 10 天自動產生下一期改成每次動作前補產（同伺服器 tick 的補產規則，不看 06:00）。
 // 央廚（fixed）上線就自動切換（modeFrom＝MODE_FROM，開起來就已經有班表；2026-10-27 起畫面與產生都以 T 期為單位）；沒設固定班別的人平日空白，fixedShift 設好後自動補上他從明天起的平日。
 // e2e 看發布：db.sched[<店>].pubs[<期>]＝[{seq, kind:'publish', status, payload:{cells…}}]。
-import { checkSelfMonth, checkSelfPeriod, comboError, employed, holName } from '../modules/schedule/rules.js';
+import { checkSelfMonth, checkSelfPeriod, comboError, orderTwo, employed, holName } from '../modules/schedule/rules.js';
 import { periodOf, periodNo, periodDates, periodStart, periodEnd, label, addDays, diffDays, weekday, todayTaipei, parseLabel } from '../modules/schedule/period.js';
 
 const ok = (data) => ({ ok: true, data: data === undefined ? {} : data });
@@ -14,7 +14,7 @@ const prevMonth = (m) => addDays(m + '-01', -1).slice(0, 7);
 // 總部自填 2026-11-03 起以期別（T01…）為單位；selfMonths 的鍵是期別
 const isP = (k) => /^T\d{2,}$/.test(k);
 const spanD = (k) => (isP(k) ? periodDates(k) : monthDates(k));
-const toCell = (c) => { const o = { t: c.day_type }; if (c.shift_id) o.s = c.shift_id; if (c.leave) o.l = c.leave; return o; };
+const toCell = (c) => { const o = { t: c.day_type }; if (c.shift_id) o.s = c.shift_id; if (c.shift_id && c.shift2_id) o.s2 = c.shift2_id; if (c.leave) o.l = c.leave; return o; };
 const sameCell = (a, b) => !!a && !!b && a.day_type === b.day_type && (a.shift_id || null) === (b.shift_id || null) && (a.leave || null) === (b.leave || null);
 const MODE_FROM = '2026-11-01';
 const GEN_LEAD = 10;      // 同 server/schedule-hq.js：下一期開始前 10 天自動產生
@@ -31,12 +31,22 @@ export function stationNeedFor(st, dates) {
 // 本檔所有「寫格子」（央廚自動產生、廠長改格子、固定班別重產、總部自填存草稿與核准）都走這裡；刪格子（delete）整列沒了，站別跟著沒了。
 export function putDay(st, e, d, cell, source) {
   const old = (st.days[e] || {})[d];
-  let station = null;
+  let station = null, station2 = null;
+  const defSt = () => { const p = st.staff.find((x) => x.emp_id === e); const def = p && p.default_station ? st.stations[p.default_station] : null; return def && def.active ? def.id : null; };
+  // 同 server/schedule.js upsertDay：站別跟著班別走；新加的第二班帶預設站
+  const shift2 = cell.shift_id && cell.shift2_id ? cell.shift2_id : null;
+  const was = {};
+  if (old && old.shift_id) was[old.shift_id] = old.station_id || null;
+  if (old && old.shift2_id) was[old.shift2_id] = old.station2_id || null;
   if (cell.shift_id) {
-    if (old && old.shift_id) station = old.station_id || null;
-    else { const p = st.staff.find((x) => x.emp_id === e); const def = p && p.default_station ? st.stations[p.default_station] : null; if (def && def.active) station = def.id; }
+    if (cell.shift_id in was) station = was[cell.shift_id];
+    else if (old && old.shift_id && !(shift2 && old.shift_id === shift2)) station = old.station_id || null;
+    else station = defSt();
   }
-  (st.days[e] = st.days[e] || {})[d] = Object.assign({}, cell, { source, station_id: station });
+  if (shift2) station2 = shift2 in was ? was[shift2] : defSt();
+  const out = Object.assign({}, cell, { source, station_id: station });
+  if (shift2) { out.shift2_id = shift2; out.station2_id = station2; } else { delete out.shift2_id; delete out.station2_id; }
+  (st.days[e] = st.days[e] || {})[d] = out;
 }
 
 
@@ -314,9 +324,13 @@ export function hqAction(action, me, b, db, hol, pa) {
       if (d < st.modeFrom) return fail('BAD_INPUT', `${st.modeFrom} 以前的日子不在這套排班`);
       const c = b.cells[d];
       if (c && c.t === '') { items.push([d, null]); continue; }
-      const cell = { day_type: c.t, shift_id: c.s || null, leave: c.l || null };
+      let cell = { day_type: c.t, shift_id: c.s || null, leave: c.l || null, shift2_id: c.s2 || null };
       const err = comboError(cell, hol, d); if (err) return fail('BAD_INPUT', err);
       if (cell.shift_id && !(st.shifts[cell.shift_id] && st.shifts[cell.shift_id].active)) return fail('BAD_INPUT', '班別不存在或已停用');
+      if (cell.shift2_id) {                                       // 同 server/schedule-hq.js cellIn
+        if (!(st.shifts[cell.shift2_id] && st.shifts[cell.shift2_id].active)) return fail('BAD_INPUT', '第二班的班別不存在或已停用');
+        const o = orderTwo(st.shifts, cell); if (o.err) return fail('BAD_INPUT', o.err); cell = o.cell;
+      }
       items.push([d, cell]);
     }
     if (!items.length) return fail('BAD_INPUT', '沒有要存的格子');

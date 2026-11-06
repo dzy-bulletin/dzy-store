@@ -72,3 +72,43 @@ export function shiftCode(name) {
   const m = /^([A-Za-z0-9Ａ-Ｚａ-ｚ０-９]+)\s*班$/.exec(s);
   return m ? m[1] : s;
 }
+
+// 一天兩個班別（2026-11-07 Eason，docs/two-shifts/requirements.md）：同一格選兩個既有班別。
+// 合成一個「虛擬班別」給工時、換班間隔、單日上限、早晚人數、LINE、核定預填共用：各段照時間先後、剛好相連的兩段併成一段（休息相加）；
+// 重疊就丟錯；合起來最多 SEG_MAX 段（打卡端 LINE 只認 2～3 段）。a 要是開始較早的那班。
+export const TWO_SEG_MAX = SEG_MAX;
+export function combineShifts(a, b) {
+  const segs = [];
+  let prevEnd = null, first = null, work = 0;
+  for (const x of segsOf(a).concat(segsOf(b))) {
+    let s0 = toMin(x.start), e0 = toMin(x.end);
+    if (prevEnd !== null) while (s0 < prevEnd - 720) s0 += 1440;      // 比上一段早很多＝隔天（跨夜）
+    if (prevEnd !== null && s0 < prevEnd) throw new Error(`${b.name || '第二班'}跟${a.name || '第一班'}時間重疊`);
+    while (e0 <= s0) e0 += 1440;
+    if (first === null) first = s0;
+    const brk = Math.max(0, Number(x.break_min) || 0);
+    work += e0 - s0 - brk;
+    const last = segs[segs.length - 1];
+    if (last && prevEnd === s0) { last.end = x.end; last.break_min += brk; }      // 剛好相連（A 到 14:00、C 從 14:00）＝同一段，不用中間打卡
+    else segs.push({ start: x.start, end: x.end, break_min: brk });
+    prevEnd = e0;
+  }
+  if (prevEnd - first > 1440) throw new Error('兩個班合起來不能超過 24 小時');
+  if (segs.length > TWO_SEG_MAX) throw new Error(`兩個班合起來最多 ${TWO_SEG_MAX} 段`);
+  const out = { id: `${a.id}+${b.id}`, name: `${a.name}＋${b.name}`, start: segs[0].start, end: segs[segs.length - 1].end, break_min: prevEnd - first - work, two: [a.id, b.id] };
+  if (segs.length >= 2) out.segs = segs; else out.break_min = segs[0].break_min;
+  if (a.color) out.color = a.color;
+  return out;
+}
+/** 一格的班別（有第二班＝合成的虛擬班別）；沒有班別或班別不存在＝null。合不起來（舊資料重疊）＝只用第一班 */
+export function cellShift(shifts, c) {
+  if (!c || !c.shift_id) return null;
+  const a = shifts[c.shift_id];
+  if (!a) return null;
+  if (!c.shift2_id) return a;
+  const b = shifts[c.shift2_id];
+  if (!b) return a;
+  try { return combineShifts(a, b); } catch (e) { return a; }
+}
+/** 一格有哪幾個班別 id（第二班放後面） */
+export const cellShiftIds = (c) => (c && c.shift_id ? (c.shift2_id ? [c.shift_id, c.shift2_id] : [c.shift_id]) : []);

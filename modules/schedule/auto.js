@@ -5,7 +5,7 @@
 // 步驟：0 輸入檢查 → 1 保留指定／手動 → 2 排日別（每週選休假日，以「休了以後各班還剩多少人」評分）
 //       → 3 逐日配對（先滿足最少人數，用增廣路徑做二分圖配對）→ 4 修復（同週對調休假日）→ 4.2 備援同仁補缺人 → 5 整期檢查，沒有「擋」才回傳
 import { periodDates, addDays } from './period.js';
-import { shiftMinutes, gapMinutes } from './hours.js';
+import { shiftMinutes, gapMinutes, cellShift, cellShiftIds } from './hours.js';
 import { checkPeriod, termAt, employed, isHoliday, allowedList, backupAt, ptCapMin, MIN_GAP, FT_OT_MAX, DAY_MAX } from './rules.js';
 
 const REPAIR_MAX = 200;   // DAY_MAX 改從 rules.js 來（2026-11-01 改 10 小時）
@@ -339,7 +339,7 @@ function buildDays(ctx, dates, fixed, plan) {
     const d0 = addDays(dates[0], -1);
     const c = (ctx.days[st.emp_id] || {})[d0];
     const a = ((ctx.actuals || {})[st.emp_id] || {})[d0];
-    prevShift[st.emp_id] = a ? { start: a.start, end: a.end, break_min: 0 } : c ? (c.shift_id ? ctx.shifts[c.shift_id] : null) : null;
+    prevShift[st.emp_id] = a ? { start: a.start, end: a.end, break_min: 0 } : cellShift(ctx.shifts, c);
   }
   const problems = [];
   // 計時同仁每期時數上限：先扣掉已固定的班，配班時逐天扣
@@ -349,7 +349,7 @@ function buildDays(ctx, dates, fixed, plan) {
     const t = termAt(ctx.terms, st.emp_id, first);
     const cap = ptCapMin(ctx.terms, st.emp_id, dates, first);           // 期中改目標工時：照天數比例分段，跟 P6 同一套（2026-10-28 Codex 審查）
     if (!t || t.kind !== 'pt' || cap == null) continue;
-    capLeft[st.emp_id] = cap - dates.reduce((a, d) => { const c = fixed[st.emp_id][d]; return a + (c && c.shift_id && ctx.shifts[c.shift_id] ? shiftMinutes(ctx.shifts[c.shift_id]) : 0); }, 0);
+    capLeft[st.emp_id] = cap - dates.reduce((a, d) => { const c = fixed[st.emp_id][d]; const sh = cellShift(ctx.shifts, c); return a + (sh ? shiftMinutes(sh) : 0); }, 0);
   }
   for (const d of dates) {
     const workers = [];
@@ -359,12 +359,12 @@ function buildDays(ctx, dates, fixed, plan) {
     for (const st of ctx.staff) {
       const e = st.emp_id;
       if (!employed(st, d)) continue;
-      if (fixed[e][d]) { out[e][d] = fixed[e][d]; if (fixed[e][d].shift_id) { fixedCount[fixed[e][d].shift_id] = (fixedCount[fixed[e][d].shift_id] || 0) + 1; fixedShift[e] = fixed[e][d].shift_id; } continue; }
+      if (fixed[e][d]) { out[e][d] = fixed[e][d]; for (const sid of cellShiftIds(fixed[e][d])) fixedCount[sid] = (fixedCount[sid] || 0) + 1; if (fixed[e][d].shift_id) fixedShift[e] = fixed[e][d].shift_id; continue; }
       if (plan[e][d] === 'off') { out[e][d] = { day_type: labels[e][d], shift_id: null, leave: null, source: 'auto' }; continue; }
       if (plan[e][d] === 'guo') { out[e][d] = { day_type: 'L', shift_id: null, leave: '國', source: 'auto' }; continue; }
       workers.push(e);
       const nx = fixed[e][addDays(d, 1)];
-      if (nx && nx.shift_id) nextShift[e] = ctx.shifts[nx.shift_id];
+      if (nx && nx.shift_id) nextShift[e] = cellShift(ctx.shifts, nx);
     }
     const { assign, unassigned, conflicts } = assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixedCount, { capLeft, fixedShift });
     const nm = (e) => (ctx.staff.find(s => s.emp_id === e) || {}).name;
@@ -381,7 +381,7 @@ function buildDays(ctx, dates, fixed, plan) {
       out[e][d] = { day_type: 'H', shift_id: null, leave: null, source: 'auto' };
       problems.push(`${nm(e)} ${md(d)} 沒有能上的班（${capLeft[e] !== undefined && Object.keys(ctx.shifts).every(s => shiftMinutes(ctx.shifts[s]) > capLeft[e]) ? '這期時數已經排滿' : '換班間隔或可上班別限制'}），改排休息日`);
     }
-    for (const st of ctx.staff) { const c = out[st.emp_id][d]; prevShift[st.emp_id] = c && c.shift_id ? ctx.shifts[c.shift_id] : null; }
+    for (const st of ctx.staff) { const c = out[st.emp_id][d]; prevShift[st.emp_id] = cellShift(ctx.shifts, c); }
   }
   return { out, problems };
 }
@@ -454,7 +454,7 @@ function scheduleCore(ctx, opts, guoSkip, keepManual) {
       // 休息日加班（H＋班）一律保留，連「全部重排」也不動：只能由店長手動改回休息日（Eason 2026-10-11，加班費不能因重排消失）
       // 自動排的國定假日假（source=auto）每次重排都重新挑日子；手動排的照請假保留
       const autoGuo = c && c.day_type === 'L' && c.leave === '國' && c.source === 'auto';
-      if (c && !autoGuo && (c.day_type === 'L' || (c.day_type === 'H' && c.shift_id) || (keepManual && c.source === 'manual'))) fixed[e][d] = c;
+      if (c && !autoGuo && (c.day_type === 'L' || (c.day_type === 'H' && c.shift_id) || c.shift2_id || (keepManual && c.source === 'manual'))) fixed[e][d] = c;      // 一天兩班只能手動加：重排一律保留（2026-11-07）
       const p = pinOf(ctx, e, d);
       if (p && p.kind === 'shift' && !fixed[e][d]) fixed[e][d] = { day_type: 'W', shift_id: p.shift_id, leave: null, source: 'pin' };
     }

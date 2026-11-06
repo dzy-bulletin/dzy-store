@@ -27,18 +27,21 @@ const LEAVE = { '特': '特休', '補': '補休', '國': '國定' };
 const shColor = (sh) => (sh && /^#[0-9A-Fa-f]{6}$/.test(sh.color || '') ? sh.color : '');      // 班別顏色（2026-11-03 Eason：三個班表都依班別上色，取代 10/12「班別不分顏色」）
 export function cellInfo(c, shiftMap) {
   if (!c || !c.t) return { t: '', cls: 'empty' };
-  if (c.t === 'W') { const sh = shiftMap[c.s]; return { t: sh ? shiftCode(sh.name) : (c.s || '班'), cls: 'work', color: shColor(sh) }; }
-  if (c.t === 'H') { if (c.s) { const sh = shiftMap[c.s]; return { t: sh ? shiftCode(sh.name) : c.s, cls: 'work ot', ot: true, color: shColor(sh) }; } return { t: '休', cls: 'off' }; }      // 休息日加班：班別＋橘色「休加」（otTag，同門市班表）
+  const nm = (id) => { const sh = shiftMap[id]; return sh ? shiftCode(sh.name) : id; };
+  const two = c.s && c.s2 ? '＋' + nm(c.s2) : '';      // 一天兩班顯示「A＋C」（2026-11-07）
+  if (c.t === 'W') { const sh = shiftMap[c.s]; return { t: (c.s ? nm(c.s) : '班') + two, cls: 'work' + (two ? ' two' : ''), color: shColor(sh) }; }
+  if (c.t === 'H') { if (c.s) { const sh = shiftMap[c.s]; return { t: nm(c.s) + two, cls: 'work ot' + (two ? ' two' : ''), ot: true, color: shColor(sh) }; } return { t: '休', cls: 'off' }; }      // 休息日加班：班別＋橘色「休加」（otTag，同門市班表）
   if (c.t === 'R') return { t: '例', cls: 'rest' };
   if (c.t === 'L') return { t: LEAVE[c.l] || '假', cls: 'leave' };
   return { t: '', cls: 'empty' };
 }
 export const otTag = (x) => (x.ot ? '<i class="sc-ot">休加</i>' : '');
 /** 選單值 → 格子（'S:<班別>'、'O:<班別>'＝休息日加班、'R'、'H'、'L:特'…、'CLEAR'） */
-export function cellOfValue(v) {
+export function cellOfValue(v, v2) {
   if (v === 'CLEAR') return { t: '' };
-  if (v.startsWith('S:')) return { t: 'W', s: v.slice(2) };
-  if (v.startsWith('O:')) return { t: 'H', s: v.slice(2) };
+  const two = v2 ? { s2: v2 } : {};      // 第二班（一天兩班，2026-11-07）：只跟著班別、休息日加班
+  if (v.startsWith('S:')) return Object.assign({ t: 'W', s: v.slice(2) }, two);
+  if (v.startsWith('O:')) return Object.assign({ t: 'H', s: v.slice(2) }, two);
   if (v.startsWith('L:')) return { t: 'L', l: v.slice(2) };
   return { t: v };
 }
@@ -48,6 +51,12 @@ export function valueOfCell(c) {
   if (c.t === 'H' && c.s) return 'O:' + c.s;
   if (c.t === 'L') return 'L:' + c.l;
   return c.t;
+}
+/** 第二班選單（一天兩班，2026-11-07）：第一格選了班別才能選；只列使用中的班（原本選的停用班照列） */
+export function secondHtml(shifts, cur, firstVal, id) {
+  const on = /^[SO]:/.test(firstVal || '');
+  return `<label class="sc-two" for="${id}">＋第二班</label><select id="${id}" aria-label="第二個班別"${on ? '' : ' disabled'}><option value="">不加</option>${
+    shifts.filter((s) => s.active !== 0 && s.active !== false || s.id === cur).map((s) => `<option value="${esc(s.id)}"${s.id === cur ? ' selected' : ''}>${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('')}</select>`;
 }
 /** 格子可選的內容（班別、休息日、休息日加班（班別，2026-11-03 Eason：總部、央廚都照門市正職）、例假、特休、補休、國定假日假） */
 export function cellOptions(shifts, cur, withClear) {

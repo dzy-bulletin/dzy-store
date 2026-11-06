@@ -2,7 +2,7 @@
 // 規格 docs/schedule-hq/spec.md §3、§5、§10.1。資料一律整包重讀（selfLoad 回來的就是最新的狀態、版本與檢查結果），畫面不自己拼。
 import { esc, busy, confirmBox } from '../../js/ui.js';
 import { timeText, shiftCode } from './hours.js';
-import { call, calHtml, resultsHtml, issueMap, cellOptions, cellOfValue, valueOfCell, md, defaultSelfPeriod, SELF_OPEN, WD } from './hq.js';
+import { call, calHtml, resultsHtml, issueMap, cellOptions, cellOfValue, valueOfCell, secondHtml, md, defaultSelfPeriod, SELF_OPEN, WD } from './hq.js';
 import { weekday, periodOf, periodNo, periodStart, periodEnd, periodDates, shiftPeriod, parseLabel, diffDays, todayTaipei } from './period.js';
 import { canEdit } from './state.js';
 
@@ -152,7 +152,7 @@ function drawSelf(ctx) {
 
   if (H.sel && editable) {
     el.insertAdjacentHTML('beforeend', `<div class="card sc-editor" id="hqEditor"><b>${md(H.sel)}（${WD[weekday(H.sel)]}）${D.holidays[H.sel] ? esc(D.holidays[H.sel]) : ''}</b>
-      <div class="row mt"><select id="hqCellSel" aria-label="這一天要選什麼">${cellOptions(shifts, valueOfCell(cells[H.sel] || {}), true)}</select>
+      <div class="row mt"><select id="hqCellSel" aria-label="這一天要選什麼">${cellOptions(shifts, valueOfCell(cells[H.sel] || {}), true)}</select>${secondHtml(shifts, (cells[H.sel] || {}).s2, valueOfCell(cells[H.sel] || {}), 'hqCellSel2')}
       <button type="button" class="btn" id="hqCellOk">套用</button><button type="button" class="btn ghost" id="hqCellX">取消</button></div></div>`);
   }
   const q = (s) => el.querySelector(s);
@@ -166,7 +166,8 @@ function drawSelf(ctx) {
   };
   el.querySelectorAll('button.hq-day').forEach((b) => { b.onclick = () => { H.sel = b.dataset.date; say(''); ctx.rerender(); }; });
   if (q('#hqCellX')) q('#hqCellX').onclick = () => { H.sel = null; ctx.rerender(); };
-  if (q('#hqCellOk')) q('#hqCellOk').onclick = () => busy(q('#hqCellOk'), () => save({ [H.sel]: cellOfValue(q('#hqCellSel').value) }, '已存，約 1 分鐘內送到 LINE'));
+  if (q('#hqCellOk')) q('#hqCellOk').onclick = () => busy(q('#hqCellOk'), () => save({ [H.sel]: cellOfValue(q('#hqCellSel').value, q('#hqCellSel2') && !q('#hqCellSel2').disabled ? q('#hqCellSel2').value : '') }, '已存，約 1 分鐘內送到 LINE'));
+  if (q('#hqCellSel') && q('#hqCellSel2')) q('#hqCellSel').onchange = () => { const on = /^[SO]:/.test(q('#hqCellSel').value); q('#hqCellSel2').disabled = !on; if (!on) q('#hqCellSel2').value = ''; };
   if (q('#hqFill')) q('#hqFill').onclick = () => busy(q('#hqFill'), async () => {
     const sid = q('#hqFillShift').value, out = {};
     if (!sid) { say('還沒有總部班別，請先請主管新增班別', true); return ctx.rerender(); }
