@@ -435,6 +435,46 @@ function buildCard(emp, date) {
   const result = h('div', 'du-result'); result.hidden = true;
   body.append(actions, result);
   const say = (cls, text) => { result.className = 'du-result ' + cls; result.hidden = false; result.textContent = text; };
+  // 主管代開加班／忘打卡單（2026-11-06 核定綁定申請單）：核定被擋「缺單」、而且那天超過 7 天（同仁自己補不了）才出現；送總監層級審
+  let proxyBox = null;
+  const proxyForm = (d) => {
+    if (proxyBox) proxyBox.remove();
+    proxyBox = h('div', 'du-proxy');
+    const kind = h('select', 'du-proxy-kind'); [['ot', '加班單'], ['miss', '忘打卡單']].forEach(([v, t]) => kind.append(h('option', null, t, { value: v })));
+    const mt = h('select', 'du-proxy-mt'); [['out', '補下班卡'], ['in', '補上班卡'], ['both', '補上班＋下班'], ['break', '補中間休息（下班＋回來上班）']].forEach(([v, t]) => mt.append(h('option', null, t, { value: v })));
+    const a = h('input', 'du-proxy-a', null, { type: 'time' }), b = h('input', 'du-proxy-b', null, { type: 'time' });
+    const la = h('span', 'du-proxy-la'), lb = h('span', 'du-proxy-lb');
+    const why = h('input', 'du-proxy-why', null, { type: 'text', maxlength: '100', placeholder: '原因（必填）' });
+    const go = h('button', 'btn', '送出代開（送總監層級審核）', { type: 'button' });
+    const sync = () => {
+      const ot = kind.value === 'ot', m = mt.value;
+      mt.hidden = ot;
+      la.textContent = ot ? '加班開始' : m === 'break' ? '回來上班' : '實際上班';
+      lb.textContent = ot ? '加班結束' : m === 'break' ? '休息開始（下班）' : '實際下班';
+      la.hidden = a.hidden = !ot && m === 'out';
+      lb.hidden = b.hidden = !ot && m === 'in';
+    };
+    kind.onchange = mt.onchange = sync; sync();
+    go.onclick = async () => {
+      const ot = kind.value === 'ot';
+      const p = { store: emp.store, emp_id: emp.emp_id, date: d, kind: kind.value, reason: why.value.trim() };
+      if (!ot) p.miss_type = mt.value;
+      if (!a.hidden) p.start = a.value;
+      if (!b.hidden) p.end = b.value;
+      if ((!a.hidden && !a.value) || (!b.hidden && !b.value)) { say('bad', '✕ 請填時間'); return; }
+      if (!p.reason) { say('bad', '✕ 代開要寫原因'); return; }
+      go.disabled = true; go.textContent = '送出中…';
+      try {
+        const res = await call('mgr_req_proxy', p);
+        say('ok', '✓ 已代開：' + res.summary + '。等總監層級在「申請審核」核准後，再回來送出核定。');
+        proxyBox.remove(); proxyBox = null;
+      } catch (e) { say('bad', '✕ 代開失敗：' + e.message); go.disabled = false; go.textContent = '送出代開（送總監層級審核）'; }
+    };
+    proxyBox.append(h('div', 'du-proxy-lead', '這天已超過 7 天，同仁自己補不了單。可以替同仁代開，代開的單要由總監層級（品牌總監／廚藝總監；總部是人資主管）核准。'),
+      h('div', 'du-proxy-row', null), why, go);
+    proxyBox.children[1].append(kind, mt, la, a, lb, b);
+    result.after(proxyBox);
+  };
 
   submit.onclick = async () => {
     // 硬擋（Eason 2026-08-22「硬擋，不給送出」，manager.html:1296–1320）：額度用完、期限過了的假別不給送出。
@@ -497,7 +537,10 @@ function buildCard(emp, date) {
       setBadge(res, C.leavesOf(res));
       card.__pending = false;
       card.dispatchEvent(new CustomEvent('emp-approved', { bubbles: true, detail: { emp_id: emp.emp_id, date: approveDate, store: emp.store } }));
-    } catch (e) { say('bad', '✕ 核定失敗：' + e.message); }
+    } catch (e) {
+      say('bad', '✕ 核定失敗：' + e.message);
+      if (/^這天還不能核定/.test(e.message) && approveDate < C.addDaysStr(C.taipeiToday(), -7) && !readOnly) proxyForm(approveDate);
+    }
     finally { submit.disabled = false; submit.textContent = '重新送出核定'; }
   };
 

@@ -116,13 +116,14 @@ function buildMine(it) {
 }
 // 打卡端 upper_kind（2026-10-29）：mgr＝值班主管本人；dept＝總部同仁在門市（申請照原身分）；home＝不算本店支援。舊打卡後端沒有這欄＝值班主管本人
 function upperIsDept(it) { return it.upper_kind === 'dept' || it.upper_kind === 'home'; }
-function upperLabel(it) { return upperIsDept(it) ? '部門同仁' : '值班主管本人'; }
+function upperLabel(it) { return it.upper_kind === 'director' ? '主管代開' : upperIsDept(it) ? '部門同仁' : '值班主管本人'; }
 
 function buildItem(it, card, title) {
   const el = h('div', 'du-rq'); el.dataset.reqId = String(it.id); el.__req = it; if (it.store) el.dataset.store = it.store;
   const l1 = h('div', 'du-rq-l1'), who = h('span', 'du-rq-who');
-  const canDecide = canWriteRow(it.kind === 'miss' ? 'hours' : 'req', it.emp_id, it.store);      // 不在名單（只看）：沒有勾選、核准、退回、看附件，改顯示「唯讀」；忘刷單看工時名單（2026-11-04）
-  const upOn = it.upper === true && it.kind !== 'miss';      // 忘刷單歸打卡店店長（2026-11-04），打卡端的「部門同仁／值班主管本人」標記不套用
+  const isProxy = it.upper_kind === 'director' || !!it.proxy_by;      // 主管代開（2026-11-06）：只有總監層級能核，伺服器給 can_decide
+  const canDecide = isProxy ? it.can_decide === true : canWriteRow(it.kind === 'miss' ? 'hours' : 'req', it.emp_id, it.store);      // 不在名單（只看）：沒有勾選、核准、退回、看附件，改顯示「唯讀」；忘刷單看工時名單（2026-11-04）
+  const upOn = it.upper === true && (it.kind !== 'miss' || isProxy);      // 忘刷單歸打卡店店長（2026-11-04），打卡端的「部門同仁／值班主管本人」標記不套用
   const pick = h('input', 'du-rq-pick', null, { type: 'checkbox', 'aria-label': '勾選 ' + it.name + ' ' + it.summary });
   pick.onchange = () => syncBatch(card);
   if (canDecide) who.append(pick);
@@ -137,7 +138,7 @@ function buildItem(it, card, title) {
 
   const acts = h('div', 'du-rq-acts');
   const ok = h('button', 'du-rq-ok btn', '核准', { type: 'button' }), no = h('button', 'du-rq-no btn ghost', '退回', { type: 'button' });
-  if (canDecide) acts.append(ok, no); else acts.append(h('span', 'du-ro', upOn ? (upperIsDept(it) ? '部門主管審核中' : '送上層審核中') : '唯讀'));
+  if (canDecide) acts.append(ok, no); else acts.append(h('span', 'du-ro', upOn ? (isProxy ? '送總監層級審核中' : upperIsDept(it) ? '部門主管審核中' : '送上層審核中') : '唯讀'));
   if (it.attach_id && canDecide) {
     const at = h('button', 'du-rq-att btn ghost', '看附件', { type: 'button' });
     at.onclick = async () => {

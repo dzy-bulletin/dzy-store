@@ -537,3 +537,10 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
   body:not(.embed) .m-tab.on .ic{filter:none;opacity:1}
 }
 @media print{.m-tabs,.m-back{display:none!important}}
+
+/* 主管代開加班／忘打卡單（2026-11-06 核定綁定申請單） */
+.du-proxy { margin-top: 8px; padding: 10px; border: 1px solid #e0c48a; border-radius: 8px; background: #fffaf0; color: #3a2f1d; display: grid; gap: 8px; }
+.du-proxy-lead { font-size: 13px; line-height: 1.5; }
+.du-proxy-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.du-proxy-row [hidden] { display: none; }
+.du-proxy-why { width: 100%; box-sizing: border-box; }
