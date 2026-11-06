@@ -56,7 +56,8 @@ function sidebarHtml(s, cur) {
     </nav>
     <div class="side-user"><div class="av">🙂</div>
       <div class="su-main"><div class="nm" id="whoName">${p ? esc(p.name + '・' + s.name) : esc(s.name)}</div><div class="rl">${p ? '管理系統帳號' : esc(s.code || '') + (s.role === 'admin' ? '・管理者' : '')}</div></div>
-      <div class="su-act">${!s.mustChangePassword && !p ? '<a href="#/password" id="pwLink">改密碼</a>' : ''}${!s.mustChangePassword && s.role === 'store' && (!p || s.isManager) && !ONLY ? '<a href="#/features" id="featLink">功能開關</a>' : ''}${many ? '<a href="#/switch" id="switchLink">換店</a>' : ''}<button id="logoutBtn" type="button">登出</button></div></div>
+      <div class="su-act">${!s.mustChangePassword && !p ? '<a href="#/password" id="pwLink">改密碼</a>' : ''}${!s.mustChangePassword && s.role === 'store' && (!p || s.isManager) && !ONLY ? '<a href="#/features" id="featLink">功能開關</a>' : ''}${many ? '<a href="#/switch" id="switchLink">換店</a>' : ''}<button id="logoutBtn" type="button">登出</button></div>
+      <a class="m-guide" id="guideLink" href="guide.html" target="_blank" rel="noopener">📖 操作手冊</a></div>
   </aside>`;
 }
 // 「本店同仁權限」：只有個人登入的店長（管理系統管理員也算店長）；門市登入、後台管理者帳號都沒有
@@ -74,12 +75,52 @@ function frame(s, inner, nav, opts) {
     app.innerHTML = `<header class="hdr"><div class="logos"></div><span class="ttl" id="sysName">${esc(UI.systemName)}</span></header><section class="login-view">${inner}</section>`;
   } else {
     const embedBar = EMBED && s.person ? `<div class="embed-who"><span id="embedWho">${esc(s.person.name + '・' + s.name)}</span>${onlyStores(s.stores).length > 1 ? '<a href="#/switch" id="embedSwitch">換店</a>' : ''}${ONLY === 'duty' ? '<a href="duty-guide.html" id="embedGuide" target="_blank" rel="noopener">📖 操作手冊</a>' : ''}</div>` : '';   // 考勤管理放給店長的圖解手冊（2026-10-30 Eason）
-    app.innerHTML = `<div class="app">${sidebarHtml(s, opts.cur)}<div class="main-wrap"><div class="topbar"><h1 class="page-title" id="pageTitle">${esc(opts.title || '')}</h1>${opts.sub ? `<div class="sub">${esc(opts.sub)}</div>` : ''}${embedBar}</div>${nav || ''}<main>${inner}</main></div></div>`;
+    const back = !EMBED && opts.cur !== 'home' ? '<a class="m-back" id="mBack" href="#/" aria-label="回首頁">‹</a>' : '';      // 手機獨立版頂端左側的返回（首頁以外都有），桌面與嵌入不顯示
+    app.innerHTML = `<div class="app">${sidebarHtml(s, opts.cur)}<div class="main-wrap"><div class="topbar">${back}<h1 class="page-title" id="pageTitle">${esc(opts.title || '')}</h1>${opts.sub ? `<div class="sub">${esc(opts.sub)}</div>` : ''}${embedBar}</div>${nav || ''}<main>${inner}</main></div></div>${EMBED ? '' : mobileTabsHtml()}`;
+    bindMobileChrome(opts.cur);
   }
   applyTheme(s ? s.brand : null, UI.logoUrl);
   bindLogout();
   postNav();
   return app.querySelector('main') || app.querySelector('.login-view');
+}
+// ---------- 手機獨立版（非嵌入、≤860px）：頂端一行＋底部三格分頁 首頁／功能／我（2026-11-06，照管理系統手機版） ----------
+// 版面只靠 CSS 切換（app.css「手機獨立版」）：桌面與嵌入都不顯示這排分頁。「功能」「我」不是新網址，而是把原本的側邊欄（#nav 功能格、.side-user 帳號區）
+// 在 body 掛 m-sheet-apps／m-sheet-me 時攤成整頁面板，所以 data-nav 等既有掛勾（e2e、postNav）都還在同一份 DOM。換頁（render 重畫 frame）自動收起。
+const mobileTabsHtml = () => `<nav class="m-tabs" id="mTabs" aria-label="主選單"><a class="m-tab" id="mTabHome" href="#/" data-m="home"><span class="ic">🏠</span>首頁</a>`
+  + `<button class="m-tab" id="mTabApps" type="button" data-m="apps" aria-expanded="false"><span class="ic">🧰</span>功能</button>`
+  + `<button class="m-tab" id="mTabMe" type="button" data-m="me" aria-expanded="false"><span class="ic">🙂</span>我</button></nav>`;
+let MCUR = '', SHEET_HASH = '';      // SHEET_HASH：面板打開時的網址；同一個畫面被資料補抓重畫時面板要留著，換了頁才收
+function mSync() {
+  const body = document.body, tabs = document.getElementById('mTabs');
+  if (!tabs) return;
+  const sheet = body.classList.contains('m-sheet-apps') ? 'apps' : body.classList.contains('m-sheet-me') ? 'me' : '';
+  const on = sheet || (MCUR === 'home' ? 'home' : MCUR ? 'apps' : '');
+  const h = document.getElementById('pageTitle');      // 面板打開時頂端寫「功能」「我」，收起還原原本的頁名
+  if (h) { if (h.dataset.orig === undefined) h.dataset.orig = h.textContent; h.textContent = sheet === 'apps' ? '功能' : sheet === 'me' ? '我' : h.dataset.orig; }
+  tabs.querySelectorAll('.m-tab').forEach(t => {
+    const m = t.dataset.m;
+    t.classList.toggle('on', m === on);
+    if (m !== 'home') t.setAttribute('aria-expanded', String(m === sheet));
+    if (m === on) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
+  });
+}
+const mClose = () => { document.body.classList.remove('m-sheet-apps', 'm-sheet-me'); mSync(); };
+function mToggle(which) {
+  const body = document.body, cls = 'm-sheet-' + which, was = body.classList.contains(cls);
+  body.classList.remove('m-sheet-apps', 'm-sheet-me');
+  if (!was) { body.classList.add(cls); window.scrollTo(0, 0); SHEET_HASH = location.hash; }
+  mSync();
+}
+// 面板裡點連結（功能格、換店、改密碼…）與首頁分頁：收起面板（同一頁的連結不會重畫，要自己收）。掛在 #app 上委派，側邊欄被局部重畫（功能開關）也不失效
+app.addEventListener('click', e => { if (e.target.closest && e.target.closest('#sidebar a[href], #mTabHome')) mClose(); });
+function bindMobileChrome(cur) {
+  if (location.hash !== SHEET_HASH) document.body.classList.remove('m-sheet-apps', 'm-sheet-me');
+  MCUR = cur || '';
+  const a = document.getElementById('mTabApps'), m = document.getElementById('mTabMe');
+  if (a) a.onclick = () => mToggle('apps');
+  if (m) m.onclick = () => mToggle('me');
+  mSync();
 }
 function bindLogout() {
   const lb = document.getElementById('logoutBtn');

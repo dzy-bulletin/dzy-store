@@ -488,3 +488,52 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
 @media (max-width:600px){.sp-tbl th,.sp-tbl td{padding:8px 6px;font-size:12.5px}.sp-tbl td:first-child,.sp-tbl th:first-child{position:sticky;left:0;background:#fff;min-width:84px}.sp-def td:first-child{background:#faf7f3}}
 .sp-newboxes .ft-row{border:0;min-height:40px;font-size:14px}
 .sp-tbl input[type=checkbox],.sp-newboxes input{accent-color:var(--red)}
+
+/* ── 手機獨立版（非嵌入、≤860px；2026-11-06）：頂端一行（返回‹＋頁名）＋底部固定三格 首頁／功能／我，照管理系統手機版 ──
+   「功能」＝側邊欄的 #nav 攤成整頁三欄格子，「我」＝側邊欄的帳號區攤成整頁（姓名、改密碼、換店、功能開關、操作手冊、登出）；
+   body 掛 m-sheet-apps／m-sheet-me 才顯示（shell.js bindMobileChrome），其餘時候側邊欄整個收起。桌面與嵌入模式（body.embed）完全不受影響。
+   用 body:not(.embed) 前綴蓋過上面 ≤860／≤400／≤360 那幾段舊的「頂端橫列」規則；留意安全區（瀏覽器列、瀏海、Home 橫條）。 */
+.m-tabs,.m-back,.m-guide{display:none}
+@media (max-width:860px){
+  body:not(.embed){--m-top:48px;--m-tab:58px;padding-bottom:calc(var(--m-tab) + env(safe-area-inset-bottom));padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+  body:not(.embed) .app{display:block;min-height:0}
+  body:not(.embed) .topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:4px;height:calc(var(--m-top) + env(safe-area-inset-top));padding:env(safe-area-inset-top) 12px 0 4px;background:var(--sidebar);color:#fff}
+  body:not(.embed) .topbar h1,body:not(.embed) .topbar .page-title{flex:1;min-width:0;margin:0;padding-left:8px;font-size:17px;font-weight:900;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  body:not(.embed) .topbar .sub{display:none}
+  body:not(.embed) .topbar .m-back{display:inline-flex;align-items:center;justify-content:center;flex:none;width:40px;height:40px;margin-left:2px;border-radius:10px;font-size:30px;line-height:1;font-weight:400;color:#fff;text-decoration:none;padding-bottom:3px}
+  body:not(.embed) .topbar .m-back:active{background:var(--sidebar-2)}
+  body:not(.embed) nav.tabs{top:calc(var(--m-top) + env(safe-area-inset-top));margin-top:0}
+  body:not(.embed) .main-wrap main{padding:12px 16px 24px}
+  /* 側邊欄＝面板：平時收起 */
+  body:not(.embed) .sidebar{display:none;position:fixed;left:0;right:0;top:calc(var(--m-top) + env(safe-area-inset-top));bottom:calc(var(--m-tab) + env(safe-area-inset-bottom));z-index:40;width:auto;height:auto;overflow-y:auto;-webkit-overflow-scrolling:touch;background:var(--bg);color:var(--black);padding:14px 16px 20px;grid-template-columns:none}
+  body.m-sheet-apps:not(.embed) .sidebar,body.m-sheet-me:not(.embed) .sidebar{display:block}
+  body:not(.embed) .sidebar .brand{display:none}
+  /* 功能：三欄格子 */
+  body.m-sheet-me:not(.embed) #nav{display:none}
+  body:not(.embed) #nav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:0;flex:none}
+  body:not(.embed) .nav-label{display:block;grid-column:1/-1;padding:8px 2px 0;font-size:12.5px;letter-spacing:.08em;color:var(--muted)}
+  body:not(.embed) #nav a,body:not(.embed) #nav:has(> a:nth-of-type(8)) a,body:not(.embed) #nav:has(> a:nth-of-type(9)) a{position:relative;flex-direction:column;justify-content:center;align-items:center;gap:6px;min-height:92px;padding:14px 6px 10px;background:var(--card);color:var(--black);border:1px solid var(--line);border-top:4px solid var(--brand);border-radius:12px;font-size:14px;font-weight:800;line-height:1.25;letter-spacing:0;text-align:center;white-space:normal;word-break:keep-all}
+  body:not(.embed) #nav a:hover{background:var(--card);color:var(--black)}
+  body:not(.embed) #nav a.on,body:not(.embed) #nav a.on:hover{background:var(--brand);color:var(--brand-ink);box-shadow:none}      /* 目前所在的系統：品牌色（與桌面側欄同一組色） */
+  body:not(.embed) #nav a .ic{height:30px;font-size:26px}
+  body:not(.embed) #nav a[data-nav=home]{display:none}      /* 首頁有自己的分頁；這個連結留著是給既有的 data-nav 掛勾（e2e） */
+  body:not(.embed) .sidebar nav a .badge{top:4px;right:6px;left:auto}
+  /* 我：帳號區 */
+  body.m-sheet-apps:not(.embed) .side-user{display:none}
+  body:not(.embed) .side-user{display:flex;flex-direction:column;align-items:stretch;gap:12px;margin:0;padding:0;border:0}
+  body:not(.embed) .side-user .av{display:flex;align-self:center;width:64px;height:64px;font-size:30px;background:var(--card);border:1px solid var(--line)}
+  body:not(.embed) .side-user .su-main{flex:none;text-align:center}
+  body:not(.embed) .side-user .nm{font-size:18px;color:var(--black);white-space:normal;overflow:visible}
+  body:not(.embed) .side-user .rl{display:block;font-size:12.5px;color:var(--muted)}
+  body:not(.embed) .su-act{flex-direction:column;gap:8px}
+  body:not(.embed) .su-act a,body:not(.embed) .su-act button,body:not(.embed) .side-user .m-guide{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:48px;padding:0 16px;background:var(--card);color:var(--black);border:1px solid var(--line);border-radius:10px;font-size:15px;font-weight:700;text-decoration:none}
+  body:not(.embed) .su-act a::after,body:not(.embed) .side-user .m-guide::after{content:"›";color:var(--muted);font-size:20px}
+  body:not(.embed) .su-act button{justify-content:center;color:var(--bad)}
+  /* 底部三格 */
+  body:not(.embed) .m-tabs{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:45;height:calc(var(--m-tab) + env(safe-area-inset-bottom));padding:0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);background:#fff;border-top:1px solid var(--line)}
+  body:not(.embed) .m-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;font:inherit;font-size:12px;font-weight:800;color:var(--muted);background:none;border:0;cursor:pointer;text-decoration:none;-webkit-tap-highlight-color:transparent}
+  body:not(.embed) .m-tab .ic{font-size:21px;line-height:1.1;filter:grayscale(1);opacity:.7}
+  body:not(.embed) .m-tab.on{color:var(--red)}
+  body:not(.embed) .m-tab.on .ic{filter:none;opacity:1}
+}
+@media print{.m-tabs,.m-back{display:none!important}}
