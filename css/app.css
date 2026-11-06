@@ -232,6 +232,11 @@ select{min-height:44px}
 .du-card.open .du-chev{transform:rotate(180deg)}
 .du-body{padding:2px 14px 14px;border-top:1px solid var(--line)}
 .du-openwarn{margin-top:10px;background:#fdf0ee;border-left:4px solid var(--red);padding:8px 10px;font-size:12.5px;border-radius:0 7px 7px 0}
+.du-dupbox{margin-top:10px;background:#fff6e5;border:1px solid #e0a020;padding:10px 12px;border-radius:8px;color:#6b4a0b}
+.du-duptitle{font-weight:600;font-size:13.5px}
+.du-duphint{font-size:12.5px;margin:3px 0 8px}
+.du-dupopts{display:flex;flex-wrap:wrap;gap:6px}
+.du-dupopt.on{background:#1f5fbf;border-color:#1f5fbf;color:#fff}
 .du-badge{margin-top:10px;font-weight:700;font-size:13.5px;padding:8px 10px;border-radius:8px;overflow-wrap:anywhere}
 .du-badge.normal{background:#e6f3ea;color:var(--ok)}
 .du-badge.warn{background:#fff4d6;color:#8a6100}

@@ -259,7 +259,9 @@ function buildCard(emp, date) {
   const punchEl = h('div', 'du-punch');
   if (emp.segments && emp.segments.length) {
     const ref = (emp.reference === null || emp.reference === undefined) ? '參考 —' : '參考 ' + emp.reference + ' 小時';   // 忘刷卡整天 reference=null，不可印成 "null"
-    punchEl.textContent = '打卡：' + emp.segments.map(C.segmentText).join('、') + '　' + ref;
+    const dupIgn = (emp.approved && emp.approved.dup_ignore) || [];  // 已認定重複的卡：打卡段已由打卡後端拿掉，這裡註明是哪幾張（2026-11-06）
+    const dupNote = dupIgn.length ? '（' + dupIgn.map(t => String(t).slice(11, 16)).sort().join('、') + ' 重複）' : '';
+    punchEl.textContent = '打卡：' + emp.segments.map(C.segmentText).join('、') + dupNote + '　' + ref;
   } else if (emp.attempts > 0) punchEl.textContent = '今天沒有入帳的打卡（有 ' + emp.attempts + ' 筆未入帳嘗試）';
   else punchEl.textContent = '今天沒有打卡紀錄';
   const mini = h('span', 'du-mini'), chev = h('span', 'du-chev', '▼');
@@ -278,8 +280,28 @@ function buildCard(emp, date) {
   card.append(head, body);
 
   // ---- 防呆：有打卡段還沒配對（有上班沒下班），現在核定會核不到那段（manager.html:1003–1012）----
-  const hasOpenSeg = (emp.segments || []).some(s => s.in && !s.out);
+  const dupGroups = emp.dup_groups || [];                     // 重複打卡（2026-11-06）：重複上班卡組前面那張配不到下班卡不是「還在上班」
+  const hasOpenSeg = C.hasOpenSegExceptDup(emp.segments, dupGroups);
   if (hasOpenSeg) body.append(h('div', 'du-openwarn', '⚠ 有打卡段還沒打下班卡（可能還在上班或跨夜還沒打完），現在核定會核不到這段、且之後補打卡也不會自動更新。請同仁立即打卡避免忘刷卡。'));
+
+  // ---- 重複打卡：同一天同型兩張卡相隔 60 分鐘內，店長選以哪張為準（2026-11-06 Eason）。不選＝照系統原判定（算 1 次忘刷），不擋送出 ----
+  const dupPicks = C.dupInitialPicks(dupGroups, emp.approved && emp.approved.dup_ignore);
+  dupGroups.forEach((g, gi) => {
+    const box = h('div', 'du-dupbox');
+    box.append(h('div', 'du-duptitle', '⧉ ' + C.dupGroupTitle(g)),
+      h('div', 'du-duphint', '如果是重複打卡，選一張為準；另一張不算忘刷卡，遲到也照選的那張比。不選＝照系統原判定（算 1 次忘刷）。'));
+    const opts = h('div', 'du-dupopts');
+    const btns = [{ ts: '', label: '不處理' }].concat(g.cards.map(c => ({ ts: c.ts, label: '以 ' + c.hm + ' 為準' }))).map(o => {
+      const b = h('button', 'btn sm ghost du-dupopt', o.label, { type: 'button', 'data-ts': o.ts });
+      b.disabled = readOnly;
+      b.onclick = () => { dupPicks[gi] = o.ts; paint(); };
+      opts.append(b); return b;
+    });
+    function paint() { btns.forEach(b => { const on = b.dataset.ts === dupPicks[gi]; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }); }
+    paint();
+    box.append(opts);
+    body.append(box);
+  });
 
   // ---- 狀態徽章：核定成功後當場翻成「已核定」----
   const badge = h('div', 'du-badge');
@@ -455,6 +477,8 @@ function buildCard(emp, date) {
       if (totalH + t2 > C.DAY_MAX_H) msg += '\n⚠ 超過一天 ' + C.DAY_MAX_H + ' 小時上限（照實核定，會列進每日通知）';
       const cw2 = C.contBreakWarn(periods);
       if (cw2) msg += '\n⚠ ' + C.contBreakText(cw2);
+      const dupLine = C.dupConfirmLine(dupGroups, dupPicks);
+      if (dupLine) msg += '\n' + dupLine;
       if (periodRows.querySelector('.du-break')) msg += '\n（休息 ' + br.start + '–' + br.end + ' 不計入）';
       const noted = lv.filter(x => !(x.type === '出差' && Number(x.hours) > 0));      // 沒算進核定的假別（出差以外、或沒填時數的出差）列出來給主管看
       if (noted.length) msg += '\n' + (noted.every(x => x.type === '出差') ? '註記' : '請假') + '：' + C.leavesText(noted);
@@ -464,7 +488,9 @@ function buildCard(emp, date) {
     submit.disabled = true; submit.textContent = '送出中…';
     const approveDate = date;                       // 送出當下鎖定日期，避免回呼時已切到別天
     try {
-      const res = await call('mgr_approve', { store: emp.store, date: approveDate, emp_id: emp.emp_id, periods, late_min: lateIn.value, leaves: lv });
+      const payload = { store: emp.store, date: approveDate, emp_id: emp.emp_id, periods, late_min: lateIn.value, leaves: lv };
+      if (dupGroups.length) payload.dup_ignore = C.dupIgnoreFrom(dupGroups, dupPicks);   // 有重複卡組才送（空陣列＝取消認定）；沒有就不送，打卡端沿用原本的
+      const res = await call('mgr_approve', payload);
       delete S.dayCache[approveDate];
       if (lv.length || initLeaves.length) staleLeave();      // 有請假的核定會動到額度，下次進核定頁重抓
       say('ok', '✓ 已核定 ' + res.approved_hours + ' 小時・' + res.status_text + C.leavesSuffix(C.leavesOf(res)) + '（' + res.manager_name + '）');

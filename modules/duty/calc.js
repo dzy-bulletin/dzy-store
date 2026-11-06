@@ -318,3 +318,44 @@ export function reqPlan(reqs) {
 export const reqLeaveLines = list => (list || []).filter(r => r.kind === 'leave' || r.kind === 'trip')
   .map(r => ({ type: r.kind === 'trip' ? '出差' : (r.leave_type || ''), hours: (r.hours === 0 || r.hours) ? r.hours : '' }))
   .filter(x => x.type);
+
+// 重複打卡（2026-11-06 Eason）：打卡後端 mgr_day 每人帶 dup_groups:[{type, cards:[{ts, hm}]}]＝同一天、同一型、相鄰、60 分鐘內的成功卡；
+// 已核定的 approved.dup_ignore＝被店長認定重複的那幾張 ts。店長選「以哪張為準」＝留那張、其他張送 dup_ignore；不選＝照系統原判定（算忘刷）。
+// 舊打卡後端沒有 dup_groups＝不顯示。正本規則在打卡後端 Code.gs dupPunchGroups_／dupIgnoreInvalid_。
+export function dupGroupTitle(g) {
+  const hms = g.cards.map(c => c.hm), kind = g.type === 'in' ? '上班卡' : '下班卡';
+  const gap = Math.round((new Date(g.cards[g.cards.length - 1].ts) - new Date(g.cards[0].ts)) / 60000);
+  const num = ['', '', '兩', '三', '四', '五'][hms.length] || String(hms.length);
+  return hms.join(hms.length === 2 ? ' 和 ' : '、') + ' ' + num + '張' + kind + '（相隔 ' + gap + ' 分），中間沒有' + (g.type === 'in' ? '下班卡' : '上班卡');
+}
+// 每組目前選的那張（ts；'' ＝不處理）：已核定時從 dup_ignore 推回來
+export function dupInitialPicks(groups, ignored) {
+  const ign = ignored || [];
+  return (groups || []).map(g => {
+    if (!g.cards.some(c => ign.includes(c.ts))) return '';
+    const keep = g.cards.find(c => !ign.includes(c.ts));
+    return keep ? keep.ts : '';
+  });
+}
+// 選擇 → 送給 mgr_approve 的 dup_ignore（每組沒被選的那幾張）
+export function dupIgnoreFrom(groups, picks) {
+  const out = [];
+  (groups || []).forEach((g, i) => { const k = (picks || [])[i]; if (k) g.cards.forEach(c => { if (c.ts !== k) out.push(c.ts); }); });
+  return out;
+}
+// 送出前確認框那一行：「重複打卡：以 17:26 為準（17:55 不算忘刷）」；沒選回 ''
+export function dupConfirmLine(groups, picks) {
+  const parts = [];
+  (groups || []).forEach((g, i) => {
+    const k = (picks || [])[i]; if (!k) return;
+    const keep = g.cards.find(c => c.ts === k), rest = g.cards.filter(c => c.ts !== k).map(c => c.hm);
+    if (keep) parts.push('以 ' + keep.hm + ' 為準（' + rest.join('、') + ' 不算忘刷）');
+  });
+  return parts.length ? '重複打卡：' + parts.join('；') : '';
+}
+// 「有打卡段還沒打下班卡」的警告不算重複上班卡組裡前面那幾張（它們配不到下班卡是因為後面又打了一張，不是還在上班）
+export function hasOpenSegExceptDup(segments, groups) {
+  const early = new Set();
+  (groups || []).filter(g => g.type === 'in').forEach(g => g.cards.slice(0, -1).forEach(c => early.add(c.hm)));
+  return (segments || []).some(s => s.in && !s.out && !early.has(s.in));
+}

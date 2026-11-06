@@ -794,6 +794,10 @@ function dutyDo(d, action, b) {
         ...leaveOut(d.leave[date + r.emp_id]), shift_in: f.shift[0], shift_out: f.shift[1],
         plan: (d.plans && d.plans[r.emp_id]) || null };
       const a = d.approved[date + r.emp_id]; if (a) out.approved = { ...a };
+      if (f.dup) {                                      // 重複打卡（2026-11-06）：打卡後端回 dup_groups；認定後打卡段改成合併後的那份（f.dup_segs／dup_ref）
+        out.dup_groups = f.dup.map(g => ({ type: g.type, cards: g.cards.map(c => ({ ...c })) }));
+        if (a && a.dup_ignore && a.dup_ignore.length && f.dup_segs) { out.segments = f.dup_segs.map(x => ({ ...x })); out.reference = f.dup_ref; }
+      }
       return out;
     }).sort((x, y) => (dutyHas(y.emp_id) ? 1 : 0) - (dutyHas(x.emp_id) ? 1 : 0));
     return ok({ date, employees });
@@ -835,7 +839,9 @@ function dutyDo(d, action, b) {
       const late = String(b.late_min ?? '').trim();
       status = late === '0' ? '主管認定不計遲到' : late !== '' && Number(late) > 0 ? '遲到' + Number(late) + '分(認定)' : '正常';
     }
-    const rec = { periods: periods.map(p => ({ ...p })), approved_hours: hours, status_text: status, manager_name: MGR };
+    const dupIgn = Array.isArray(b.dup_ignore) ? b.dup_ignore.slice() : ((d.approved[date + emp.emp_id] || {}).dup_ignore || []);
+    if (periods.length && dupIgn.length) status = (status === '正常' ? '' : status + '、') + '主管認定重複打卡（' + dupIgn.map(t => String(t).slice(11, 16)).sort().join('／') + '）';
+    const rec = { periods: periods.map(p => ({ ...p })), approved_hours: hours, status_text: status, manager_name: MGR, dup_ignore: periods.length ? dupIgn : [] };
     d.approved[date + emp.emp_id] = rec; d.leave[date + emp.emp_id] = leaves;
     (d.hlog = d.hlog || []).push({ at: new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 19) + '+08:00', date, emp_id: emp.emp_id, name: emp.name, hours, status, periods: periods.map(p => p.start + '-' + p.end).join(','), by: MGR });   // 核定紀錄（打卡端 approved 分頁只追加）
     return ok({ date, emp_id: emp.emp_id, name: emp.name, periods, approved_hours: hours, ...leaveOut(leaves), status_text: status, manager_name: MGR });
