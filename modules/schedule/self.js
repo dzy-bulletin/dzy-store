@@ -2,7 +2,7 @@
 // 規格 docs/schedule-hq/spec.md §3、§5、§10.1。資料一律整包重讀（selfLoad 回來的就是最新的狀態、版本與檢查結果），畫面不自己拼。
 import { esc, busy, confirmBox } from '../../js/ui.js';
 import { timeText, shiftCode } from './hours.js';
-import { call, calHtml, resultsHtml, issueMap, cellOptions, cellOfValue, valueOfCell, secondHtml, md, defaultSelfPeriod, SELF_OPEN, WD } from './hq.js';
+import { call, calHtml, resultsHtml, issueMap, cellOptions, cellOfValue, valueOfCell, secondHtml, isExt, md, defaultSelfPeriod, SELF_OPEN, WD } from './hq.js';
 import { weekday, periodOf, periodNo, periodStart, periodEnd, periodDates, shiftPeriod, parseLabel, diffDays, todayTaipei } from './period.js';
 import { canEdit } from './state.js';
 
@@ -152,7 +152,7 @@ function drawSelf(ctx) {
 
   if (H.sel && editable) {
     el.insertAdjacentHTML('beforeend', `<div class="card sc-editor" id="hqEditor"><b>${md(H.sel)}（${WD[weekday(H.sel)]}）${D.holidays[H.sel] ? esc(D.holidays[H.sel]) : ''}</b>
-      <div class="row mt"><select id="hqCellSel" aria-label="這一天要選什麼">${cellOptions(shifts, valueOfCell(cells[H.sel] || {}), true)}</select>${secondHtml(shifts, (cells[H.sel] || {}).s2, valueOfCell(cells[H.sel] || {}), 'hqCellSel2')}
+      <div class="row mt"><select id="hqCellSel" aria-label="這一天要選什麼">${cellOptions(shifts, valueOfCell(cells[H.sel] || {}), true, D.stores)}</select>${slotExtra(cells[H.sel] || {}, '')}${secondHtml(shifts, (cells[H.sel] || {}).s2, valueOfCell(cells[H.sel] || {}), 'hqCellSel2', D.stores)}${slotExtra(cells[H.sel] || {}, '2')}
       <button type="button" class="btn" id="hqCellOk">套用</button><button type="button" class="btn ghost" id="hqCellX">取消</button></div></div>`);
   }
   const q = (s) => el.querySelector(s);
@@ -166,8 +166,12 @@ function drawSelf(ctx) {
   };
   el.querySelectorAll('button.hq-day').forEach((b) => { b.onclick = () => { H.sel = b.dataset.date; say(''); ctx.rerender(); }; });
   if (q('#hqCellX')) q('#hqCellX').onclick = () => { H.sel = null; ctx.rerender(); };
-  if (q('#hqCellOk')) q('#hqCellOk').onclick = () => busy(q('#hqCellOk'), () => save({ [H.sel]: cellOfValue(q('#hqCellSel').value, q('#hqCellSel2') && !q('#hqCellSel2').disabled ? q('#hqCellSel2').value : '') }, '已存，約 1 分鐘內送到 LINE'));
-  if (q('#hqCellSel') && q('#hqCellSel2')) q('#hqCellSel').onchange = () => { const on = /^[SO]:/.test(q('#hqCellSel').value); q('#hqCellSel2').disabled = !on; if (!on) q('#hqCellSel2').value = ''; };
+  if (q('#hqCellOk')) q('#hqCellOk').onclick = () => busy(q('#hqCellOk'), () => save({ [H.sel]: cellOfValue(q('#hqCellSel').value, q('#hqCellSel2') && !q('#hqCellSel2').disabled ? q('#hqCellSel2').value : '', slotMore(q)) }, '已存，約 1 分鐘內送到 LINE'));
+  if (q('#hqCellSel') && q('#hqCellSel2')) {
+    const sync = () => { const on = /^[SO]:/.test(q('#hqCellSel').value); q('#hqCellSel2').disabled = !on; if (!on) q('#hqCellSel2').value = ''; syncSlots(q, D.stores); };
+    q('#hqCellSel').onchange = sync; q('#hqCellSel2').onchange = () => syncSlots(q, D.stores);
+    syncSlots(q, D.stores);
+  }
   if (q('#hqFill')) q('#hqFill').onclick = () => busy(q('#hqFill'), async () => {
     const sid = q('#hqFillShift').value, out = {};
     if (!sid) { say('還沒有總部班別，請先請主管新增班別', true); return ctx.rerender(); }
@@ -223,4 +227,30 @@ function drawApprove(ctx) {
   bindMonth(ctx, el);
   el.querySelectorAll('button.hq-emp').forEach((b) => { b.onclick = () => { H.who = b.dataset.emp; say(''); ctx.rerender(); }; });
   bindShiftCard(ctx, el, D);
+}
+
+// 總部出差＋門市班（2026-11-07 Eason）：每一班旁邊一個「出差」勾選（只有總部的班能勾）與門市工作站選單（選了門市的班才出現，列那家門市的站）
+function slotExtra(c, n) {
+  return `<label class="sc-two hq-trip" for="hqTrip${n}"><input type="checkbox" id="hqTrip${n}"${c['tr' + n] ? ' checked' : ''}> 出差</label>`
+    + `<select id="hqSt${n}" aria-label="門市的工作站" data-cur="${esc(c['w' + n] || '')}" hidden></select>`;
+}
+const slotVal = (q, n) => { const el = q(n ? '#hqCellSel2' : '#hqCellSel'); if (!el || el.disabled) return ''; return n ? el.value : el.value.replace(/^[SO]:/, ''); };
+function syncSlots(q, stores) {
+  for (const n of ['', '2']) {
+    const id = slotVal(q, n), ext = isExt(id), trip = q('#hqTrip' + n), st = q('#hqSt' + n);
+    if (trip) { trip.disabled = !id || ext; if (trip.disabled) trip.checked = false; trip.parentElement.hidden = !id || ext; }
+    if (!st) continue;
+    const x = ext ? (stores || []).find((s) => s.code === id.slice(0, id.indexOf('.'))) : null;
+    st.hidden = !x || !x.stations.length;
+    if (x) { const cur = st.value || st.dataset.cur; st.innerHTML = '<option value="">不選站</option>' + x.stations.map((w) => `<option value="${esc(w.id)}"${w.id === cur ? ' selected' : ''}>${esc(x.name)} ${esc(w.name)}</option>`).join(''); }
+  }
+}
+function slotMore(q) {
+  const o = {};
+  for (const n of ['', '2']) {
+    const tr = q('#hqTrip' + n), st = q('#hqSt' + n);
+    if (tr && !tr.disabled && tr.checked) o['tr' + n] = 1;
+    if (st && !st.hidden && st.value) o['w' + n] = st.value;
+  }
+  return o;
 }

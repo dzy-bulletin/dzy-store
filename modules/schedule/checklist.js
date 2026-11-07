@@ -13,7 +13,7 @@ export function setupChecklist(D) {
   const nShift = (D.shifts || []).filter((s) => s.active).length;
   items.push({ key: 'shifts', label: '班別', level: 'must', ok: nShift > 0, text: nShift ? `班別：${nShift} 個` : '班別：還沒建', tab: 'shifts' });
 
-  const inPeriod = (D.staff || []).filter((st) => dates.some((d) => employed(st, d)));
+  const inPeriod = (D.staff || []).filter((st) => !st.ext && dates.some((d) => employed(st, d)));      // 總部支援的人（ext）不用設身分
   const missing = inPeriod.filter((st) => dates.some((d) => employed(st, d) && !termAt(D.terms || {}, st.emp_id, d)));
   const names = missing.slice(0, NAME_MAX).map((st) => st.name).join('、') + (missing.length > NAME_MAX ? ` 等 ${missing.length} 人` : '');
   items.push({ key: 'terms', label: '同仁身分', level: 'must', ok: inPeriod.length > 0 && !missing.length,

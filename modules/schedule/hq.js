@@ -27,7 +27,9 @@ const LEAVE = { '特': '特休', '補': '補休', '國': '國定' };
 const shColor = (sh) => (sh && /^#[0-9A-Fa-f]{6}$/.test(sh.color || '') ? sh.color : '');      // 班別顏色（2026-11-03 Eason：三個班表都依班別上色，取代 10/12「班別不分顏色」）
 export function cellInfo(c, shiftMap) {
   if (!c || !c.t) return { t: '', cls: 'empty' };
-  const nm = (id) => { const sh = shiftMap[id]; return sh ? shiftCode(sh.name) : id; };
+  // 門市班顯示「光復 C」（門市簡稱去掉「店」＋班別代碼）；出差顯示「出差A」（總部出差＋門市班，2026-11-07）
+  const nm0 = (id) => { const sh = shiftMap[id]; if (!sh) return id; if (!isExt(id)) return shiftCode(sh.name); const t = sh.name.split(' '); return t[0].replace(/店$/, '').replace(/^(新竹|台中|員林|台北)/, '') + ' ' + shiftCode(t.slice(1).join(' ')); };
+  const nm = (id) => (id === c.s && c.tr ? '出差' : id === c.s2 && c.tr2 ? '出差' : '') + nm0(id);
   const two = c.s && c.s2 ? '＋' + nm(c.s2) : '';      // 一天兩班顯示「A＋C」（2026-11-07）
   if (c.t === 'W') { const sh = shiftMap[c.s]; return { t: (c.s ? nm(c.s) : '班') + two, cls: 'work' + (two ? ' two' : ''), color: shColor(sh) }; }
   if (c.t === 'H') { if (c.s) { const sh = shiftMap[c.s]; return { t: nm(c.s) + two, cls: 'work ot' + (two ? ' two' : ''), ot: true, color: shColor(sh) }; } return { t: '休', cls: 'off' }; }      // 休息日加班：班別＋橘色「休加」（otTag，同門市班表）
@@ -37,9 +39,9 @@ export function cellInfo(c, shiftMap) {
 }
 export const otTag = (x) => (x.ot ? '<i class="sc-ot">休加</i>' : '');
 /** 選單值 → 格子（'S:<班別>'、'O:<班別>'＝休息日加班、'R'、'H'、'L:特'…、'CLEAR'） */
-export function cellOfValue(v, v2) {
+export function cellOfValue(v, v2, more) {
   if (v === 'CLEAR') return { t: '' };
-  const two = v2 ? { s2: v2 } : {};      // 第二班（一天兩班，2026-11-07）：只跟著班別、休息日加班
+  const two = Object.assign(v2 ? { s2: v2 } : {}, more || {});      // 第二班（一天兩班，2026-11-07）：只跟著班別、休息日加班；more＝出差 tr／tr2、門市站 w／w2
   if (v.startsWith('S:')) return Object.assign({ t: 'W', s: v.slice(2) }, two);
   if (v.startsWith('O:')) return Object.assign({ t: 'H', s: v.slice(2) }, two);
   if (v.startsWith('L:')) return { t: 'L', l: v.slice(2) };
@@ -53,14 +55,18 @@ export function valueOfCell(c) {
   return c.t;
 }
 /** 第二班選單（一天兩班，2026-11-07）：第一格選了班別才能選；只列使用中的班（原本選的停用班照列） */
-export function secondHtml(shifts, cur, firstVal, id) {
+export function secondHtml(shifts, cur, firstVal, id, stores) {
   const on = /^[SO]:/.test(firstVal || '');
-  return `<label class="sc-two" for="${id}">＋第二班</label><select id="${id}" aria-label="第二個班別"${on ? '' : ' disabled'}><option value="">不加</option>${
-    shifts.filter((s) => s.active !== 0 && s.active !== false || s.id === cur).map((s) => `<option value="${esc(s.id)}"${s.id === cur ? ' selected' : ''}>${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('')}</select>`;
+  const o = `<option value="">不加</option>${shifts.filter((s) => s.active !== 0 && s.active !== false || s.id === cur).map((s) => `<option value="${esc(s.id)}">${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('')}${storeGroups(stores, '')}`;
+  return `<label class="sc-two" for="${id}">＋第二班</label><select id="${id}" aria-label="第二個班別"${on ? '' : ' disabled'}>${cur ? o.replace(`value="${esc(cur)}"`, `value="${esc(cur)}" selected`) : o}</select>`;
 }
 /** 格子可選的內容（班別、休息日、休息日加班（班別，2026-11-03 Eason：總部、央廚都照門市正職）、例假、特休、補休、國定假日假） */
-export function cellOptions(shifts, cur, withClear) {
+// 門市班（總部出差＋門市班，2026-11-07）：每家門市一組 optgroup，值「S:門市代號.班別」
+export const storeGroups = (stores, prefix) => (stores || []).map((x) => `<optgroup label="${esc(x.name)}（門市）">${x.shifts.map((s) => `<option value="${prefix}${esc(s.id)}">${esc(x.name)} ${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('')}</optgroup>`).join('');
+export const isExt = (id) => typeof id === 'string' && id.indexOf('.') > 0;
+export function cellOptions(shifts, cur, withClear, stores) {
   const o = shifts.map((s) => `<option value="S:${esc(s.id)}">${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('')
+    + storeGroups(stores, 'S:')
     + '<option value="H">休息日</option>'
     + shifts.map((s) => `<option value="O:${esc(s.id)}">${esc(shiftCode(s.name))} ${esc(timeText(s))}（休息日加班）</option>`).join('')
     + '<option value="R">例假</option><option value="L:特">特休</option><option value="L:補">補休</option><option value="L:國">國定假日假</option>'

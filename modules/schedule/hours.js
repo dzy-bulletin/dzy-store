@@ -103,11 +103,9 @@ export function combineShifts(a, b) {
 /** 一格的班別（有第二班＝合成的虛擬班別）；沒有班別或班別不存在＝null。合不起來（舊資料重疊）＝只用第一班 */
 export function cellShift(shifts, c) {
   if (!c || !c.shift_id) return null;
-  const a = shifts[c.shift_id];
-  if (!a) return null;
-  if (!c.shift2_id) return a;
-  const b = shifts[c.shift2_id];
-  if (!b) return a;
+  const a = shifts[c.shift_id], b = c.shift2_id ? shifts[c.shift2_id] : null;
+  if (!a) return b || null;      // 第一班不在這份清單（例：總部的格子第一班排在門市，算總部考勤時只看第二班）
+  if (!c.shift2_id || !b) return a;
   try { return combineShifts(a, b); } catch (e) { return a; }
 }
 /** 一格有哪幾個班別 id（第二班放後面） */

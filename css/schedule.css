@@ -220,3 +220,8 @@ button.hq-day{cursor:pointer}
 .sc-c.two, .hq-day.two .hq-v { font-size: .82em; letter-spacing: -.02em; white-space: nowrap; }
 .sc-two { margin-left: 4px; color: var(--muted, #666); font-size: .9em; }
 @media print { .sc-c.two { font-size: 8px; } }
+
+/* 總部支援（2026-11-07）：總部同仁排到這家店的班，唯讀、灰底 */
+.sc-suprow th, .sc-c.sup, .sc-drow.sup { background: color-mix(in srgb, var(--line, #ddd) 35%, transparent); cursor: default; }
+.sc-suptag { display: inline-block; margin-left: 4px; font-size: .72em; font-style: normal; color: var(--muted, #666); }
+.hq-trip { white-space: nowrap; }

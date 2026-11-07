@@ -31,7 +31,9 @@ export function renderBoard(ctx) {
   const el = ctx.el, D = S.data;
   const shifts = Object.fromEntries(D.shifts.map((s) => [s.id, s]));
   const activeShifts = D.shifts.filter((s) => s.active);
-  const staff = D.staff.filter((st) => D.dates.some((d) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date)));
+  // 總部支援（2026-11-07）：總部同仁排到這家店的班，另列一區、唯讀、算進人數；門市名冊裡對到的支援帳號（ext）不列在一般同仁
+  const staff = D.staff.filter((st) => !st.ext && D.dates.some((d) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date)));
+  const sup = D.support || [];
   const locked = D.meta.locked;
   const ses = ctx.session || getSession();
   const canLock = canEdit(ses);       // 個人登入：排班、鎖定、解鎖、重送都只有店長同等職、人資主管、管理員（伺服器另外擋，這裡只是不顯示）
@@ -86,12 +88,13 @@ export function renderBoard(ctx) {
 
   const ratioCls = (r) => (r == null || !target ? '' : r < target ? ' low' : ' good');
   // 當天總人數（Eason 2026-10-11：不分班別，只看當天幾個人上班）；需要人數＝各班最少人數加總
-  const dayTotal = (d) => staff.filter((st) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date) && ((D.days[st.emp_id] || {})[d] || {}).shift_id).length;
   const inJobOn = (st, d) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date);
+  const cellsOn = (d) => staff.filter((st) => inJobOn(st, d)).map((st) => (D.days[st.emp_id] || {})[d]).concat(sup.map((x) => x.days[d])).filter(Boolean);      // 當天每個人的格子（含總部支援）
+  const dayTotal = (d) => cellsOn(d).filter((c) => c.shift_id).length;
   // 當天排定總工時（2026-11-01 Eason：當天人數下方一列）：在職、有排班的人照班別扣掉休息後的工時加總，跟右邊「排班時數」同一套算法
-  const dayMin = (d) => staff.reduce((a, st) => { const c = (D.days[st.emp_id] || {})[d], s = cellShift(shifts, c); return a + (s && inJobOn(st, d) ? shiftMinutes(s) : 0); }, 0);
+  const dayMin = (d) => cellsOn(d).reduce((a, c) => { const s = cellShift(shifts, c); return a + (s ? shiftMinutes(s) : 0); }, 0);
   const hrTxt = (min) => +(min / 60).toFixed(2);
-  const stCount = (d, id) => staff.reduce((a, st) => { const c = (D.days[st.emp_id] || {})[d] || {}; if (!inJobOn(st, d) || !c.shift_id) return a; return a + (c.station_id === id ? 1 : 0) + (c.shift2_id && c.station2_id === id ? 1 : 0); }, 0);      // 兩班各算一人次
+  const stCount = (d, id) => cellsOn(d).reduce((a, c) => (!c.shift_id ? a : a + (c.station_id === id ? 1 : 0) + (c.shift2_id && c.station2_id === id ? 1 : 0)), 0);      // 兩班各算一人次
   const stNeed = (d, id) => ((D.stationNeed || {})[d] || {})[id] || 0;
   // 統計列只列有設最少人數的站（這期任一天有設）；沒設的站（例：收班）只在格子上顯示站名，不另列一排人數（2026-10-31 Eason）
   const stCntShow = stShow.filter((x) => D.dates.some((d) => stNeed(d, x.id) > 0));
@@ -99,7 +102,7 @@ export function renderBoard(ctx) {
   // 當天人數只顯示早／晚（2026-10-31 Eason）：照上班時間分、不看班名——早＝15:00 以前開始，晚＝18:00 以後才結束（含跨夜）；二段班、整天班兩邊都算
   const isEarly = (s) => segsOf(s)[0].start < '15:00';
   const isLate = (s) => { const g = segsOf(s), last = g[g.length - 1]; return last.end > '18:00' || last.end <= g[0].start; };
-  const dayEL = (d) => { let e = 0, l = 0; for (const st of staff) { const c = (D.days[st.emp_id] || {})[d] || {}, s = cellShift(shifts, c); if (!s || !inJobOn(st, d)) continue; if (isEarly(s)) e++; if (isLate(s)) l++; } return { e, l }; };
+  const dayEL = (d) => { let e = 0, l = 0; for (const c of cellsOn(d)) { const s = cellShift(shifts, c); if (!s) continue; if (isEarly(s)) e++; if (isLate(s)) l++; } return { e, l }; };
   // 每天的午餐／晚餐備註（全店共用，Eason 2026-10-26）：放在日期下方、同仁上方；鎖定後也能改，存了自動重送 LINE
   const NOTE_KINDS = [['lunch', '午餐備註'], ['dinner', '晚餐備註']];
   const noteOf = (d, k) => ((D.notes || {})[d] || {})[k] || '';
@@ -177,6 +180,11 @@ export function renderBoard(ctx) {
       const o = offOf(st), lvs = Object.entries(o.lv).map(([k, v]) => k + ' ' + v).join('・');
       return `<tr><th class="sc-name" scope="row">${esc(st.name)}${annualTxt(st)}</th>${tds}<td class="sc-off"><b>${o.n}</b>${lvs ? `<small>${esc(lvs)}</small>` : ''}</td><td class="sc-hr"><b>${+(hoursOf(st) / 60).toFixed(2)}</b></td></tr>`;
     }).join('');
+    const supHr = (x) => D.dates.reduce((a, d) => { const s = cellShift(shifts, x.days[d]); return a + (s ? shiftMinutes(s) : 0); }, 0);
+    const supRows = sup.map((x) => `<tr class="sc-suprow" data-sup="${esc(x.key)}"><th class="sc-name" scope="row">${esc(x.name)}<small class="sc-suptag">總部支援</small></th>${D.dates.map((d) => {
+      const c = x.days[d], t = cellText(c, shifts);
+      return `<td class="sc-c sup ${c ? t.cls : 'empty'}${isWe(d) ? ' we' : ''}" title="總部同仁排的，門市不能改">${c ? esc(t.t) + stTag(c) : ''}</td>`;
+    }).join('')}<td class="sc-off"></td><td class="sc-hr"><b>${+(supHr(x) / 60).toFixed(2)}</b></td></tr>`).join('');
     const cnt = `<tr class="sc-cnt"><th scope="row">當天人數</th>${D.dates.map((d) => {
       const n = dayTotal(d), need = dayNeed(d), el = dayEL(d);
       return `<td class="${need && n < need ? 'short' : ''}${isWe(d) ? ' we' : ''}" title="共 ${n} 人上班${need ? `，至少要 ${need} 人` : ''}">早 ${el.e}<br>晚 ${el.l}</td>`;
@@ -198,7 +206,7 @@ export function renderBoard(ctx) {
     const legend = legendSh.length ? `<div class="sc-legend" id="scLegend">${legendSh.map((s) => `<span><b>${esc(shiftCode(s.name))}</b>：${esc(timeText(s))}</span>`).join('')}</div>` : '';
     body = `<div class="card sc-gridcard"><div class="scroll"><table class="sc-grid">
       <thead><tr><th class="sc-name">同仁</th>${th}<th class="sc-offh">休假<small>天數</small></th><th class="sc-hrh">排班<small>時數</small></th></tr></thead>
-      <tbody>${noteRows}${rows}${cnt}${stRows}</tbody></table></div>${legend}</div>`;
+      <tbody>${noteRows}${rows}${supRows}${cnt}${stRows}</tbody></table></div>${legend}</div>`;
   } else {
     const d = S.day, hol = D.holidays.days[d];
     const chips = D.dates.map((x) => `<button type="button" class="sc-daychip${x === d ? ' on' : ''}${isWe(x) ? ' we' : ''}${(byDay[x] || []).length ? ' warn' : ''}" data-day="${x}">${md(x)}<small>${WD[weekday(x)]}</small></button>`).join('');
@@ -209,6 +217,9 @@ export function renderBoard(ctx) {
       return `<button type="button" class="sc-drow ${x.cls}${bday(st, d) ? ' bd' : ''}${pin && pin.kind === 'off' ? ' pin-off' : ''}${iss.length ? ' i-' + iss.sort((a, b) => LV_RANK[a.level] - LV_RANK[b.level])[0].level : ''}" data-emp="${esc(st.emp_id)}" data-date="${d}">
         <span class="sc-dn">${esc(st.name)}${bday(st, d) ? ' <i class="sc-bd">生日</i>' : ''}${annualTxt(st)}</span><span class="sc-dv">${esc(x.t)}${otTag(x)}${s ? `<small>${esc(timeText(s))}</small>` : ''}${stTag(c)}</span>
         ${iss.length ? `<span class="sc-dmsg">${esc(iss.map((i) => i.msg).join('；'))}</span>` : ''}</button>`;
+    }).join('') + sup.filter((x) => x.days[d]).map((x) => {
+      const c = x.days[d], t = cellText(c, shifts), sh = cellShift(shifts, c);
+      return `<div class="sc-drow sup ${t.cls}" data-sup="${esc(x.key)}"><span class="sc-dn">${esc(x.name)} <i class="sc-suptag">總部支援</i></span><span class="sc-dv">${esc(t.t)}${sh ? `<small>${esc(timeText(sh))}</small>` : ''}${stTag(c)}</span></div>`;
     }).join('');
     const n = dayTotal(d), nd = dayNeed(d), el = dayEL(d);
     const cnt = `<span class="tag ${nd && n < nd ? 'bad' : ''}" id="scDayCount">早 ${el.e} 人｜晚 ${el.l} 人</span><span class="tag" id="scDayHours">總工時 ${hrTxt(dayMin(d))} 小時</span>`

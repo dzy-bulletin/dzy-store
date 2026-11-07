@@ -14,7 +14,7 @@ const prevMonth = (m) => addDays(m + '-01', -1).slice(0, 7);
 // 總部自填 2026-11-03 起以期別（T01…）為單位；selfMonths 的鍵是期別
 const isP = (k) => /^T\d{2,}$/.test(k);
 const spanD = (k) => (isP(k) ? periodDates(k) : monthDates(k));
-const toCell = (c) => { const o = { t: c.day_type }; if (c.shift_id) o.s = c.shift_id; if (c.shift_id && c.shift2_id) o.s2 = c.shift2_id; if (c.leave) o.l = c.leave; return o; };
+const toCell = (c) => { const o = { t: c.day_type }; if (c.shift_id) o.s = c.shift_id; if (c.shift_id && c.shift2_id) o.s2 = c.shift2_id; if (c.leave) o.l = c.leave; if (c.trip) o.tr = 1; if (c.trip2) o.tr2 = 1; const x = (id) => typeof id === 'string' && id.indexOf('.') > 0; if (x(c.shift_id) && c.station_id) o.w = c.station_id; if (x(c.shift2_id) && c.station2_id) o.w2 = c.station2_id; return o; };
 const sameCell = (a, b) => !!a && !!b && a.day_type === b.day_type && (a.shift_id || null) === (b.shift_id || null) && (a.leave || null) === (b.leave || null);
 const MODE_FROM = '2026-11-01';
 const GEN_LEAD = 10;      // 同 server/schedule-hq.js：下一期開始前 10 天自動產生
@@ -44,8 +44,14 @@ export function putDay(st, e, d, cell, source) {
     else station = defSt();
   }
   if (shift2) station2 = shift2 in was ? was[shift2] : defSt();
+  const ext = (id) => typeof id === 'string' && id.indexOf('.') > 0;
+  if (ext(cell.shift_id)) station = cell.xst !== undefined ? cell.xst || null : (old && old.shift_id === cell.shift_id ? station : null);
+  if (shift2 && ext(shift2)) station2 = cell.xst2 !== undefined ? cell.xst2 || null : (old && old.shift2_id === shift2 ? station2 : null);
   const out = Object.assign({}, cell, { source, station_id: station });
-  if (shift2) { out.shift2_id = shift2; out.station2_id = station2; } else { delete out.shift2_id; delete out.station2_id; }
+  delete out.xst; delete out.xst2;
+  out.trip = cell.shift_id && !ext(cell.shift_id) && cell.trip ? 1 : 0;
+  if (shift2) { out.shift2_id = shift2; out.station2_id = station2; out.trip2 = !ext(shift2) && cell.trip2 ? 1 : 0; } else { delete out.shift2_id; delete out.station2_id; delete out.trip2; }
+  if (!out.trip) delete out.trip; if (!out.trip2) delete out.trip2;
   (st.days[e] = st.days[e] || {})[d] = out;
 }
 
@@ -143,15 +149,53 @@ function effective(st, e, month, hol) {
   for (const d of holDates(month, hol)) if (!days[d]) days[d] = holDefault();
   return days;
 }
+// 總部出差＋門市班（2026-11-07，同 server/sched-support.js）：可以選的門市＝示範資料裡的門市排班店（沒有 mode），班別代號「門市代號.班別」
+const STORE_NAME = { TEST1: '測試門市', TEST2: '墨竹亭測試店' };
+export function mockStores(db) {
+  return Object.entries(db.sched || {}).filter(([, x]) => x && !x.mode && x.shifts && Object.values(x.shifts).some((y) => y.active))
+    .map(([c, x]) => ({ code: c, name: STORE_NAME[c] || c, shifts: Object.values(x.shifts).filter((y) => y.active).map((y) => Object.assign({}, y, { id: c + '.' + y.id })),
+      stations: Object.values(x.stations || {}).filter((y) => y.active).map((y) => ({ id: y.id, name: y.name })) }));
+}
+export function mockExt(db) {
+  const out = {};
+  for (const [c, x] of Object.entries(db.sched || {})) if (x && !x.mode) for (const y of Object.values(x.shifts || {})) out[c + '.' + y.id] = Object.assign({}, y, { id: c + '.' + y.id, name: (STORE_NAME[c] || c) + ' ' + y.name });
+  return out;
+}
+/** 門市 code 的總部支援（同 server supportOf）：[{key, name, emp, days}] */
+export function mockSupport(db, code, dates, staff) {
+  const pre = code + '.', out = [];
+  for (const [hc, x] of Object.entries(db.sched || {})) {
+    if (!x || x.mode !== 'self') continue;
+    for (const s of x.staff) {
+      const days = {};
+      for (const d of dates) {
+        const c = (x.days[s.emp_id] || {})[d];
+        if (!c || (c.day_type !== 'W' && c.day_type !== 'H')) continue;
+        const slots = [[c.shift_id, c.station_id], [c.shift2_id, c.station2_id]].filter(([id]) => id && id.startsWith(pre));
+        if (!slots.length) continue;
+        const o = { day_type: c.day_type, shift_id: slots[0][0].slice(pre.length), station_id: slots[0][1] || null };
+        if (slots[1]) { o.shift2_id = slots[1][0].slice(pre.length); o.station2_id = slots[1][1] || null; }
+        days[d] = o;
+      }
+      if (!Object.keys(days).length) continue;
+      const same = (staff || []).filter((y) => y.name === s.name && !y.leave_date);
+      out.push({ key: hc + ':' + s.emp_id, name: s.name, emp: same.length === 1 ? same[0].emp_id : null, days });
+    }
+  }
+  return out;
+}
+
 function results(st, emps, month, hol) {
   const staff = st.staff.filter((s) => emps.includes(s.emp_id)).map((s) => (st.modeFrom && !(s.hire_date && s.hire_date > st.modeFrom) ? Object.assign({}, s, { hire_date: st.modeFrom }) : s));
   const days = {};
   for (const s of staff) days[s.emp_id] = effective(st, s.emp_id, month, hol);
-  return checkSelfPeriod({ period: month, staff, shifts: st.shifts, days, holidays: hol });
+  return checkSelfPeriod({ period: month, staff, shifts: Object.assign({}, st.shifts, st.__ext || {}), days, holidays: hol });
 }
 
-export function hqAction(action, me, b, db, hol, pa) {
+export function hqAction(action, me, b, db, hol, pa, seedStores) {
   const st = seedHq(db, me.code, hol);
+  if (seedStores) seedStores();      // 總部可以選的門市班要有示範門市（TEST1）的資料
+  Object.defineProperty(st, '__ext', { value: mockExt(db), enumerable: false, configurable: true });      // 門市班（不存進 localStorage）
   const person = me.person;
   if (!person) return fail('FORBIDDEN', '排班請用管理系統個人帳號：人資部門 → 排班管理');
   const today = todayTaipei();
@@ -309,7 +353,9 @@ export function hqAction(action, me, b, db, hol, pa) {
       staff.push({ emp_id: s.emp_id, name: s.name, version: r.version, filled: dates.filter((d) => base[d] && employed(s, d)).length, days: dates.filter((d) => employed(s, d)).length, hire_date: s.hire_date || null, leave_date: s.leave_date || null });
     }
     return ok({ period: month, from: dates[0], to: dates[dates.length - 1], curPeriod: label(Math.max(1, periodNo(today) || 0)), mode: 'self', me: mine, canView, shifts: Object.values(st.shifts).filter((s) => s.active).map((s) => ({ id: s.id, name: s.name, start: s.start, end: s.end, break_min: s.break_min, color: s.color || '', sort: s.sort || 0, ...(s.segs ? { segs: s.segs } : {}) })), holidays: Object.fromEntries(Object.entries(Object.assign({}, (hol.gov && hol.gov.off) || {}, hol.days)).filter(([k]) => k >= dates[0] && k <= dates[dates.length - 1])),
-      staff, cells, results: results(st, rows.map((s) => s.emp_id), month, hol), mode_from: st.modeFrom });
+      staff, cells, results: results(st, rows.map((s) => s.emp_id), month, hol), mode_from: st.modeFrom,
+      extShifts: Object.values(st.__ext || {}).map((x) => ({ id: x.id, name: x.name, start: x.start, end: x.end, break_min: x.break_min, ...(x.segs ? { segs: x.segs } : {}) })),
+      stores: mockStores(db).map((x) => ({ code: x.code, name: x.name, shifts: x.shifts.map((y) => ({ id: y.id, name: y.name, start: y.start, end: y.end, break_min: y.break_min, ...(y.segs ? { segs: y.segs } : {}) })), stations: x.stations })) });
   }
   const own = () => (typeof b.emp_id === 'string' && mine.includes(b.emp_id) ? null : fail('FORBIDDEN', '只能改自己的班表'));
   const prefill = (e) => { st.days[e] = st.days[e] || {}; for (const d of holDates(month, hol)) if (!st.days[e][d] && d >= st.modeFrom) putDay(st, e, d, holDefault(), 'self'); };
@@ -326,10 +372,21 @@ export function hqAction(action, me, b, db, hol, pa) {
       if (c && c.t === '') { items.push([d, null]); continue; }
       let cell = { day_type: c.t, shift_id: c.s || null, leave: c.l || null, shift2_id: c.s2 || null };
       const err = comboError(cell, hol, d); if (err) return fail('BAD_INPUT', err);
-      if (cell.shift_id && !(st.shifts[cell.shift_id] && st.shifts[cell.shift_id].active)) return fail('BAD_INPUT', '班別不存在或已停用');
+      const SX = Object.assign({}, st.shifts, st.__ext), stores = mockStores(db);
+      for (const [k, w, tr, n] of [['shift_id', 'w', 'tr', ''], ['shift2_id', 'w2', 'tr2', '2']]) {      // 同 server cellIn：門市班、出差、門市站
+        const id = cell[k]; if (!id) continue;
+        if (id.indexOf('.') > 0) {
+          const x = stores.find((y) => y.code === id.slice(0, id.indexOf('.')));
+          if (!x || !x.shifts.some((y) => y.id === id)) return fail('BAD_INPUT', '門市的班別不存在或已停用');
+          if (c[tr]) return fail('BAD_INPUT', '出差只能標在總部的班');
+          if (c[w] && !x.stations.some((y) => y.id === c[w])) return fail('BAD_INPUT', '門市的工作站不存在或已停用');
+          cell['xst' + n] = c[w] || null;
+        } else if (c[tr]) cell['trip' + n] = 1;
+      }
+      if (cell.shift_id && !(SX[cell.shift_id] && SX[cell.shift_id].active)) return fail('BAD_INPUT', '班別不存在或已停用');
       if (cell.shift2_id) {                                       // 同 server/schedule-hq.js cellIn
-        if (!(st.shifts[cell.shift2_id] && st.shifts[cell.shift2_id].active)) return fail('BAD_INPUT', '第二班的班別不存在或已停用');
-        const o = orderTwo(st.shifts, cell); if (o.err) return fail('BAD_INPUT', o.err); cell = o.cell;
+        if (!(SX[cell.shift2_id] && SX[cell.shift2_id].active)) return fail('BAD_INPUT', '第二班的班別不存在或已停用');
+        const o = orderTwo(SX, cell); if (o.err) return fail('BAD_INPUT', o.err); cell = o.cell;
       }
       items.push([d, cell]);
     }

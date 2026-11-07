@@ -113,7 +113,12 @@ export function orderTwo(shifts, c) {
   if (!a || !b) return { err: '班別不存在' };
   const cell = Object.assign({}, c);
   const m = (x) => { const [h, mm] = String(x.start).split(':'); return +h * 60 + +mm; };
-  if (m(b) < m(a)) { cell.shift_id = c.shift2_id; cell.shift2_id = c.shift_id; [a, b] = [b, a]; }
+  if (m(b) < m(a)) {
+    cell.shift_id = c.shift2_id; cell.shift2_id = c.shift_id; [a, b] = [b, a];
+    // 跟著班別走的欄位一起對調：出差標記（總部）、指定的站（總部選門市班時）
+    [cell.trip, cell.trip2] = [c.trip2 || 0, c.trip || 0];
+    if ('xst' in c || 'xst2' in c) [cell.xst, cell.xst2] = [c.xst2, c.xst];
+  }
   const err = twoError(shifts, cell);
   if (err) return { err };
   const mins = shiftMinutes(cellShift(shifts, cell));
@@ -181,7 +186,10 @@ export function checkPeriod(ctx) {
   if (hol.validThrough && end > hol.validThrough) add('C5', 'block', null, end, `國定假日表只到 ${hol.validThrough}，要先補上下一年的假日才能鎖定`);
 
   const noPrior = [];
+  // 總部支援（sched-support.js，2026-11-07）：ctx.support＝[{days:{date:格子}}]，只算人數；門市名冊裡對到的支援帳號（st.ext）不做個人規則檢查（班在總部班表檢查）
+  const sup = ctx.support || [];
   for (const st of ctx.staff) {
+    if (st.ext) continue;
     const e = st.emp_id, who = st.name;
     const mine = ctx.days[e] || {};
     const inPeriod = dates.filter(d => employed(st, d));
@@ -343,6 +351,7 @@ export function checkPeriod(ctx) {
       const c = (ctx.days[st.emp_id] || {})[d];
       for (const sid of cellShiftIds(c)) { count[sid] = (count[sid] || 0) + 1; (onShift[sid] = onShift[sid] || []).push(st.emp_id); }      // 一天兩班：兩個班各算一人次
     }
+    for (const x of sup) for (const sid of cellShiftIds(x.days[d])) count[sid] = (count[sid] || 0) + 1;
     for (const sid in need) {
       const n = count[sid] || 0, sh = (ctx.shifts[sid] || {}).name || sid;
       if (n < need[sid].min) add('D1', 'warn', null, d, `${md(d)} ${sh}缺 ${need[sid].min - n} 人`);
@@ -367,6 +376,7 @@ export function checkPeriod(ctx) {
         if (c && c.shift_id && c.station_id) count[c.station_id] = (count[c.station_id] || 0) + 1;
         if (c && c.shift2_id && c.station2_id) count[c.station2_id] = (count[c.station2_id] || 0) + 1;      // 第二班各選各的站、各算一人次
       }
+      for (const x of sup) { const c = x.days[d]; if (!c) continue; if (c.station_id) count[c.station_id] = (count[c.station_id] || 0) + 1; if (c.shift2_id && c.station2_id) count[c.station2_id] = (count[c.station2_id] || 0) + 1; }
       const lack = Object.keys(need).filter(id => stations[id] && stations[id].active && (count[id] || 0) < need[id])
         .sort((a, b) => (stations[a].sort || 0) - (stations[b].sort || 0) || (a < b ? -1 : 1))
         .map(id => `${stations[id].name} ${need[id] - (count[id] || 0)}`);

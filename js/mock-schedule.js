@@ -5,7 +5,7 @@ import { autoSchedule } from '../modules/schedule/auto.js';
 import { periodDates, periodOf, todayTaipei, addDays, weekday, parseLabel, shiftPeriod } from '../modules/schedule/period.js';
 import { shiftMinutes, breakOk, normSegs, cellShift } from '../modules/schedule/hours.js';
 import { whileLeaving } from './leaving.js';
-import { hqAction, seedHq, putDay, stationNeedFor, publishPeriod, hasActiveDay } from './mock-schedule-hq.js';
+import { hqAction, seedHq, putDay, stationNeedFor, publishPeriod, hasActiveDay, mockSupport } from './mock-schedule-hq.js';
 
 const E2E = () => (typeof window !== 'undefined' && window.__E2E_DATA) || {};
 const ok = (data) => ({ ok: true, data: data === undefined ? {} : data });
@@ -64,7 +64,7 @@ function ctxOf(st, period, hol) {
 
 export async function schedule(action, me, b, db, s, hooks) {
   const hol = await holidays();
-  if (/^(self|fixed)[A-Z]/.test(action)) return hqAction(action, me, b, db, hol, (hooks && hooks.pa) || {});      // 總部自填／央廚固定排班（docs/schedule-hq/spec.md）
+  if (/^(self|fixed)[A-Z]/.test(action)) return hqAction(action, me, b, db, hol, (hooks && hooks.pa) || {}, () => { if (db.accounts.TEST1) storeOf(db, 'TEST1'); });      // 總部自填／央廚固定排班（docs/schedule-hq/spec.md）
   if (db.accounts[me.code] && db.accounts[me.code].mode) seedHq(db, me.code, hol);      // 這兩家店的班別、同仁用自己的假資料
   const st = storeOf(db, me.code);
   const clockAlias = me.code === 'TEST2' ? null : '';
@@ -112,10 +112,13 @@ export async function schedule(action, me, b, db, s, hooks) {
         return { ym, revenue, minutes, ratio: revenue != null && minutes > 0 ? Math.round(revenue / (minutes / 60)) : null };
       });
       const pubs = st.pubs[period] || [];
+      const support = st.__hq ? [] : mockSupport(db, me.code, dates, st.staff);      // 總部支援（同 server buildCtx）
+      const extEmp = new Set(support.map((x) => x.emp).filter(Boolean));
+      const supStaff = extEmp.size ? st.staff.map((x) => (extEmp.has(x.emp_id) ? Object.assign({}, x, { ext: true }) : x)) : st.staff;
       return ok({ period, dates, today: todayTaipei(), store: me.code,
         meta: { version: r.version, locked: !!r.locked, locked_at: r.locked_at, locked_by: r.locked_by, needs_recheck: !!r.needs_recheck, publication: pubs.length ? pubs[pubs.length - 1] : null, clockAlias, lineFrom: '2026-11-01' },
-        shifts: Object.values(st.shifts).sort((a, x) => a.sort - x.sort), staff: st.staff, terms: st.terms, days, actuals: st.actuals, demand: ctx.demand, demandTpl: tpl, demandOverrides: ov,
-        pins: ctx.pins, pairs: st.pairs, months, cfg: st.cfg, holidays: hol, monthOtMin: {}, results: checkPeriod(Object.assign(ctx, { days: st.days })), roster: { synced: clockAlias !== null },
+        shifts: Object.values(st.shifts).sort((a, x) => a.sort - x.sort), staff: supStaff, terms: st.terms, days, support, actuals: st.actuals, demand: ctx.demand, demandTpl: tpl, demandOverrides: ov,
+        pins: ctx.pins, pairs: st.pairs, months, cfg: st.cfg, holidays: hol, monthOtMin: {}, results: checkPeriod(Object.assign(ctx, { days: st.days, support, staff: supStaff })), roster: { synced: clockAlias !== null },
         notes: Object.fromEntries(dates.filter((d) => (st.notes || {})[d]).map((d) => [d, st.notes[d]])),
         stations: Object.values(st.stations).sort((a, x) => a.sort - x.sort || (a.id < x.id ? -1 : 1)), stationNeedTpl: st.stNeedTpl, stationNeedDay: Object.fromEntries(dates.filter((d) => hasActiveDay(st, d)).map((d) => [d, st.stNeedDay[d]])), stationNeed: ctx.stationNeed });
     }

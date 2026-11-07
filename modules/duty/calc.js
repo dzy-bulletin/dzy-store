@@ -252,6 +252,7 @@ const PLAN_OFF_TEXT = { R: '例假', H: '排休' };
 const PLAN_LEAVE_TEXT = { '國': '國定', '特': '排特休', '補': '排補休' };
 export function planOffText(plan) {
   if (!plan || plan.work) return '';
+  if (plan.away) return '這天排在門市上班（門市那段在門市打卡、由店長核）';      // 總部同仁整天去門市（2026-11-07）
   return (plan.day_type === 'L' ? PLAN_LEAVE_TEXT[plan.leave] : PLAN_OFF_TEXT[plan.day_type]) || '排休';
 }
 const planSegsOk = plan => !!plan && plan.work === true && Array.isArray(plan.segs) && plan.segs.length > 0 && plan.segs.every(s => s && s.start && s.end);
