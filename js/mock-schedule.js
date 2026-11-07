@@ -150,9 +150,13 @@ export async function schedule(action, me, b, db, s, hooks) {
     case 'auto': {
       const g = guard(false); if (g) return g;
       if (!Object.values(st.shifts).some((s) => s.active)) return fail('BAD_INPUT', '還沒建班別，請先到「班別與設定」建立班別');   // 同 server/schedule.js NO_SHIFT_MSG
-      const res = autoSchedule(ctxOf(st, period, hol), { keepManual: b.keepManual !== false });
+      const actx = ctxOf(st, period, hol);
+      actx.support = st.__hq ? [] : mockSupport(db, me.code, dates, st.staff);      // 總部支援：先扣人數、名冊裡對到的支援帳號不排（同 server auto）
+      const extEmp = new Set(actx.support.map((x) => x.emp).filter(Boolean));
+      actx.staff = st.staff.filter((x) => !extEmp.has(x.emp_id));
+      const res = autoSchedule(actx, { keepManual: b.keepManual !== false });
       if (!res.ok) return ok({ ok: false, problems: res.problems, version: prow(st, period).version });
-      for (const x of st.staff) { st.days[x.emp_id] = st.days[x.emp_id] || {}; for (const d of dates) { const c = (res.days[x.emp_id] || {})[d]; if (c) putDay(st, x.emp_id, d, c, c.source || 'auto'); else delete st.days[x.emp_id][d]; } }
+      for (const x of actx.staff) { st.days[x.emp_id] = st.days[x.emp_id] || {}; for (const d of dates) { const c = (res.days[x.emp_id] || {})[d]; if (c) putDay(st, x.emp_id, d, c, c.source || 'auto'); else delete st.days[x.emp_id][d]; } }
       const v = bump(); recheckNext(); return ok({ ok: true, problems: res.problems, version: v });
     }
     case 'saveRevenue': {

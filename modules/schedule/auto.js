@@ -25,7 +25,7 @@ const staffRow = (ctx, e) => ctx.staff.find(s => s.emp_id === e) || {};
 const prioOf = (ctx, e) => { const p = staffRow(ctx, e).prio; return p == null ? Infinity : p; };
 const prefOf = (ctx, e) => staffRow(ctx, e).pref_shift || null;
 const pinOf = (ctx, e, d) => ((ctx.pins || {})[e] || {})[d] || null;
-const needOf = (ctx, d) => (ctx.demand || {})[d] || {};
+const needOf = (ctx, d) => (ctx.autoDemand || ctx.demand || {})[d] || {};      // autoDemand＝扣掉總部支援後門市自己要排的人數（lessSupport）；規則檢查照原 demand＋支援人數算
 
 /** 0. 輸入檢查：回傳問題清單（有問題就不排） */
 export function inputProblems(ctx) {
@@ -399,9 +399,27 @@ function merged(ctx, dates, out) {
 
 const otCells = (days) => Object.values(days || {}).reduce((a, m) => a + Object.values(m).filter(c => c && c.day_type === 'H' && c.shift_id && c.source === 'auto').length, 0);
 
+/** 總部支援（ctx.support，2026-11-07）：那天那班已有總部的人來，每班最少／最多人數先扣掉，門市自己少排幾個（放 autoDemand；ctx.demand 不動，checkPeriod 會把支援的人算進人數） */
+function lessSupport(ctx) {
+  const sup = ctx.support || [];
+  if (!sup.length) return ctx;
+  const demand = {};
+  for (const d in ctx.demand || {}) {
+    const n = {};
+    for (const x of sup) for (const sid of cellShiftIds(x.days[d])) n[sid] = (n[sid] || 0) + 1;
+    demand[d] = {};
+    for (const sid in ctx.demand[d]) {
+      const r = ctx.demand[d][sid], k = n[sid] || 0;
+      demand[d][sid] = k ? Object.assign({}, r, { min: Math.max(0, (r.min || 0) - k), max: r.max == null ? r.max : Math.max(0, r.max - k) }) : r;
+    }
+  }
+  return Object.assign({}, ctx, { autoDemand: demand });
+}
+
 /** 國定假日假不能逼出休息日加班（加班費比國定假日出勤的雙倍薪資貴；Eason 2026-10-12）：
  *  先照常排；若比「完全不排國定假日假」多出休息日加班，就逐一讓正職這期不排國定假日假（留 C8 提醒雙倍薪資），直到不多為止 */
 export function autoSchedule(ctx, opts) {
+  ctx = lessSupport(ctx);
   const dates = periodDates(ctx.period);
   const r0 = scheduleOnce(ctx, opts, null);
   if (!r0.ok || !dates.some(d => isHoliday(ctx.holidays, d)) || !otCells(r0.days)) return r0;
