@@ -225,3 +225,10 @@ button.hq-day{cursor:pointer}
 .sc-suprow th, .sc-c.sup, .sc-drow.sup { background: color-mix(in srgb, var(--line, #ddd) 35%, transparent); cursor: default; }
 .sc-suptag { display: inline-block; margin-left: 4px; font-size: .72em; font-style: normal; color: var(--muted, #666); }
 .hq-trip { white-space: nowrap; }
+
+/* 手機上格子編輯框（門市、總部）：選單各佔一整行，看得到選了哪個班（2026-11-07 截圖發現被擠成「A 1(」） */
+@media (max-width: 520px) {
+  #scEditor .row, #hqEditor .row { flex-wrap: wrap; }
+  #scEditor .row select, #hqEditor .row select { flex: 1 1 100%; min-width: 0; max-width: 100%; }
+  #scEditor .sc-two, #hqEditor .sc-two { margin-left: 0; }
+}

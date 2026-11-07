@@ -38,6 +38,7 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
 <div class="wrap">
 <nav class="toc" aria-label="目錄"><b>依序做這 8 步</b>
   <a href="#sg-1">1 建班別</a><a href="#sg-2">2 設同仁</a><a href="#sg-3">3 每班人數</a><a href="#sg-4">4 指定休假</a><a href="#sg-5">5 工作站</a><a href="#sg-6">6 自動排班</a><a href="#sg-7">7 備註</a><a href="#sg-8">8 鎖定並發布</a>
+  <br><b>總部同仁</b> <a href="#sg-hq">出差＋去門市上班</a>
 </nav>
 
 <section id="intro">
@@ -85,6 +86,7 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
   <p>回到「班表」按 <span class="btn">自動排班</span>。排好後看「提醒」：紅色「要修正」一定要改，才能鎖定；黃色是警告，看過自己判斷。</p>
   <ul><li>要改哪一格就點那一格，選好按 <span class="btn">套用</span>；要改工作站，在同一個框選站別後按 <span class="btn">儲存站別</span>。</li><li>手機預設看單日，點上方日期換天；電腦可以切「整期」看 28 天。</li><li>再按一次自動排班，預設會保留你手動改過的格子。</li><li>同一天要上兩個班（例如 A 班＋C 班）：點那一格，第一個選班別，旁邊「＋第二班」再選一個，按 <span class="btn">套用</span>，格子會顯示「A＋C」。兩個班時間不能重疊、合起來最多 10 小時；兩班可以各選一個工作站，各班人數各算一人。第二班只能自己加，自動排班不會排，重排也會保留。</li></ul>
   <figure class="shot"><img src="img/guide/sg-06-auto.jpg" width="780" height="1688" alt="自動排班後的單日班表與提醒"><figcaption>排好的班表（單日檢視）</figcaption></figure>
+  <figure class="shot"><img src="img/guide/sg-06b-two.jpg" width="780" height="1688" alt="點一格選第一個班，再選「＋第二班」，格子顯示 A＋C"><figcaption>同一天兩個班：選好第一班，再選「＋第二班」</figcaption></figure>
 </section>
 
 <section id="sg-7">
@@ -99,6 +101,21 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
   <p>沒有紅色「要修正」之後，按 <span class="btn">鎖定並發布</span>。同仁在 LINE「鼎兆元打卡」的出勤班表就看得到這一期的班。</p>
   <ul><li>鎖定後要改班，先按「解除鎖定」，改好再鎖定一次；解除期間同仁暫時看不到這一期。</li><li>只改工作站或備註<b>不用解除鎖定</b>：鎖定中點格子就能改站別，存了會自動重送到 LINE。</li><li>「送 LINE 失敗」時按「立即重送」，系統也會每 5 分鐘自動再試。</li><li>誰在什麼時候鎖定、解除鎖定，都記在頁頂「鎖定紀錄」分頁，可以依期別、動作、操作人查；紀錄永久保留、不能修改。</li></ul>
   <figure class="shot"><img src="img/guide/sg-08-lock.jpg" width="780" height="1240" alt="班表上方的鎖定並發布按鈕"><figcaption>鎖定並發布</figcaption></figure>
+</section>
+
+<section id="sg-hq">
+  <h2>總部同仁：出差、去門市上班<span class="opt">總部自填班表</span></h2>
+  <p>總部同仁在「我的班表」點一天。班別選單除了總部的班，下面還有各門市的班（例如「新竹光復店 C班」）。</p>
+  <ul>
+    <li><b>出差</b>：選總部的班，勾旁邊的「出差」。班表和 LINE 會顯示「出差 早班」，考勤由總部主管核。</li>
+    <li><b>去門市上班</b>：選那家門市的班，再選那家店的工作站。門市的班表會在最下面「總部支援」列出你，算進當天人數；你不用、也不能請店長幫你排。</li>
+    <li><b>同一天兩段</b>：例如上午出差、晚上去光復上班，第一個選總部的班勾出差，「＋第二班」選門市的班。兩段時間不能重疊、合起來最多 10 小時。</li>
+    <li><b>門市那段在門市打卡、由店長核</b>：第一次到那家店用 LINE 打卡時，系統會自動幫你加入那家店，之後店長的考勤就會照你排的班預填。</li>
+    <li>總部班別不夠用，可以在「我的班表」下面的「總部班別」自己新增；要刪除請找人資。</li>
+  </ul>
+  <figure class="shot"><img src="img/guide/sg-09-hq-trip.jpg" width="780" height="1688" alt="選早班並勾出差"><figcaption>出差：選總部的班，勾「出差」</figcaption></figure>
+  <figure class="shot"><img src="img/guide/sg-10-hq-store.jpg" width="780" height="1688" alt="選門市的班與那家店的工作站"><figcaption>去門市上班：選門市的班，再選那家店的工作站</figcaption></figure>
+  <figure class="shot"><img src="img/guide/sg-12-support.jpg" width="780" height="1688" alt="門市班表最下面的總部支援"><figcaption>門市班表看到的「總部支援」（店長不能改）</figcaption></figure>
 </section>
 
 <footer>有問題請找人資或管理者。</footer>
