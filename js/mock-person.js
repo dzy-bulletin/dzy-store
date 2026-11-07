@@ -62,7 +62,7 @@ export function access(db, p, code, eff) {
   const hr = !!p.hr_head, dutyEntry = (p.attStores || []).includes(code) || isManager || isAdmin || hr || approveList.length > 0;
   // 總監開放排班（對照 server/person.js）：schedUnit＝這家門市在 sched_units 內（門市排班）→ scheduleAdmin、只給 schedule；shiftAdmin＝總部自填排班的店＋sched_hq_shift
   const mode = acc.mode || 'store';
-  const schedUnit = !!unit && mode === 'store' && (p.sched_units || []).includes(unit), shiftAdmin = mode === 'self' && p.sched_hq_shift === true;
+  const schedUnit = !!unit && mode === 'store' && (p.sched_units || []).includes(unit), shiftAdmin = mode === 'self' && (p.sched_hq_shift === true || selfList.length > 0);      // 2026-11-07 Eason：總部同仁本人也能新增、修改總部班別
   const schedEntry = acc.role === 'service' ? (selfList.length > 0 || approveList.length > 0 || hr || isAdmin || shiftAdmin) : (dutyEntry || selfList.length > 0 || schedUnit || shiftAdmin);
   let feats = [];
   if (isManager) feats = upper.slice();
