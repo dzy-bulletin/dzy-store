@@ -389,16 +389,21 @@ export function renderBoard(ctx) {
   });
 
   // 鎖定／解鎖：只有管理系統個人帳號（scheduleAdmin）能做，不需要出勤核定密碼；門市帳號（共用店號）不能排班（hr-move-spec §10.1-2），畫面走不到這裡
+  const review = D.results.filter((x) => x.code === 'F9');   // 1-12：正職連上 7～12 天
   const doLock = async () => {
     try {
       if (locked) { await mutate('unlock'); say(pub && pub.kind === 'publish' ? '已解除鎖定，LINE 上的這一期班表會撤下' : '已解除鎖定'); }
-      else { const r = await mutate('lock'); say(r.publish ? '已鎖定，正在送到 LINE' : '已鎖定'); }
+      else {
+        const r = await mutate('lock', review.length ? { review_ack: true } : {});
+        say(r.publish ? '已鎖定，正在送到 LINE' : '已鎖定');
+      }
     } catch (e) { say(e.message, true); }
     rerender();
   };
   if (q('#scLock')) q('#scLock').onclick = () => busy(q('#scLock'), async () => {
     if (!locked && counts.block) { say(`還有 ${counts.block} 個地方不合規定，修正後才能鎖定`, true); return rerender(); }
     if (locked && !(await confirmBox('解除鎖定後，同仁在 LINE 上會暫時看不到這一期的班表，改好要再鎖定。確定嗎？', '解除鎖定'))) return;
+    if (!locked && review.length && !(await confirmBox(`這些同仁連續上班 7 天以上，要有部門主管同意：${review.map((x) => x.msg.split(' 到 ')[0]).join('、')}。確定已取得同意？會記進鎖定紀錄。`, '已取得同意，鎖定'))) return rerender();
     await doLock();
   });
   if (q('#scResend')) q('#scResend').onclick = () => busy(q('#scResend'), async () => {

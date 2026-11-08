@@ -23,6 +23,8 @@ export const H = 60;
 const FT_DAY_NORMAL = 10 * H, PT_DAY_NORMAL = 8 * H;
 export const DAY_MAX = 10 * H;                // 單日上限：Eason 2026-11-01 由 12 改 10 小時（與打卡 Rest.gs 一致），自動排班、檢查、班別存檔共用
 const PERIOD_NORMAL = 160 * H, WEEK_NORMAL = 40 * H;
+// 出勤規範第 5 批（Eason 2026-11-08），這一期（第一天）起生效：加班上限改看 28 天週期、計時排班規則、正職連上 7 天覆核、兩店合併看連續上班、央廚四週檢核
+export const RULES5_FROM = '2026-11-29';
 export const MONTH_OT = 46 * H, MONTH_OT_WARN = 36 * H;   // 每月加班：超過 46 擋、超過 36 警告（Eason 2026-10-27，取代 10-11 的「46 只提醒」）
 const PT_OT_RUN = 6;                         // 計時連上第 6 天＝休息日加班，提醒（Eason 2026-10-27；第 7 天由 P3 擋）
 // 備註字體顏色（2026-11-01 Eason）：代號 → 色碼；沒選＝預設黑字。伺服器只收這幾個代號
@@ -163,7 +165,9 @@ function workedOn(ctx, emp, d) {
   const a = (ctx.actuals && ctx.actuals[emp] || {})[d];
   if (a && ctx.period && d < periodDates(ctx.period)[0]) return { date: d, shift: { start: a.start, end: a.end, break_min: 0 } };   // 前期有實際出勤就以實際為準（GPT 上線前審查 6）
   const c = (ctx.days[emp] || {})[d];
-  if (c) return c.shift_id ? { date: d, shift: cellShift(ctx.shifts, c) || undefined } : null;
+  if (c && c.shift_id) return { date: d, shift: cellShift(ctx.shifts, c) || undefined };
+  if (ctx.elsewhere && ctx.elsewhere[emp] && ctx.elsewhere[emp][d]) return { date: d };   // 同一個人在別家店的班（5-8）：只算連續上班，換班間隔看不到時段
+  if (c) return null;
   return a ? { date: d, shift: { start: a.start, end: a.end, break_min: 0 } } : null;
 }
 function hasPrior(ctx, emp, start) {
@@ -227,15 +231,17 @@ export function checkPeriod(ctx) {
     if (!hasPrior(ctx, e, start) && inPeriod[0] === start) noPrior.push(who);
     let run = 0;
     for (let i = LOOKBACK; i >= 1; i--) run = workedOn(ctx, e, addDays(start, -i)) ? run + 1 : 0;
-    let told = false;                                                  // 同一段連續上班只報一次（前期已連上很多天時，本期第一天就要擋）
+    let told = false, reviewed = false;                                                  // 同一段連續上班只報一次（前期已連上很多天時，本期第一天就要擋）
     for (const d of dates) {
       run = workedOn(ctx, e, d) ? run + 1 : 0;
-      if (!run) { told = false; continue; }
+      if (!run) { told = false; reviewed = false; continue; }
       const t = termAt(ctx.terms, e, d);
       if (!t || told) continue;
       if (t.kind === 'ft' && run >= 13) { add('F6', 'block', e, d, `${who} 到 ${md(d)} 已連續上班 ${run} 天，最多 12 天`); told = true; }
       if (t.kind === 'pt' && run >= 7) { add('P3', 'block', e, d, `${who} 到 ${md(d)} 已連續上班 ${run} 天，一定要休一天`); told = true; }
       // 計時連上第 6 天：這天算休息日加班。已經排成「休息日出勤」的由 P2 提醒，這裡只提醒還排成一般工作日的
+      if (t.kind === 'ft' && run >= 7 && run <= 12 && start >= RULES5_FROM && !reviewed) { add('F9', 'warn', e, d, `${who} 到 ${md(d)} 連續上班 ${run} 天，7～12 天要部門主管覆核，鎖定時要確認已取得同意`); reviewed = true; }
+      if (t.kind === 'pt' && run === PT_OT_RUN && mine[d] && mine[d].day_type === 'W' && start >= RULES5_FROM) { add('P8', 'block', e, d, `${who} 到 ${md(d)} 連排 ${run} 天，計時最多連排 5 天（第 6 天只能排成休息日出勤）`); continue; }
       if (t.kind === 'pt' && run === PT_OT_RUN && mine[d] && mine[d].day_type === 'W') add('P7', 'warn', e, d, `${who} ${md(d)} 是連續上班第 ${PT_OT_RUN} 天，這天算休息日加班（要付加班費）：請改成「班別（休息日出勤）」`);
     }
 
@@ -311,9 +317,23 @@ export function checkPeriod(ctx) {
       if (cap != null && total > cap) add('P6', 'warn', e, end, `${who} 這期排了 ${hm(total)}，超過上限 ${hm(cap)}`);
     }
 
-    // 曆月加班（含期外月份）：超過 46 小時擋、超過 36 小時警告（Eason 2026-10-27）
+    // 計時每 7 天至少 2 天沒排班（1-13）：休息日出勤不算進這 5 天
+    if (start >= RULES5_FROM && t0 && t0.kind === 'pt') {
+      for (const d of inPeriod) {
+        let n = 0;
+        for (let i = 0; i < 7; i++) { const c = (ctx.days[e] || {})[addDays(d, -i)]; if (c && c.shift_id && c.day_type === 'W') n++; }
+        if (n > 5) { add('P9', 'block', e, d, `${who} 到 ${md(d)} 前 7 天排了 ${n} 天班，每 7 天至少要 2 天沒排班`); break; }
+      }
+    }
+    // 加班上限只看 28 天週期（4-17，Eason 2026-11-08 選定；法定上限是曆月，已告知風險）
+    if (start >= RULES5_FROM) {
+      const tot = dates.reduce((a, d) => a + mins[d].ot, 0);
+      if (tot > MONTH_OT) add('C2', 'block', e, null, `${who} 這一期加班 ${hm(tot)}，超過上限 46 小時，要減少加班才能鎖定`);
+      else if (tot > MONTH_OT_WARN) add('C9', 'warn', e, null, `${who} 這一期加班 ${hm(tot)}，超過 36 小時（上限 46 小時）`);
+    }
+    // 曆月加班（含期外月份）：超過 46 小時擋、超過 36 小時警告（Eason 2026-10-27）；RULES5_FROM 起改看週期
     const byMonth = {};
-    for (const d of dates) { const m = d.slice(0, 7); byMonth[m] = (byMonth[m] || 0) + mins[d].ot; }
+    if (start < RULES5_FROM) for (const d of dates) { const m = d.slice(0, 7); byMonth[m] = (byMonth[m] || 0) + mins[d].ot; }
     for (const m in byMonth) {
       const tot = byMonth[m] + ((ctx.monthOtMin && ctx.monthOtMin[m] || {})[e] || 0);
       if (tot > MONTH_OT) add('C2', 'block', e, null, `${who} ${+m.slice(5)} 月加班 ${hm(tot)}，超過上限 46 小時，要減少加班才能鎖定`);
@@ -424,6 +444,7 @@ export function checkSelfMonth(ctx) {
   const first = dates[0], last = dates[dates.length - 1];
   const hol = ctx.holidays || { days: {} };
   const shifts = ctx.shifts || {};
+  const fw = !!ctx.fourWeek && dates.length === 28 && first >= RULES5_FROM;   // 央廚四週檢核（1-4）；照舊只提醒不擋（soft）
   for (const st of ctx.staff) {
     const e = st.emp_id, who = st.name || e;
     const mine = (ctx.days || {})[e] || {};
@@ -462,21 +483,43 @@ export function checkSelfMonth(ctx) {
       prev = { date: d, shift: sh };
     }
 
-    // 每週（日～六）至少 1 天例假、1 天休息日；每週超過 40 小時提醒
-    const w0 = addDays(first, -weekday(first));
-    for (let ws = w0; ws <= last; ws = addDays(ws, 7)) {
-      const wk = Array.from({ length: 7 }, (_, i) => addDays(ws, i));
-      const known = wk.filter((d) => mine[d]);
-      const missing = 7 - known.length;
-      const rs = known.filter((d) => mine[d].day_type === 'R').length;
-      const hs = known.filter((d) => mine[d].day_type === 'H' && !mine[d].shift_id).length;
-      const lack = (rs < 1 ? 1 : 0) + (hs < 1 ? 1 : 0);
-      const at = wk.find((d) => d >= first && d <= last);
-      if (rs < 1 && missing < lack) add('W1', 'block', e, at, `${who} ${md(wk[0])} 這週沒有例假，每週至少要 1 天例假`);
-      const hOt = known.find((d) => d >= first && d <= last && mine[d].day_type === 'H' && mine[d].shift_id);      // 休息日排了加班：照樣不算休息日，但講清楚是哪一天
-      if (hs < 1 && missing < lack) add('W2', 'block', e, hOt || at, hOt ? `${who} ${md(hOt)} 休息日加班（要付加班費），${md(wk[0])} 這週就沒有休息日了` : `${who} ${md(wk[0])} 這週沒有休息日，每週至少要 1 天休息日`);
-      const mins = known.reduce((a, d) => { const sh = cellShift(shifts, mine[d]); return a + (sh ? shiftMinutes(sh) : 0); }, 0);
-      if (mins > WEEK_NORMAL) add('W3', 'warn', e, at, `${who} ${md(wk[0])} 這週排了 ${hm(mins)}，超過 40 小時的部分算加班`);
+    if (fw) {
+      if (!blank.length) {
+        for (const [half, label] of [[dates.slice(0, 14), '前兩週'], [dates.slice(14), '後兩週']]) {
+          const inH = half.filter((d) => employed(st, d));
+          const need = inH.length >= 14 ? 2 : inH.length >= 7 ? 1 : 0;
+          const r = inH.filter((d) => mine[d] && mine[d].day_type === 'R').length;
+          if (r < need) add('F1', 'block', e, half[0], `${who} ${label}只有 ${r} 天例假，至少要 ${need} 天`);
+        }
+        const needRH = Math.ceil(inMonth.length * 8 / 28);
+        const rh = inMonth.filter((d) => mine[d] && (mine[d].day_type === 'R' || mine[d].day_type === 'H')).length;
+        if (rh < needRH) add('F2', 'block', e, first, `${who} 這期例假加休息日只有 ${rh} 天，至少要 ${needRH} 天`);
+      }
+      let run = 0, told = false, reviewed = false;
+      for (let d = addDays(first, -3); d <= last; d = addDays(d, 1)) {
+        run = mine[d] && mine[d].shift_id ? run + 1 : 0;
+        if (!run) { told = false; reviewed = false; continue; }
+        if (d < first) continue;
+        if (run >= 7 && run <= 12 && !reviewed) { add('F9', 'warn', e, d, `${who} 到 ${md(d)} 連續上班 ${run} 天，7～12 天要部門主管覆核`); reviewed = true; }
+        if (run >= 13 && !told) { add('F6', 'block', e, d, `${who} 到 ${md(d)} 已連續上班 ${run} 天，最多 12 天`); told = true; }
+      }
+    } else {
+      // 每週（日～六）至少 1 天例假、1 天休息日；每週超過 40 小時提醒
+      const w0 = addDays(first, -weekday(first));
+      for (let ws = w0; ws <= last; ws = addDays(ws, 7)) {
+        const wk = Array.from({ length: 7 }, (_, i) => addDays(ws, i));
+        const known = wk.filter((d) => mine[d]);
+        const missing = 7 - known.length;
+        const rs = known.filter((d) => mine[d].day_type === 'R').length;
+        const hs = known.filter((d) => mine[d].day_type === 'H' && !mine[d].shift_id).length;
+        const lack = (rs < 1 ? 1 : 0) + (hs < 1 ? 1 : 0);
+        const at = wk.find((d) => d >= first && d <= last);
+        if (rs < 1 && missing < lack) add('W1', 'block', e, at, `${who} ${md(wk[0])} 這週沒有例假，每週至少要 1 天例假`);
+        const hOt = known.find((d) => d >= first && d <= last && mine[d].day_type === 'H' && mine[d].shift_id);      // 休息日排了加班：照樣不算休息日，但講清楚是哪一天
+        if (hs < 1 && missing < lack) add('W2', 'block', e, hOt || at, hOt ? `${who} ${md(hOt)} 休息日加班（要付加班費），${md(wk[0])} 這週就沒有休息日了` : `${who} ${md(wk[0])} 這週沒有休息日，每週至少要 1 天休息日`);
+        const mins = known.reduce((a, d) => { const sh = cellShift(shifts, mine[d]); return a + (sh ? shiftMinutes(sh) : 0); }, 0);
+        if (mins > WEEK_NORMAL) add('W3', 'warn', e, at, `${who} ${md(wk[0])} 這週排了 ${hm(mins)}，超過 40 小時的部分算加班`);
+      }
     }
 
     // 休息日加班超過 FT_OT_MAX 天（同門市正職 F8，只提醒）
