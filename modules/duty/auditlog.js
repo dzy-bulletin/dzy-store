@@ -13,7 +13,7 @@ const GROUP_OF = { hours: 'hours', rehours: 'hours', recheck: 'hours', approve: 
 
 export const contentOf = e => {
   const d = e.detail || {};
-  if (e.kind === 'hours') return (d.hours != null ? Math.round(d.hours * 100) / 100 + ' 小時' : '') + (d.status ? '・' + d.status : '') + (d.periods ? '（' + d.periods + '）' : '');
+  if (e.kind === 'hours') return (d.hours != null ? Math.round(d.hours * 100) / 100 + ' 小時' : '') + (d.status ? '・' + d.status : '') + (d.periods ? '（' + d.periods + '）' : '') + (d.diff_reason ? '・與打卡不同原因：' + d.diff_reason : '');
   if (e.kind === 'req') return [d.summary, d.reason ? '原因：' + d.reason : ''].filter(Boolean).join('・');
   return '';
 };
