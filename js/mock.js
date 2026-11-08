@@ -206,6 +206,10 @@ function route(method, p, q, b, token) {
     if (m[1] === 'duty' && !s.duty) return fail('FORBIDDEN', '請先輸入出勤核定通行碼');
     if (m[1] === 'purchase') return purchase(m[2], mx, b);
     if (m[1] === 'cashbook') return cashbook(m[2], mx, b);
+    if (m[1] === 'duty' && m[2] === 'mgr_approve' && window.__dutyDelay) {      // e2e：核定拖慢，並記同時進行的最大請求數（驗一鍵核定循序、不併發）
+      const w = window; w.__dutyInflight = (w.__dutyInflight || 0) + 1; w.__dutyMax = Math.max(w.__dutyMax || 0, w.__dutyInflight);
+      return new Promise(res => setTimeout(() => { try { res(duty(m[2], mx, s, b)); } finally { w.__dutyInflight--; } }, w.__dutyDelay));
+    }
     if (m[1] === 'duty') return duty(m[2], mx, s, b);
     if (m[1] === 'transfer') return transferMock(m[2], mx, b, db);
     if (m[1] === 'inventory') return invMock(m[2], mx, b, db);
@@ -739,12 +743,16 @@ function duty(action, me, s, b) {
   const fault = fi >= 0 ? d.faults[fi] : null;
   if (fault && fault.once) d.faults.splice(fi, 1);
   if (fault && fault.mode === 'timeout') return fail('TIMEOUT', '打卡系統回應太久，請稍後再試');
+  if (fault && fault.mode === 'timeout-saved') { if (tgt) withFake(tgt, () => dutyDo(d, action, b)); else dutyDo(d, action, b); return fail('TIMEOUT', '打卡系統回應太久，請稍後再試'); }      // 寫入其實成功了、只是回應逾時（兩步寫入對帳用）
+  if (action === 'mgr_req_proxy' && !me.person) return fail('BAD_INPUT', '代開申請要用個人帳號登入');      // 同 server/proxy/duty.js acting_only
   if (fault && fault.mode === 'down') return fail('UPSTREAM', '打卡系統暫時沒有回應，請稍後再試');
   if (fault && fault.mode === 'unknown') return fail('NOT_FOUND', '找不到這個功能');     // 舊營運系統（還沒更新到這個動作）
   if (fault && fault.mode === 'clock_old') return fail('UPSTREAM', '這家店的打卡系統還沒更新到這個功能，請聯絡管理者。');
+  if (me.person && action === 'mgr_req_pending') b = Object.assign({}, b, { __person: true });
   const ms = markSelf(d, action, b);
   if (ms && ms.deny) return ms.deny;
   const r = tgt ? withFake(tgt, () => dutyDo(d, action, b)) : dutyDo(d, action, b);
+  if (fault && fault.mode === 'partial' && r.ok) r.data.failed = [{ store: 'cf', storeName: '央廚', message: '打卡系統暫時沒有回應，請稍後再試' }];      // 部分門市讀不到（伺服器 failed 契約）
   if (r.ok && ms && ms.mine) {
     if (action === 'mgr_req_pending') r.data.items = r.data.items.map(it => (ms.mine(it.emp_id) ? { ...it, self: true } : it));
     if (action === 'mgr_req_day') Object.keys(r.data.by_emp).forEach(e => { if (ms.mine(e)) r.data.by_emp[e] = r.data.by_emp[e].map(x => ({ ...x, self: true })); });
@@ -827,6 +835,13 @@ function dutyDo(d, action, b) {
     }
     if (!multi && leaveList(d.leave[date + emp.emp_id]).length > 1) return fail('BAD_INPUT', '這天記了多種假別，請到打卡系統的值班核定頁修改');
     const periods = b.periods || [], hasTrip = leaves.some(x => x.type === '出差');
+    // 時段每段兩頭都要有、不能是零長度（真後端 bad_periods；12:00–12:00 不能被算成 24 小時，2026-11-09 審查）
+    if (periods.some(p => !p || !/^\d{2}:\d{2}$/.test(p.start || '') || !/^\d{2}:\d{2}$/.test(p.end || '') || p.start === p.end)) return fail('BAD_INPUT', '上班時段格式不對，或沒有填任何時段也沒選假別。');
+    // 沒單不能核定（伺服器 need_request，11/06 起）：那天打卡缺上班或下班卡、又沒有已核准的忘打卡／加班／假單。示範模式預設不擋；e2e 設 d.needReq 才打開
+    if (d.needReq) {
+      const f0 = fakeOf(emp.emp_id), openSeg = !!f0 && f0.segs.some(x => !x.in || !x.out), covered = d.reqs.some(r => r.emp_id === emp.emp_id && r.date === date && r.status === 'approved');
+      if (openSeg && !covered) return fail('BAD_INPUT', '這天還不能核定：缺加班單、假單或忘打卡單');
+    }
     const trip = leaves.reduce((a, x) => a + (x.type === '出差' && x.hours !== '' ? x.hours : 0), 0);
     let hours, status;
     if (!periods.length) {
@@ -839,9 +854,19 @@ function dutyDo(d, action, b) {
       const late = String(b.late_min ?? '').trim();
       status = late === '0' ? '主管認定不計遲到' : late !== '' && Number(late) > 0 ? '遲到' + Number(late) + '分(認定)' : '正常';
     }
+    if (window.__dutyFailEmp && window.__dutyFailEmp[b.emp_id]) { delete window.__dutyFailEmp[b.emp_id]; return fail('UPSTREAM', '打卡系統暫時沒有回應，請稍後再試'); }      // e2e：指定某人的核定失敗一次
+    // 規則 4（核定和打卡差 30 分鐘以上要原因）：伺服器才有的規則，示範模式預設不擋；e2e 設 d.diffRule＝分鐘數才打開（手機一頁核定測「伺服器說要原因」用）
+    if (d.diffRule && periods.length && !String(b.diff_reason ?? '').trim()) {
+      const f = fakeOf(emp.emp_id);
+      if (f && f.segs.length && f.segs.every(x => x.in && x.out)) {
+        const raw = f.segs.reduce((a, x) => { const [i, o] = [x.in, x.out].map(t => +t.slice(0, 2) * 60 + +t.slice(3)); return a + (o <= i ? o + 1440 : o) - i; }, 0);
+        if (Math.abs(hours * 60 - raw) >= (Number(d.diffRule) || 30)) return fail('BAD_INPUT', '核定和打卡差太多，要填原因才能送出');
+      }
+    }
     const dupIgn = Array.isArray(b.dup_ignore) ? b.dup_ignore.slice() : ((d.approved[date + emp.emp_id] || {}).dup_ignore || []);
     if (periods.length && dupIgn.length) status = (status === '正常' ? '' : status + '、') + '主管認定重複打卡（' + dupIgn.map(t => String(t).slice(11, 16)).sort().join('／') + '）';
-    const rec = { periods: periods.map(p => ({ ...p })), approved_hours: hours, status_text: status, manager_name: MGR, dup_ignore: periods.length ? dupIgn : [] };
+    (d.applog = d.applog || []).push(JSON.parse(JSON.stringify(b)));      // e2e：收到的核定內文原樣留著，驗「手機一頁核定送的和舊卡片一樣」
+    const rec = { periods: periods.map(p => ({ ...p })), approved_hours: hours, status_text: status, manager_name: MGR, dup_ignore: periods.length ? dupIgn : [], ...(String(b.diff_reason ?? '').trim() ? { diff_reason: String(b.diff_reason).trim() } : {}) };
     d.approved[date + emp.emp_id] = rec; d.leave[date + emp.emp_id] = leaves;
     (d.hlog = d.hlog || []).push({ at: new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 19) + '+08:00', date, emp_id: emp.emp_id, name: emp.name, hours, status, periods: periods.map(p => p.start + '-' + p.end).join(','), by: MGR });   // 核定紀錄（打卡端 approved 分頁只追加）
     return ok({ date, emp_id: emp.emp_id, name: emp.name, periods, approved_hours: hours, ...leaveOut(leaves), status_text: status, manager_name: MGR });
@@ -852,6 +877,8 @@ function dutyDo(d, action, b) {
   if (action === 'mgr_req_pending') {
     const items = d.reqs.filter(r => r.status === 'pending').sort((x, y) => (x.created_at < y.created_at ? -1 : 1)).map(r => {
       const o = reqPublic(r); o.attach_id = r.attach_id || '';
+      if (r.upper_kind) o.upper_kind = r.upper_kind; if (r.proxy_by) o.proxy_by = r.proxy_by;
+      if (b.__person) o.can_decide = !r.upper_kind;      // 個人登入才有（伺服器 duty.js can_decide）：代開的單這個示範主管核不了      // 主管代開的單（mgr_req_proxy）：標代開，只有總監層級核得了
       if (r.date <= today) o.punches = clone(r.punches || []);   // 還沒到的日期沒有打卡可看
       return o;
     });
@@ -865,6 +892,7 @@ function dutyDo(d, action, b) {
     const r = d.reqs.find(x => String(x.id) === String(b.id || ''));
     if (!r) return fail('NOT_FOUND', '找不到這筆申請');
     if (r.status !== 'pending') return fail('BAD_INPUT', r.status === 'cancelled' ? '同仁已經取消這筆申請' : '這筆已經處理過了');
+    if (decision === 'approve' && d.decideFail && d.decideFail[String(r.id)]) return fail('BAD_INPUT', d.decideFail[String(r.id)]);      // e2e：伺服器拒絕核准（申請和打卡對不上）
     r.status = decision === 'approve' ? 'approved' : 'rejected'; r.decided_at = new Date().toISOString(); r.decided_by = MGR; r.reject_reason = decision === 'reject' ? reason : '';
     return ok({ id: r.id, status: r.status });
   }
@@ -919,6 +947,15 @@ function dutyDo(d, action, b) {
     });
     log.sort((a, c) => (a.at < c.at ? 1 : a.at > c.at ? -1 : 0));
     return ok({ ym, items, leaves, log: log.filter(e => e.at), unmatched: leaves.filter(x => !x.emp_id).length });
+  }
+  if (action === 'mgr_req_proxy') {              // Requests.gs mgr_req_proxy：超過 7 天才能代開，一律送總監層級審；原因必填
+    const emp = d.roster.find(r => r.emp_id === b.emp_id); if (!emp) return fail('NOT_FOUND', '名冊裡找不到這位同仁，請重新整理。');
+    const reason = String(b.reason ?? '').trim().slice(0, 100);
+    if (!reason) return fail('BAD_INPUT', '代開要寫原因');
+    if (!(String(b.date || '') < taipeiDay(-7))) return fail('BAD_INPUT', '7 天內請同仁自己在 LINE 申請；超過 7 天才能代開');
+    const r = { id: 'P' + (d.reqs.length + 1), created_at: new Date().toISOString(), emp_id: emp.emp_id, name: emp.name, kind: String(b.kind || 'miss'), date: b.date, leave_type: '', start: b.start || '', end: b.end || '', hours: null, miss_type: b.miss_type || '', reason, attach_id: '', status: 'pending', upper_kind: 'director', proxy_by: MGR };
+    d.reqs.push(r);
+    return ok({ id: r.id, summary: reqSummary(r) });
   }
   if (action === 'mgr_req_void') {               // Requests.gs handleMgrReqVoid_（2026-10-26）：只能作廢已核准的、理由必填
     const reason = String(b.reason ?? '').trim().slice(0, 100);

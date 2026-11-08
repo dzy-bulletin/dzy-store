@@ -7,8 +7,10 @@ import { qrButton } from './qr.js';
 import { api } from '../../js/api.js';
 import { comparePlan } from '../schedule/compare.js';
 import { ssoSwitch, setSession, toSession } from '../../js/auth.js';
+import { quickWanted, quickAvailable, renderQuick, backBar } from './quick.js';
 
 export function renderApprove(ctx) {
+  if (quickWanted(ctx)) return renderQuick(ctx);      // 手機寬度：預設用「一頁核定」（quick.js）；完整頁是退路
   const el = ctx.el;
   el.innerHTML = `<div id="duQrSlot"></div><div class="du-datebar"><button type="button" class="btn ghost du-nav" id="duPrev" aria-label="前一天">‹</button>
     <input type="date" id="duDate" aria-label="日期"><button type="button" class="btn ghost du-nav" id="duNext" aria-label="後一天">›</button>
@@ -16,6 +18,7 @@ export function renderApprove(ctx) {
     <div id="duPend"></div><div id="duDayBox"></div>`;
   const dateIn = el.querySelector('#duDate'), pendEl = el.querySelector('#duPend'), box = el.querySelector('#duDayBox');
   const live = () => el.isConnected;
+  if (quickAvailable(ctx)) el.insertBefore(backBar(ctx), el.firstChild);      // 手機的完整頁：上面一顆「回到一頁核定」
   if (dutyManager(ctx.session) && !S.all) el.querySelector('#duQrSlot').append(qrButton(el));      // 打卡 QR（同仁定位抓不到時給他掃），日期列上方
 
   // ---------- 本月待核定提醒（manager.html:1604–1745）：沒有待核定＝整塊不畫 ----------

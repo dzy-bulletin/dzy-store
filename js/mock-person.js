@@ -107,7 +107,7 @@ export function attStoresOf(db, p) {
 export function sessionBody(db, p, code, eff, token) {
   const a = db.accounts[code], x = access(db, p, code, eff);
   return Object.assign(token ? { token: token.token, expiresAt: token.expiresAt } : {}, { code, name: a.name, role: 'store', brand: a.brand, mustChangePassword: false, features: x.features,
-    person: { sub: p.sub, name: p.name }, canVoid: x.canVoid, isManager: x.isManager, scheduleAdmin: x.scheduleAdmin, dutyUnlocked: x.features.includes('duty'), dutyManager: x.dutyManager, dutyHours: !p.reqOnly, stores: storesOf(db, p, eff), attStores: attStoresOf(db, p),
+    person: { sub: p.sub, name: p.name }, canVoid: x.canVoid, isManager: x.isManager, scheduleAdmin: x.scheduleAdmin, dutyUnlocked: x.features.includes('duty'), dutyManager: x.dutyManager, dutyHours: !p.reqOnly, ...(p.dutyView ? { dutyView: p.dutyView } : {}), stores: storesOf(db, p, eff), attStores: attStoresOf(db, p),
     ...(x.schedMode !== 'store' ? { schedMode: x.schedMode, ...(x.schedMode === 'self' ? { schedSelfOn: x.selfIds.length > 0, schedApproveOn: x.approveAll || x.approveIds.length > 0, ...(x.shiftAdmin ? { shiftAdmin: true } : {}) } : {}) } : {}),
     ...(() => { const l = schedStoresOf(db, p, eff); return l.length ? { schedStores: l } : {}; })() });
 }

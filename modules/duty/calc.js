@@ -263,7 +263,7 @@ const planSegsOk = plan => !!plan && plan.work === true && Array.isArray(plan.se
 export function planPrefill(emp, plan, br) {
   const approved = emp && emp.approved;
   const keep = approved ? (approved.periods && approved.periods.length ? approved.periods : [null]) : null;
-  const one = (a, b) => (shiftCoversBreak(br, a, b) ? [{ start: a, end: br.start }, { start: br.end, end: b }] : [{ start: a, end: b }]);
+  const one = (a, b) => (shiftCoversBreak(br, a, b) ? [{ start: a, end: br.start }, { start: br.end, end: b }].filter(p => p.start !== p.end) : [{ start: a, end: b }]);      // 班別剛好從休息帶開始／在休息帶結束時，不留零長度那段（會被算成 24 小時）
   const brTag = (a, b) => (shiftCoversBreak(br, a, b) ? '・休' + breakHoursText(br) + 'h' : '');
   if (planSegsOk(plan)) {
     const segs = plan.segs.map(s => ({ start: s.start, end: s.end }));

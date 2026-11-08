@@ -6,11 +6,11 @@ const FLAG = 'dzystore_dutyok';
 // 管理者（2026-10-11 Eason：看得到所有門市、也能代核）：asStore＝正在看的門市代號，每次呼叫自動帶上；stores＝各店總覽讀到的門市清單。
 export const S = { key: null, admin: false, asStore: '', asName: '', stores: null, meta: { clockStore: '', label: '', breakStart: '', breakEnd: '' }, date: null, dayCache: {}, dayTok: 0,
   pend: null, pendAll: false, focusEmp: null, elsewhere: [], rerender: null, leave: null, leaveP: null,
-  all: false, metaBy: {}, leaveBy: {}, recent: {}, reqPre: null };   // all＝個人登入「全部門市」模式（2026-10-19）；metaBy／leaveBy＝各店的休息帶與假別額度（以營運系統門市代號為鍵）
+  all: false, metaBy: {}, leaveBy: {}, recent: {}, reqPre: null, dqFull: false };   // all＝個人登入「全部門市」模式（2026-10-19）；metaBy／leaveBy＝各店的休息帶與假別額度（以營運系統門市代號為鍵）
 
 export function reset(key) {
   S.key = key; S.asStore = ''; S.asName = ''; S.stores = null; S.meta = { clockStore: '', label: '', breakStart: '', breakEnd: '' }; S.date = null; S.dayCache = {}; S.dayTok++;
-  S.pend = null; S.pendAll = false; S.focusEmp = null; S.elsewhere = []; S.leave = null; S.leaveP = null; S.reqCount = 0; S.reqAt = 0; S.metaBy = {}; S.leaveBy = {}; S.recent = {}; S.reqPre = null;
+  S.pend = null; S.pendAll = false; S.focusEmp = null; S.elsewhere = []; S.leave = null; S.leaveP = null; S.reqCount = 0; S.reqAt = 0; S.metaBy = {}; S.leaveBy = {}; S.recent = {}; S.reqPre = null; S.dqFull = false;
 }
 
 // ---- 全部門市（個人登入、可核的人分布在兩家以上打卡店；2026-10-19）----
