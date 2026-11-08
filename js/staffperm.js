@@ -11,7 +11,8 @@ const taipeiToday = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(
 const addDays = (ymd, n) => new Date(Date.parse(ymd + 'T00:00:00Z') + n * 86400e3).toISOString().slice(0, 10);
 
 export default async function view({ el, api, session, ui }) {
-  const labelOf = id => ((ui.cards || []).find(c => c.id === id) || MODULES.find(m => m.id === id) || {}).label || id;
+  const SUB_LABEL = { price_confirm: '價格確認' };                  // 子權限（貨單價格同步：待確認的「套用／不改」），要逐人給、不能放本店預設
+  const labelOf = id => SUB_LABEL[id] || ((ui.cards || []).find(c => c.id === id) || MODULES.find(m => m.id === id) || {}).label || id;
 
   const head = `<div class="card"><h2>本店同仁權限</h2>
     <p class="hint">勾選的功能，這位同仁才看得到、用得到；沒有自己設定的同仁跟著「本店預設」。出勤核定與收支作廢由總部設定，這裡只能看。</p>
@@ -27,10 +28,11 @@ export default async function view({ el, api, session, ui }) {
 
   const feats = d.assignable || [];
   const lock = '<span class="sp-lock" title="由總部設定" aria-label="由總部設定">🔒</span>';
-  const boxes = (have, off) => feats.map(f => `<td class="sp-c"><input type="checkbox" data-mod="${esc(f)}" aria-label="${esc(labelOf(f))}"${have.includes(f) ? ' checked' : ''}${off ? ' disabled' : ''}></td>`).join('');
+  const boxes = (have, off, isDef) => feats.map(f => (isDef && SUB_LABEL[f]) ? '<td class="sp-c"><span class="sp-sub">逐人給</span></td>'
+    : `<td class="sp-c"><input type="checkbox" data-mod="${esc(f)}" aria-label="${esc(labelOf(f))}"${have.includes(f) ? ' checked' : ''}${off ? ' disabled' : ''}></td>`).join('');
   const thead = `<thead><tr><th>同仁</th><th>模式</th>${feats.map(f => `<th class="sp-c">${esc(labelOf(f))}</th>`).join('')}<th class="sp-c">出勤核定<div class="sp-sub">由總部設定</div></th><th class="sp-c">收支作廢<div class="sp-sub">由總部設定</div></th><th></th></tr></thead>`;
   const locks = `<td class="sp-c">${lock}</td><td class="sp-c">${lock}</td>`;
-  const defRow = `<tr data-sub="__default" class="sp-def"><td><b>本店預設</b><div class="sp-sub">沒有自己設定的同仁都跟這一列</div></td><td><span class="tag">預設</span></td>${boxes(d.default.features, false)}${locks}<td></td></tr>`;
+  const defRow = `<tr data-sub="__default" class="sp-def"><td><b>本店預設</b><div class="sp-sub">沒有自己設定的同仁都跟這一列</div></td><td><span class="tag">預設</span></td>${boxes(d.default.features, false, true)}${locks}<td></td></tr>`;
   const personRow = p => `<tr data-sub="${esc(p.sub)}"${p.self ? ' data-self="1"' : ''}><td><b>${esc(p.name)}</b> <span class="sp-sub">${esc(TITLE_TEXT[p.title] || p.title || '')}${p.self ? '・本人' : ''}</span>${p.stale ? '<div class="sp-sub sp-stale">已失效（轉調或復職），目前跟本店預設</div>' : ''}</td>
     <td><span class="tag${p.mode === 'deny' ? ' bad' : p.mode === 'custom' ? ' ok' : ''} sp-mode" data-mode-of="${esc(p.sub)}">${esc(MODE_TEXT[p.mode] || p.mode)}</span></td>
     ${boxes(p.features, p.self)}${locks}

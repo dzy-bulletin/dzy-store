@@ -38,6 +38,8 @@ function store(db, code) {
   return db.inv[code];
 }
 const snap = st => { const S = clone(st.S); delete S.dropped; return S; };
+// 鎖定中：完成盤點那一刻的快照（照 server/inventory.js frozenOf；price-sync P5）
+const frozenOf = st => { const h = [...st.history].reverse().find(x => x.kind === 'finish'); return h ? { id: h.id, at: h.at, data: clone(h.snapshot) } : null; };
 function hist(st, kind, force) {
   const nowMs = Date.now();
   if (!force) { const last = [...st.history].reverse().find(h => h.kind === 'auto'); if (last && nowMs - Date.parse(last.at) < GAP) return null; }
@@ -118,9 +120,10 @@ export function inventory(action, me, b, db) {
   const canLock = !me.person || !!me.isManager, canUnlock = !!me.person && !!me.isManager;
   const WRITES = ['saveCounts', 'saveCats', 'saveProduct', 'deleteProduct', 'saveThreshold', 'finish', 'importLegacy'];
   if (st.lock && WRITES.includes(action) && !(action === 'importLegacy' && b.confirm !== true)) return fail('LOCKED', '盤點已鎖定，要修改請店長先解鎖');
-  if (action === 'bootstrap') { const d = snap(st); return ok({ at: at(), lastFinish: st.lastFinish, lock: st.lock || null, canLock, canUnlock, data: d }); }
+  if (action === 'bootstrap') { const d = snap(st); return ok({ at: at(), lastFinish: st.lastFinish, lock: st.lock || null, canLock, canUnlock, data: d, frozen: st.lock ? frozenOf(st) : null }); }
   if (action === 'unlock') { if (!canUnlock) return fail('FORBIDDEN', '只有店長可以解鎖，請用管理系統個人帳號登入'); st.lock = null; return ok({ at: at(), lock: null }); }
   if (action === 'lowCount') return ok({ ...counts(S, true), missing: 0 });
+  if (action === 'priceSync') return ok({ mode: 'off' });                    // 示範模式沒有貨單價格同步（畫面照舊）
   if (action === 'saveCounts') {
     if (!ZONES.includes(b.zone)) return bad('區域不正確');
     const zone = b.zone, cats = zone === 'cart' ? S.cartCats : S.stockCats, items = zone === 'cart' ? S.cartItems : S.stockItems;
@@ -202,7 +205,7 @@ export function inventory(action, me, b, db) {
   if (action === 'finish') {
     if (!canLock) return fail('FORBIDDEN', '完成盤點會鎖定盤點，只有店長可以按');
     const id = hist(st, 'finish', true); st.lastFinish = at(); st.lock = { at: st.lastFinish, by: (me.person && me.person.name) || me.code };
-    return ok({ id, at: st.lastFinish, lock: st.lock });
+    return ok({ id, at: st.lastFinish, lock: st.lock, frozen: frozenOf(st) });
   }
   if (action === 'listHistory') return ok({ items: [...st.history].reverse().slice(0, Math.min(+b.limit || 50, 200)).map(({ id, at: a, kind, total: t }) => ({ id, at: a, kind, total: t })) });
   if (action === 'getHistory') {

@@ -176,7 +176,8 @@ export function storePermRoute(db, method, p, q, b, s, per, me, eff, log) {
     setBy = 'admin:' + me.code;
   } else return fail('FORBIDDEN', '只有這家店的店長可以設定同仁權限');
   const unit = unitOf(db, code);
-  const assignable = eff(db.accounts[code]).filter(f => f !== 'duty' && f !== 'schedule');
+  const assignable0 = eff(db.accounts[code]).filter(f => f !== 'duty' && f !== 'schedule');
+  const assignable = assignable0.includes('inventory') ? [...assignable0, 'price_confirm'] : assignable0;   // 照 server/store-perm.js：價格確認跟著庫存盤點
   const roster = () => Object.keys(db.personas).map(sub => personaOf(db, sub)).filter(x => x.unit === unit && x.active !== false && x.title)
     .map(x => ({ sub: x.sub, emp_no: x.sub, name: x.name, title: x.title })).sort((a, c) => (a.sub < c.sub ? -1 : 1));
   const checkFeatures = list => {
@@ -202,6 +203,7 @@ export function storePermRoute(db, method, p, q, b, s, per, me, eff, log) {
   if (method !== 'POST') return null;
   if (p === '/store-perm/default') {
     const e = checkFeatures(b.features); if (e) return e;
+    if ((b.features || []).includes('price_confirm')) return fail('BAD_INPUT', '「價格確認」要逐人給，不能放進本店預設');
     db.storeDefault[code] = sortedSet(b.features); log(me.code, 'store-perm', 'default', true, '', per && per.name); return ok();
   }
   const subOk = typeof b.sub === 'string' && SUB_RE.test(b.sub);

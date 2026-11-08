@@ -4,7 +4,7 @@
 import { api } from '../../js/api.js';
 
 export const AUTOSAVE_MS = 3000;
-export const S = { key: null, loaded: false, loading: null, loadedAt: 0, data: null, at: '', lastFinish: null, lock: null, canLock: true, canUnlock: false,
+export const S = { key: null, loaded: false, loading: null, loadedAt: 0, data: null, at: '', lastFinish: null, lock: null, frozen: null, canLock: true, canUnlock: false,
   dirty: { cart: new Set(), stock: new Set() }, deleted: { cart: new Set(), stock: new Set() }, inflight: null,
   timer: null, saving: 0, status: { kind: 'idle', hm: '', msg: '' }, retry: new Map(), warn: '', collapsed: new Set(), device: '' };
 
@@ -18,7 +18,7 @@ function deviceId() {
 }
 export function resetState(key) {
   clearTimeout(S.timer);
-  Object.assign(S, { key, loaded: false, loading: null, loadedAt: 0, data: null, at: '', lastFinish: null, lock: null, canLock: true, canUnlock: false, inflight: null, timer: null, saving: 0,
+  Object.assign(S, { key, loaded: false, loading: null, loadedAt: 0, data: null, at: '', lastFinish: null, lock: null, frozen: null, canLock: true, canUnlock: false, inflight: null, timer: null, saving: 0,
     status: { kind: 'idle', hm: '', msg: '' }, retry: new Map(), warn: '', collapsed: new Set(), device: deviceId() });
   S.dirty = { cart: new Set(), stock: new Set() }; S.deleted = { cart: new Set(), stock: new Set() };
 }
@@ -47,6 +47,7 @@ export async function load() {
   const d = await api('POST', '/m/inventory/bootstrap', {});
   S.data = d.data; S.at = d.at; S.lastFinish = d.lastFinish; S.loaded = true; S.loadedAt = Date.now();
   S.lock = d.lock || null; S.canLock = d.canLock !== false; S.canUnlock = !!d.canUnlock;
+  S.frozen = d.lock && d.frozen ? d.frozen : null; S.lockedMeanwhile = false;                // 鎖定中：列印與匯出讀完成盤點那一刻的快照（價格不會被之後的貨單改到）
   S.data.cartCats = S.data.cartCats || []; S.data.stockCats = S.data.stockCats || [];
   return S.data;
 }
@@ -123,7 +124,7 @@ export function flushNow() {
 const LOCKED_MSG = '盤點已經被鎖定（可能有人剛按了完成盤點），你剛剛改的沒有存進去。請按「重新讀取」。';
 function lockedMeanwhile(batch) {
   for (const zone of ['cart', 'stock']) { batch[zone].ids.forEach(id => S.dirty[zone].delete(id)); batch[zone].del.forEach(id => S.deleted[zone].delete(id)); }
-  S.warn = LOCKED_MSG; S.lock = S.lock || { at: '', by: '' };
+  S.warn = LOCKED_MSG; S.lock = S.lock || { at: '', by: '' }; S.lockedMeanwhile = true;
 }
 
 // 完成盤點、列印、匯出之前用：先存，還有沒存進去的就丟錯（不能拿舊資料去完成盤點或印出來）（2026-10-12 Codex 審查）
@@ -139,7 +140,7 @@ export async function track(key, fn) {
   try { const r = await fn(); S.retry.delete(key); S.saving--; if (S.saving === 0 && !S.retry.size && !dirtyCount()) setStatus('ok'); else paintStatus(); return r; }
   catch (e) {
     S.saving--;
-    if (e.code === 'LOCKED') { S.retry.delete(key); S.warn = LOCKED_MSG; S.lock = S.lock || { at: '', by: '' }; setStatus('idle'); throw e; }
+    if (e.code === 'LOCKED') { S.retry.delete(key); S.warn = LOCKED_MSG; S.lock = S.lock || { at: '', by: '' }; S.lockedMeanwhile = true; setStatus('idle'); throw e; }
     S.retry.set(key, fn); setStatus('fail', e.message); throw e;
   }
 }

@@ -1,6 +1,6 @@
 // 庫存盤點（營運系統自有資料，取代只存在手機的舊版 eason0728.github.io/mala）。
 // 六個分頁：攤車庫存／現場庫存／商品價格／列印與匯出／歷史／從舊版匯入。功能與計算照正本，存檔改成伺服器（停手 3 秒自動存）。
-import { esc } from '../../js/ui.js';
+import { esc, confirmBox } from '../../js/ui.js';
 import { api } from '../../js/api.js';
 import { S, resetState, load, flushNow, paintStatus, retryAll, hookPage, dirtyCount } from './state.js';
 import { renderZone } from './count.js';
@@ -16,11 +16,11 @@ const whenOf = iso => { const d = new Date(iso); return isNaN(d) ? '' : `${d.get
 function lockBar() {
   if (!S.lock) return '';
   const who = [whenOf(S.lock.at), S.lock.by].filter(Boolean).join(' ');
-  return `<div class="inv-lockbar" id="invLock" role="status"><span>🔒 盤點已鎖定${who ? '（' + esc(who) + ' 完成盤點）' : ''}。數量、價格、商品都不能改；列印、匯出、看歷史照常。</span>`
+  return `<div class="inv-lockbar" id="invLock" role="status"><span>🔒 盤點已鎖定${who ? '（' + esc(who) + ' 完成盤點）' : ''}。數量、商品、手改價格都不能改；列印、匯出、看歷史、貨單價格的待確認照常。</span>`
     + (S.canUnlock ? '<button class="btn ghost sm" type="button" id="invUnlockBtn">🔓 解鎖</button>' : '<span class="inv-lockhint">要修改請店長解鎖。</span>') + '</div>';
 }
 function lockView(el) {
-  el.querySelectorAll('input, select, textarea, button').forEach(x => { if (!x.matches('[data-act="tog"]')) x.disabled = true; });   // 收合分類照常可按
+  el.querySelectorAll('input, select, textarea, button').forEach(x => { if (!x.matches('[data-act="tog"]') && !x.closest('.inv-sync')) x.disabled = true; });   // 收合分類照常可按；貨單價格同步那一區（.inv-sync）照常可按
   el.classList.add('inv-locked');
 }
 const VIEWS = { cart: c => renderZone(c, 'cart'), stock: c => renderZone(c, 'stock'), price: renderPrice, print: renderPrint, history: renderHistory, import: renderImport };
@@ -46,8 +46,9 @@ export default {
       ctx.el.querySelector('#invReload').onclick = async () => { try { await flushNow(); S.loaded = false; S.warn = ''; await load(); } catch (e) { /* 留著提示 */ } ctx.rerender(); };
       const ub = ctx.el.querySelector('#invUnlockBtn');
       if (ub) ub.onclick = async () => {
+        if (!(await confirmBox('解鎖後就開始新的一輪盤點：之後再按「完成盤點」，會用那時的價格定格。這次已完成的盤點，隨時可以從「歷史」重印。確定解鎖？', '解鎖'))) return;
         ub.disabled = true;
-        try { await api('POST', '/m/inventory/unlock', {}); S.lock = null; S.warn = ''; ctx.rerender(); }
+        try { await api('POST', '/m/inventory/unlock', {}); S.lock = null; S.frozen = null; S.warn = ''; ctx.rerender(); }
         catch (e) { ub.disabled = false; S.warn = '解鎖失敗：' + e.message; paintStatus(); }
       };
       paintStatus();

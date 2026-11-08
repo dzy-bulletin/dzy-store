@@ -6,6 +6,7 @@ import { api } from '../../js/api.js';
 import { S, track, flushNow } from './state.js';
 import { pgForProduct, fmtpg } from './calc.js';
 import { snack } from './count.js';
+import { loadSync, syncOn, syncHead, syncCells, logBtn, syncTop, syncBody, bindSync } from './pricesync.js';
 
 const numStr = v => (v === null || v === undefined ? '' : String(v));
 
@@ -13,17 +14,17 @@ function tableHtml(cat) {
   const rows = (S.data.products[cat] || []).map(p => {
     const t = S.data.thresholds[p.id] || { low: null, high: null };
     return `<tr data-pid="${esc(p.id)}">
-      <td><input class="pn" value="${esc(p.name)}" data-f="name" aria-label="品名"></td>
+      <td><div class="ps-name"><input class="pn" value="${esc(p.name)}" data-f="name" aria-label="品名">${logBtn(p)}</div></td>
       <td><input class="pp" type="number" inputmode="decimal" value="${esc(p.price)}" data-f="price" aria-label="價格"></td>
       <td><input class="ps" type="number" inputmode="decimal" value="${esc(p.spec)}" data-f="spec" aria-label="規格"></td>
       <td><input class="pu" value="${esc(p.unit)}" data-f="unit" aria-label="單位"></td>
       <td class="cmp">${fmtpg(pgForProduct(p))}</td>
       <td><input class="pt" type="number" inputmode="decimal" placeholder="不設定" value="${esc(numStr(t.low))}" data-t="low" aria-label="低於幾元算偏低"></td>
       <td><input class="pt" type="number" inputmode="decimal" placeholder="不設定" value="${esc(numStr(t.high))}" data-t="high" aria-label="高於幾元算偏高"></td>
-      <td><button class="btn ghost sm" type="button" data-act="del">刪除</button></td></tr>`;
+      ${syncCells(p)}<td><button class="btn ghost sm" type="button" data-act="del">刪除</button></td></tr>`;
   }).join('');
   return `<section class="card inv-pcat" data-cat="${esc(cat)}"><h2>【${esc(cat)}】</h2>
-    <div class="scroll"><table class="inv-ptable"><thead><tr><th>品名</th><th>價格(元)</th><th>規格</th><th>單位</th><th>每克/件(元)</th><th>低於(元)</th><th>高於(元)</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="scroll"><table class="inv-ptable"><thead><tr><th>品名</th><th>價格(元)</th><th>規格</th><th>單位</th><th>每克/件(元)</th><th>低於(元)</th><th>高於(元)</th>${syncHead()}<th></th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="inv-padd"><div class="inv-padd-t">＋ 新增品項到「${esc(cat)}」</div>
       <div class="row"><div class="fld grow"><label>品名</label><input type="text" class="an" placeholder="例：新品（包）" maxlength="60"></div>
       <div class="fld"><label>價格(元)</label><input type="number" inputmode="decimal" class="ap" placeholder="0"></div>
@@ -32,17 +33,25 @@ function tableHtml(cat) {
       <button class="btn sm mt" type="button" data-act="add">＋ 新增</button><div class="err" role="alert"></div></div></section>`;
 }
 
-export function renderPrice(ctx) {
+export async function renderPrice(ctx, cached) {
   const el = ctx.el;
+  if (!cached) await loadSync();                                             // 這家店有開貨單價格同步，才多出對照、待確認那些東西（spec 3.5）
+  if (!el.isConnected) return;
   const cats = Object.keys(S.data.products);
-  el.innerHTML = `<div id="invPrice"><p class="hint">價格、規格改完離開欄位就自動存。「低於／高於」是盤點列金額（元），列印頁會用它標示偏低、偏高。</p>
+  el.innerHTML = `<div id="invPrice">${syncTop()}<div id="invPriceBody">`;
+  const body = el.querySelector('#invPriceBody');
+  const redraw = (reload) => renderPrice(ctx, reload === false);
+  if (syncOn()) bindSync(el.querySelector('#invPrice'), ctx, redraw);
+  if (await syncBody(body)) return;                                          // 待確認／還沒對上／換不過去分頁（盤點鎖定也照常能按）
+  body.outerHTML = `<p class="hint">價格、規格改完離開欄位就自動存。「低於／高於」是盤點列金額（元），列印頁會用它標示偏低、偏高。${syncOn() ? '「貨單對照」對好的商品，貨單入帳後價格會自動更新；🕘 看改價紀錄。' : ''}</p>
     ${cats.map(tableHtml).join('')}
     <div class="inv-addcat card"><input id="invNewPCat" type="text" placeholder="新商品類別名稱" maxlength="30"><button class="btn sm" type="button" data-act="addcat">＋ 新增類別</button><div class="err" id="invPCatErr" role="alert"></div></div></div>`;
   const root = el.querySelector('#invPrice');
+  if (S.lock) root.querySelectorAll('input, select, textarea, button').forEach(x => { if (!x.closest('.inv-sync')) x.disabled = true; });   // 重畫時也維持鎖定（index.js lockView 只在切頁時跑）
 
   const productOf = tr => (S.data.products[tr.closest('.inv-pcat').dataset.cat] || []).find(p => p.id === tr.dataset.pid);
   root.addEventListener('change', async e => {
-    const inp = e.target, tr = inp.closest('tr[data-pid]'); if (!tr) return;
+    const inp = e.target, tr = inp.closest('tr[data-pid]'); if (!tr || inp.dataset.ps) return;     // 貨單同步的勾選框由 pricesync.js 處理
     const p = productOf(tr); if (!p) return;
     if (inp.dataset.t) {                                                      // 1121–1129 setThresh
       const v = inp.value === '' ? null : parseFloat(inp.value);
