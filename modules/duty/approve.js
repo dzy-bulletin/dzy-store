@@ -163,7 +163,7 @@ export function renderApprove(ctx) {
       });
     }, () => {});
   }
-  // 那天已核准的加班請假／忘打卡申請 → 對應同仁卡片顯示並預填（不快取：主管剛核准完切過來要看得到）。失敗就安靜略過，不擋核定。
+  // 那天已核准的加班請假／忘打卡申請 → 對應同仁卡片顯示並預填（不快取：主管剛核准完切過來要看得到）。讀完前整塊鎖住，讀不到就停用送出並給重試：否則已核准的整天假可能被照班表核成上班（2026-11-10 Eason 選）。
   function applyDayRequests(date) {
     const tok = S.dayTok;
     const put = (store, byEmp) => Object.keys(byEmp || {}).forEach(id => {
@@ -173,18 +173,33 @@ export function renderApprove(ctx) {
     });
     const pre = S.reqPre && S.reqPre.date === date && S.reqPre.all === S.all ? S.reqPre.p : null;   // 跟名單同時送出的那一次
     S.reqPre = null;
-    if (S.all) {          // 全部門市：by_store[店].by_emp，各店的 emp_id 分開對（同號員編不會對錯人）
-      (pre || callAll('mgr_req_day', { date })).then(res => {
-        if (tok !== S.dayTok || S.date !== date || !live() || !res || !res.by_store) return;
-        Object.keys(res.by_store).forEach(st => put(st, res.by_store[st] && res.by_store[st].by_emp));
-      }, () => {});
-      return;
-    }
-    (pre || call('mgr_req_day', { date })).then(res => {
-      if (tok !== S.dayTok || S.date !== date || !live() || !res || !res.by_emp) return;
-      put('', res.by_emp);
-      Object.keys(res.by_store || {}).forEach(st => put(st, res.by_store[st] && res.by_store[st].by_emp));      // 總部那組併進來的別家
-    }, () => {});
+    markStale('已核准的申請讀取中，讀到後就可以核定…');
+    const current = () => tok === S.dayTok && S.date === date && live();
+    const unlock = () => { unStale(); const n = box.querySelector('#duStale'); if (n) n.remove(); };      // 畫面沒有重畫，提示要自己拿掉
+    // failed＝只有這幾家讀不到（全部門市、總部併組），其他店照常；沒傳＝整份讀不到
+    const block = failed => {
+      const prefixes = failed ? failed.map(f => f.store + '|') : null;
+      [].forEach.call(box.querySelectorAll('.du-card'), c => {
+        if (prefixes && !prefixes.some(x => c.dataset.empId.startsWith(x))) return;
+        const b = c.querySelector('.du-submit');
+        if (b) { b.disabled = true; b.title = '已核准的申請讀不到，重新載入後才能送出'; }
+      });
+      const bar = h('div', 'du-fail', null, { id: 'duReqFail' });
+      bar.append(h('span', 'du-fail-msg', (failed ? failed.map(f => f.storeName).join('、') + '的' : '') + '已核准申請讀不到，為了避免算錯工時，暫時不能送出核定'));
+      const again = h('button', 'btn sm ghost', '重新載入', { type: 'button' });
+      again.onclick = () => { again.disabled = true; again.textContent = '載入中…'; loadDay(date); };
+      bar.append(again);
+      box.prepend(bar);
+    };
+    // 全部門市：by_store[店].by_emp，各店的 emp_id 分開對（同號員編不會對錯人）
+    (pre || (S.all ? callAll('mgr_req_day', { date }) : call('mgr_req_day', { date }))).then(res => {
+      if (!current()) return;
+      unlock();
+      if (!res || !(S.all ? res.by_store : res.by_emp)) return block();
+      if (!S.all) put('', res.by_emp);
+      Object.keys(res.by_store || {}).forEach(st => put(st, res.by_store[st] && res.by_store[st].by_emp));      // 全部門市各店；單一門市時是總部那組併進來的別家
+      if (Array.isArray(res.failed) && res.failed.length) block(res.failed);
+    }, () => { if (current()) { unlock(); block(); } });
   }
 
   dateIn.onchange = () => { if (dateIn.value) loadDay(dateIn.value); };
@@ -681,10 +696,12 @@ function buildCard(emp, date) {
           const wasFilled = (card.__lastFilled || []).includes(r.id);      // 作廢的這張剛才有填進畫面
           const clearedOt = !!(card.__otRows && card.__otRows.length);     // 自動接上的加班時段先拿掉，再依剩下的申請重建
           (card.__otRows || []).forEach(n => n.remove()); card.__otRows = []; if (clearedOt) refresh();
+          const clearedLeave = wasFilled && (r.kind === 'leave' || r.kind === 'trip');      // 作廢的假單／出差單填過假別：先清掉，剩下的申請有假別會再填回（否則剩忘打卡單時，舊時數會跟著送出，2026-11-10 Codex 複審）
+          if (clearedLeave) { setLeaveLines([]); refresh(); }
           rbox.remove(); if (tag) { tag.remove(); tag = null; }
           card.__reqApplied = false; card.__lastFilled = [];
           card.__applyReq(rest);
-          const stale = wasFilled && !clearedOt && !card.__lastFilled.length;           // 剩下的沒有重新填 → 畫面還是作廢那張的內容（2026-10-29 Fable 審查第 5、6 條）
+          const stale = wasFilled && !clearedOt && !card.__lastFilled.length && !(clearedLeave && r.start);           // 剩下的沒有重新填 → 畫面還是作廢那張的內容（2026-10-29 Fable 審查第 5、6 條）
           const done = h('div', 'du-reqbox warn du-voided', '已作廢：' + r.summary + (stale ? '。畫面上已經預填的內容沒有清掉，請確認後再送出核定。' : ''));
           periodRows.parentNode.insertBefore(done, periodRows);
           delete S.dayCache[date];
