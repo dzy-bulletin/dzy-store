@@ -404,14 +404,16 @@ function classifyRaw(inp) {
   const lg = nPlanSegs >= 2 && segs.length === nPlanSegs ? segLag(emp.plan.segs, segs) : lag(comparePlanOf(emp.plan), segs);
   const lateV = Math.max(fl.late, lg.late >= THRESHOLD_MIN ? lg.late : 0), earlyV = Math.max(fl.early, lg.early >= THRESHOLD_MIN ? lg.early : 0);      // 達 15 分鐘就算（compare.js 只在超過 15 才標旗）
   if (lateV || earlyV) {
-    if (punchHours > OK_MAX_H) return full('照打卡超過 ' + OK_MAX_H + ' 小時', '照打卡 ' + fmtH(punchHours) + ' 小時，沒有加班單');
+    if (planHours > OK_MAX_H) return full('班表超過 ' + OK_MAX_H + ' 小時', '有遲到早退，要自己核對');
+    if (punchHours > OK_MAX_H) return full('打卡超過 ' + OK_MAX_H + ' 小時', '打卡 ' + fmtH(punchHours) + ' 小時，沒有加班單');
     const tag = [lateV ? '遲到 ' + lateV + ' 分' : '', earlyV ? '早退 ' + earlyV + ' 分' : ''].filter(Boolean).join('、');
-    return Object.assign(base, { status: 'abnormal', tag, hours: punchHours, payload: punchPayload, actions: [punchAct(true), planAct(false)] });
+    // 核定一定照班表：打卡和核定時段比才標得出遲到早退分鐘，薪資與績效靠這個（改成打卡取整會變成沒遲到，2026-11-10 Eason）
+    return Object.assign(base, { status: 'abnormal', tag, chk: '遲到早退的分鐘由薪資照扣', hours: planHours, payload: planPayload, actions: [planAct(true), fullAct] });
   }
   if (dev.early >= THRESHOLD_MIN || dev.late >= THRESHOLD_MIN) {
     const tag = [dev.early >= THRESHOLD_MIN ? '早到 ' + dev.early + ' 分' : '', dev.late >= THRESHOLD_MIN ? '晚走 ' + dev.late + ' 分' : ''].filter(Boolean).join('、');
     const acts = [planAct(true)];
-    if (punchHours <= OK_MAX_H) acts.push(punchAct(false));
+    if (punchHours <= OK_MAX_H && !lg.late && !lg.early) acts.push(punchAct(false));      // 另一端有未滿 15 分的遲到早退時不給照打卡：取整後會標不出分鐘
     return Object.assign(base, { status: 'abnormal', tag, note: '沒有加班單', hours: planHours, payload: planPayload, actions: acts });
   }
   if (planHours > OK_MAX_H) {
