@@ -56,7 +56,21 @@ export function breakHoursText(br) {
 // manager.html:912–914
 export function segmentText(s) { return (s.in || '？') + '–' + (s.out || '？') + (s.cross ? '(+1)' : ''); }
 // manager.html:916–919
-export function badgeClass(statusText) { return !statusText || statusText === '正常' ? 'normal' : 'warn'; }
+// 第二個參數（2026-11-10 Eason）：出差、全天請假有已核准的申請單，假別、時數、核定時數都對得上＝正常（綠色）；沒傳或對不上維持 warn
+const LEAVE_ONLY_STATUS = ['出差', '全天請假'];
+export function badgeClass(statusText, day) {
+  if (!statusText || statusText === '正常') return 'normal';
+  const parts = String(statusText).split('、').map(s => s.trim()).filter(Boolean);
+  return day && parts.length && parts.every(p => LEAVE_ONLY_STATUS.includes(p)) && leavesMatchReqs(day) ? 'normal' : 'warn';
+}
+/** 核定的假別與時數＝當天已核准的請假／出差單，且核定時數＝上班時段＋出差時數。day：{approvedHours, periods, leaves, reqs} */
+export function leavesMatchReqs(day) {
+  const total = list => (list || []).reduce((m, x) => { m[x.type] = (m[x.type] || 0) + (x.hours === '' || x.hours == null ? NaN : Number(x.hours)); return m; }, {});
+  const want = total(day.leaves), got = total(reqLeaveLines(day.reqs)), types = Object.keys(want);
+  if (!types.length || types.length !== Object.keys(got).length) return false;
+  if (!types.every(t => want[t] > 0 && Math.abs(want[t] - got[t]) < 0.01)) return false;
+  return Math.abs(Number(day.approvedHours) - (sumPeriods(day.periods || []).total + tripHoursOfList(day.leaves))) < 0.01;
+}
 // manager.html:955–959：假別＋時數的顯示後綴，如「・病假2.5h」
 export function leaveSuffix(type, hours) {
   if (!type) return '';

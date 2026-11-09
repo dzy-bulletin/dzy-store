@@ -315,11 +315,14 @@ function buildCard(emp, date) {
 
   // ---- 狀態徽章：核定成功後當場翻成「已核定」----
   const badge = h('div', 'du-badge');
+  let badgeNow = null;      // 申請單比卡片晚到、作廢後也要重算顏色
   function setBadge(approved, leaves) {
+    badgeNow = { approved, leaves };
     if (approved) {
-      badge.className = 'du-badge ' + C.badgeClass(approved.status_text);
+      const cls = C.badgeClass(approved.status_text, { approvedHours: approved.approved_hours, periods: approved.periods, leaves, reqs: card.__dayReqs });
+      badge.className = 'du-badge ' + cls;
       badge.textContent = '已核定 ' + approved.approved_hours + ' 小時・' + approved.status_text + C.leavesSuffix(leaves) + '（' + approved.manager_name + '）';
-      mini.className = 'du-mini ' + C.badgeClass(approved.status_text); mini.textContent = '✓ ' + approved.approved_hours + ' 小時';
+      mini.className = 'du-mini ' + cls; mini.textContent = '✓ ' + approved.approved_hours + ' 小時';
     } else if (absent) { badge.className = 'du-badge absent'; badge.textContent = '未出勤'; mini.className = 'du-mini absent'; mini.textContent = '未出勤'; }
     else { badge.className = 'du-badge pending'; badge.textContent = '待核定'; mini.className = 'du-mini pending'; mini.textContent = '待核定'; }
     badge.hidden = !approved;                       // 未核定時頭部的精簡徽章已寫「待核定」，不必再重複一顆
@@ -584,6 +587,8 @@ function buildCard(emp, date) {
   //      預填只是畫面上的值，主管按送出核定才算數（核准申請本身不寫入核定）。加班在上班日接在班表後面（2026-11-09）；
   //      班表排休那天（2026-10-29）加班申請的時段就是當天工時 → 依加班申請預填、標「來自加班申請」，並收掉補申請提示。
   card.__applyReq = reqs => {
+    card.__dayReqs = reqs || [];
+    if (badgeNow) setBadge(badgeNow.approved, badgeNow.leaves);
     if (!reqs || !reqs.length || card.__reqApplied) return;
     card.__reqApplied = true;
     // 同一天多張申請（2026-10-29，照 manager.html 2026-10-26；spec §1.1）：不同假別（出差＋天災假）一起填、各成一列；
