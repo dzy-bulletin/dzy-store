@@ -525,7 +525,7 @@ function buildCard(emp, date) {
       go.disabled = true; go.textContent = '送出中…';
       try {
         const res = await call('mgr_req_proxy', p);
-        say('ok', '✓ 已代開：' + res.summary + '。等總監層級在「申請審核」核准後，再回來送出核定。' + (k === 'leave' ? '需要附證明的假別，請同仁在 LINE「我的申請」補附。' : ''));
+        say('ok', '✓ 已代開：' + res.summary + '。等總監層級在「申請審核」核准後，再回來送出核定。還缺別張單的話，再按一次「送出核定」就能繼續代開。' + (k === 'leave' ? '需要附證明的假別，請同仁在 LINE「我的申請」補附。' : ''));
         proxyBox.remove(); proxyBox = null;
       } catch (e) { say('bad', '✕ 代開失敗：' + e.message); go.disabled = false; go.textContent = '送出代開（送總監層級審核）'; }
     };

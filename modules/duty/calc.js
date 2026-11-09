@@ -56,12 +56,26 @@ export function breakHoursText(br) {
 // manager.html:912–914
 export function segmentText(s) { return (s.in || '？') + '–' + (s.out || '？') + (s.cross ? '(+1)' : ''); }
 // manager.html:916–919
-// 第二個參數（2026-11-10 Eason）：出差、全天請假有已核准的申請單，假別、時數、核定時數都對得上＝正常（綠色）；沒傳或對不上維持 warn
+// 第二個參數（2026-11-10 Eason）：出差、全天請假、忘刷卡有已核准的申請單，內容和核定時數都對得上＝正常（綠色）；沒傳或對不上維持 warn
 const LEAVE_ONLY_STATUS = ['出差', '全天請假'];
+const missCardsOf = p => (p === '上班忘刷卡' || p === '下班忘刷卡' || /^第.+段(上班|下班)無打卡$/.test(p)) ? 1 : p === '該段無打卡' ? 2 : 0;
 export function badgeClass(statusText, day) {
   if (!statusText || statusText === '正常') return 'normal';
   const parts = String(statusText).split('、').map(s => s.trim()).filter(Boolean);
-  return day && parts.length && parts.every(p => LEAVE_ONLY_STATUS.includes(p)) && leavesMatchReqs(day) ? 'normal' : 'warn';
+  if (!day || !parts.length || !parts.every(p => LEAVE_ONLY_STATUS.includes(p) || missCardsOf(p))) return 'warn';
+  const needLeave = parts.some(p => LEAVE_ONLY_STATUS.includes(p)) || (day.leaves || []).length > 0;
+  const needCards = parts.reduce((a, p) => a + missCardsOf(p), 0);
+  return (!needLeave || leavesMatchReqs(day)) && (!needCards || missMatchesReqs(day, needCards)) ? 'normal' : 'warn';
+}
+/** 已核准的忘打卡單補足缺的卡，補的時間在核定時段頭尾 15 分鐘內，核定時數也對得上。 */
+function missMatchesReqs(day, needCards) {
+  const reqs = (day.reqs || []).filter(r => r.kind === 'miss');
+  const periods = day.periods || [];
+  const have = reqs.reduce((a, r) => a + (r.miss_type === 'both' || r.miss_type === 'break' ? 2 : 1), 0);
+  if (have < needCards || !periods.length) return false;
+  const near = (t, side) => periods.some(p => Math.abs(hhmmToMin(t) - hhmmToMin(p[side])) <= 15);
+  const ok = reqs.every(r => (r.miss_type === 'out' || (r.start && near(r.start, 'start'))) && (r.miss_type === 'in' || (r.end && near(r.end, 'end'))));
+  return ok && Math.abs(Number(day.approvedHours) - (sumPeriods(periods).total + tripHoursOfList(day.leaves))) < 0.01;
 }
 /** 核定的假別與時數＝當天已核准的請假／出差單，且核定時數＝上班時段＋出差時數。day：{approvedHours, periods, leaves, reqs} */
 export function leavesMatchReqs(day) {
