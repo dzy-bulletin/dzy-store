@@ -355,7 +355,10 @@ function classifyRaw(inp) {
     } else if (old && proxy) {
       base.actions = [{ id: 'proxy', label: '主管代開忘打卡單', primary: true, missType: proxy, defStart: ps ? ps[0].start : '', defEnd: ps ? ps[ps.length - 1].end : '' }, skip('先跳過')];
     } else if (old) base.actions = [fullAct, skip('先跳過')];
-    else base.actions = [skip('先跳過，等同仁補單')];
+    else {
+      if (inp.person) base.note = '請同仁到 LINE 補忘打卡單；同仁沒綁 LINE，請到完整頁代開';      // 這裡不知道誰沒綁，完整頁送出時打卡端會判斷（2026-11-09）
+      base.actions = inp.person ? [skip('先跳過，等同仁補單'), fullAct] : [skip('先跳過，等同仁補單')];
+    }
     return base;
   }
   if (pv.mode === 'off') {

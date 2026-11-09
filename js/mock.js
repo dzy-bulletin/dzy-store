@@ -843,7 +843,7 @@ function dutyDo(d, action, b) {
     // 沒單不能核定（伺服器 need_request，11/06 起）：那天打卡缺上班或下班卡、又沒有已核准的忘打卡／加班／假單。示範模式預設不擋；e2e 設 d.needReq 才打開
     if (d.needReq) {
       const f0 = fakeOf(emp.emp_id), openSeg = !!f0 && f0.segs.some(x => !x.in || !x.out), covered = d.reqs.some(r => r.emp_id === emp.emp_id && r.date === date && r.status === 'approved');
-      if (openSeg && !covered) return fail('BAD_INPUT', '這天還不能核定：缺加班單、假單或忘打卡單');
+      if (openSeg && !covered) return fail('BAD_INPUT', '這天還不能核定：缺加班單、假單或忘打卡單' + (emp.no_line ? '。這位同仁沒綁 LINE，請店長在考勤管理「代開申請」，送總監層級審核。' : ''));
     }
     const trip = leaves.reduce((a, x) => a + (x.type === '出差' && x.hours !== '' ? x.hours : 0), 0);
     let hours, status;
@@ -957,7 +957,7 @@ function dutyDo(d, action, b) {
     const emp = d.roster.find(r => r.emp_id === b.emp_id); if (!emp) return fail('NOT_FOUND', '名冊裡找不到這位同仁，請重新整理。');
     const reason = String(b.reason ?? '').trim().slice(0, 100);
     if (!reason) return fail('BAD_INPUT', '代開要寫原因');
-    if (!(String(b.date || '') < taipeiDay(-7))) return fail('BAD_INPUT', '7 天內請同仁自己在 LINE 申請；超過 7 天才能代開');
+    if (!(String(b.date || '') < taipeiDay(-7)) && !(emp.no_line && String(b.date || '') <= taipeiDay(0))) return fail('BAD_INPUT', '7 天內請同仁自己在 LINE 申請；超過 7 天才能代開');
     const r = { id: 'P' + (d.reqs.length + 1), created_at: new Date().toISOString(), emp_id: emp.emp_id, name: emp.name, kind: String(b.kind || 'miss'), date: b.date, leave_type: '', start: b.start || '', end: b.end || '', hours: null, miss_type: b.miss_type || '', reason, attach_id: '', status: 'pending', upper_kind: 'director', proxy_by: MGR };
     d.reqs.push(r);
     return ok({ id: r.id, summary: reqSummary(r) });
