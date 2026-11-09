@@ -201,6 +201,7 @@ select{min-height:44px}
 .du-fail{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#fdf0ee;border-left:4px solid var(--red);border-radius:0 7px 7px 0;padding:10px 12px;margin-bottom:12px;font-size:13px}
 .du-fail-msg{flex:1;min-width:0;overflow-wrap:anywhere}
 .du-stale>*:not(.du-stale-note){opacity:.55;pointer-events:none}
+.dq-stale{opacity:.55;pointer-events:none}
 .du-stale-note{font-size:13px;color:var(--muted,#6b6b6b);padding:6px 2px 10px}
 .du-pa{background:#fff8ec;border:1px solid var(--gold);border-radius:10px;padding:12px 14px;margin-bottom:14px}
 .du-pa-title{font-weight:900;font-size:14.5px}

@@ -1,7 +1,7 @@
 // 考勤管理「手機一頁核定」（核定工時分頁在手機寬度 ≤860px 的新畫面；規格 docs/duty-quick/requirements.md，2026-11-09 Eason 定案）。
 // 一頁完成：沒問題的人一鍵核定、有異常的人一人一張卡按一下完成、少打卡又沒單的人先擋住。舊畫面（approve.js）完整保留當退路。
 // 規則都在 quick-calc.js（純函式，有單元測試）；這裡只負責讀資料、畫畫面、依序呼叫既有的 mgr_approve／mgr_req_decide／mgr_req_proxy。
-import { S, call, h, failBar, failedStores, supportTag, loadLeave, staleLeave, leaveFor, canWriteRow, brk, dutyManager, dutyHours, viewNoHoursStore } from './state.js';
+import { S, call, h, failBar, failedStores, supportTag, loadLeave, staleLeave, leaveFor, canWriteRow, brk, dutyManager, dutyHours, viewNoHoursStore, snapLabel } from './state.js';
 import * as C from './calc.js';
 import * as Q from './quick-calc.js';
 import { qrButton } from './qr.js';
@@ -103,13 +103,38 @@ export function renderQuick(ctx) {
     const [d, rq] = await Promise.all([call('mgr_day', { date }), call('mgr_req_day', { date })]);
     return { emps: Array.isArray(d.employees) ? d.employees : [], appr: apprFrom(rq), failed: [].concat((d && d.failed) || [], (rq && rq.failed) || []) };
   }
+  // Mac mini 記得的上次資料先顯示（2026-11-10 Eason）：灰色不能按，最新資料到了整份換掉。少任何一份就不顯示
+  async function peekFirst(tok, isFresh) {
+    const stop = () => isFresh() || tok !== st.tok || !live();
+    const opt = { peek: true };
+    const [pend, rq] = await Promise.all([st.manual ? null : call('mgr_pending_approvals', opt), call('mgr_req_pending', opt)]);
+    if (stop() || (!st.manual && !(pend && pend.snapshot_at)) || !(rq && rq.snapshot_at)) return;
+    const pending = Array.isArray(rq.items) ? rq.items : [];
+    const wr = (it) => canWriteRow('hours', it.emp_id, it.store);
+    const dates = st.manual ? [st.manual] : Q.candidateDates(((pend && pend.items) || []).filter(wr), todayNow(), pending.filter((it) => it.self !== true && wr(it)));
+    for (const date of dates.slice(0, Q.MAX_DATES)) {
+      const [d, r] = await Promise.all([call('mgr_day', { date, peek: true }), call('mgr_req_day', { date, peek: true })]);
+      if (stop() || !(d && d.snapshot_at) || !(r && r.snapshot_at) || !Array.isArray(d.employees)) return;
+      st.pending = pending; st.date = date; st.emps = d.employees; st.appr = apprFrom(r); recompute();
+      if (st.manual || secs().left > 0) {
+        st.peekAt = Math.min(d.snapshot_at, r.snapshot_at, rq.snapshot_at, pend ? pend.snapshot_at : Infinity);
+        st.peekSaved = { pending, date, emps: st.emps, appr: st.appr, people: st.people };
+        render();
+        return;
+      }
+    }
+    st.date = null; st.emps = []; st.people = [];
+  }
   async function load() {
     if (st.busy) return;                                      // 寫入途中不換資料（含「重新載入」鈕）
     const tok = ++st.tok;
-    st.loading = true; st.error = null; st.ui = {}; render();
+    st.loading = true; st.error = null; st.ui = {}; st.peekAt = 0; st.peekSaved = null; render();
+    let fresh = false;
+    peekFirst(tok, () => fresh).catch(() => {});
     try {
       const leaveReady = loadLeave().catch(() => null);          // 不等額度才去抓名單；分類前（下面 readDay 那裡）才要到齊
       const [pend, rq] = await Promise.all([st.manual ? null : call('mgr_pending_approvals'), call('mgr_req_pending')]);      // 主管自己選日期時不用找待核定的日子
+      fresh = true;
       if (tok !== st.tok || !live()) return;
       st.pending = Array.isArray(rq && rq.items) ? rq.items : [];
       st.handled = new Set(); st.date = null; st.emps = []; st.people = []; st.appr = {}; st.extra = []; st.capped = false; st.skipN = 0;
@@ -134,9 +159,12 @@ export function renderQuick(ctx) {
         st.date = selected.date; st.emps = selected.day.emps; st.appr = selected.day.appr; st.people = selected.people;
       } else if (!st.manual && dates.length > scanDates.length) st.capped = true;
       st.failed = failedAll.filter((f, i, a) => a.findIndex((x) => x.store === f.store) === i);      // 任一讀取有門市讀不到：不可一鍵、不可顯示完成
+      st.peekAt = 0; st.peekSaved = null;
       st.loading = false; render();
     } catch (e) {
+      fresh = true;
       if (tok !== st.tok || !live()) return;
+      if (st.peekSaved) Object.assign(st, st.peekSaved);      // 讀不到最新的：舊資料留著看，仍然不能按
       st.loading = false; st.error = e; render();
     }
   }
@@ -454,13 +482,19 @@ export function renderQuick(ctx) {
     if (!live()) return;
     const keepScroll = window.scrollY;
     root.innerHTML = '';
-    const s = st.loading ? null : secs();
+    const stale = !!st.peekAt && (st.loading || !!st.error);      // 正在顯示上次資料
+    const s = st.loading && !stale ? null : secs();
     const head = h('div', 'dq-head');
     const hl = h('div'); hl.append(h('div', 'dq-store', (S.meta && S.meta.label) || (ctx.session && ctx.session.name) || ''), h('div', 'dq-title', st.date ? Q.dayLabel(st.date, todayNow()) : '考勤管理'));
     head.append(hl, h('div', 'dq-left', st.date && s ? '還剩 ' + s.left + ' 人' : ''));
     root.append(head, navEl());
-    if (st.loading) { root.append(h('div', 'card du-center', '載入中…', { id: 'dqLoading' })); return; }
-    if (st.error) { const c = h('div', 'card'); root.append(c); failBar(c, '考勤資料', st.error, load); return; }
+    if (st.loading && !stale) { root.append(h('div', 'card du-center', '載入中…', { id: 'dqLoading' })); return; }
+    if (st.error && !stale) { const c = h('div', 'card'); root.append(c); failBar(c, '考勤資料', st.error, load); return; }
+    if (stale) {
+      root.append(h('div', 'du-stale-note', st.error ? '讀不到最新資料，下面是' + snapLabel(st.peekAt) + '的舊資料，不能核定' : '這是' + snapLabel(st.peekAt) + '的資料，正在讀取最新資料，讀到後就可以核定…', { id: 'dqStale' }));
+      if (st.error) { const c = h('div', 'card'); root.append(c); failBar(c, '考勤資料', st.error, load); }
+    }
+    const staleFrom = root.children.length;
 
     if (st.failed.length) failedStores(root, st.failed, load);
     if (st.toast) root.append(h('div', 'dq-toast', st.toast, { role: 'status' }));
@@ -500,6 +534,7 @@ export function renderQuick(ctx) {
     fl.onclick = () => { if (st.date) S.date = st.date; S.dqFull = true; ctx.rerender(); };
     foot.append(fl);
     root.append(foot);
+    if (stale) [...root.children].slice(staleFrom).forEach((el) => { el.inert = true; el.classList.add('dq-stale'); });
     window.scrollTo(0, keepScroll);
   }
 

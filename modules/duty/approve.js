@@ -1,7 +1,7 @@
 // 核定工時：照原系統 ~/mala-clock-in/manager.html 搬。日期列（前一天／後一天／今天）、本月待核定提醒、員工卡（收合展開、時段、
 // 核定時數即時算、休息、假別、出差、遲到分鐘）、送出核定。外觀換成營運系統風格，規則與文案不改。
 import { confirmBox } from '../../js/ui.js';
-import { S, dutyManager, call, callAll, brk, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow, supportTag, rememberOne } from './state.js';
+import { S, dutyManager, call, callAll, brk, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow, supportTag, rememberOne, snapLabel } from './state.js';
 import * as C from './calc.js';
 import { qrButton } from './qr.js';
 import { api } from '../../js/api.js';
@@ -97,10 +97,19 @@ export function renderApprove(ctx) {
     const stale = !gate && S.recent[want];
     if (stale) { drawDay(want, stale, [], true); markStale(); }
     else box.innerHTML = '<div class="card du-center" id="duLoading">載入中…</div>';
+    // Mac mini 記得的上次資料先顯示（2026-11-10 Eason）：灰色不能按，最新資料到了就換掉；這次打開頁面已經看過的（stale）優先
+    let fresh = false, peekAt = 0;
+    if (!stale) dayRead({ date: want, peek: true }).then(r => {
+      if (fresh || tok !== S.dayTok || !live() || !r || !r.snapshot_at || !Array.isArray(r.employees)) return;
+      peekAt = r.snapshot_at;
+      drawDay(want, r.employees, [], true);
+      markStale('這是' + snapLabel(peekAt) + '的資料，正在讀取最新資料，讀到後就可以核定…');
+    }, () => {});
     const body = dateOverride ? { date: dateOverride } : {};
     let gateDone = !gate;                 // 假別額度還沒到：名單先畫出來看，但不能按（2026-11-09 Eason：考勤選店後等太久）
     if (gate) wait.then(() => { gateDone = true; });
     dayRead(body).then(r => {
+      fresh = true;
       if (tok !== S.dayTok || !live()) return;
       unStale();
       const failed = r.failed || [];          // 單一門市也可能有：總部那組併進來的別家讀不到（不快取、顯示提示）
@@ -113,9 +122,16 @@ export function renderApprove(ctx) {
         drawDay(r.date, r.employees, failed); prefetch(r.date);
       });
     }, e => {
+      fresh = true;
       if (tok !== S.dayTok || !live()) return;
       unStale();
-      box.innerHTML = ''; const c = h('div', 'card'); box.append(c);
+      const c = h('div', 'card');
+      if (peekAt) {                        // 讀不到最新的：舊資料留著看，仍然不能按；重新載入鈕放在外面才按得到
+        const note = box.querySelector('#duStale');
+        if (note) note.textContent = '讀不到最新資料，下面是' + snapLabel(peekAt) + '的舊資料，不能核定';
+        const old = h('div', 'du-stale'); old.inert = true; old.append(...box.childNodes);
+        box.append(c, old);
+      } else { box.innerHTML = ''; box.append(c); }
       failBar(c, '這天的名單', e, () => loadDay(dateOverride));
     });
   }

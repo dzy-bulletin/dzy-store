@@ -34,6 +34,11 @@ export async function callAll(op, body) {
 // 每一列自己的店（全部門市時列上有 store）：休息帶與假別額度各用各的店
 // 單一門市也可能有別家的列（總部那組直接列在央廚打卡的人，2026-11-02）：列上有 store 就用那家的
 export const leaveFor = store => (S.all ? (S.leaveBy[store] || null) : store ? (S.leaveBy[store] || null) : S.leave);
+// 上次資料的時間：今天 13:00、不是今天就 11/9 18:00（台北時間）
+export function snapLabel(at) {
+  const f = ms => new Date(ms + 8 * 3600e3).toISOString(), a = f(at), n = f(Date.now()), t = a.slice(11, 16);
+  return a.slice(0, 10) === n.slice(0, 10) ? '今天 ' + t : Number(a.slice(5, 7)) + '/' + Number(a.slice(8, 10)) + ' ' + t;
+}
 export const rowKey = r => (r && r.store ? r.store + '|' : '') + String(r && r.emp_id);
 // 某店讀不到的提示條（全部門市時，其他店照常顯示）
 export function failedStores(el, failed, retry) {
