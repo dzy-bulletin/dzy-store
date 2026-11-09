@@ -328,7 +328,7 @@ export function checkPeriod(ctx) {
     // 加班上限只看 28 天週期（4-17，Eason 2026-11-08 選定；法定上限是曆月，已告知風險）
     if (start >= RULES5_FROM) {
       const tot = dates.reduce((a, d) => a + mins[d].ot, 0);
-      if (tot > MONTH_OT) add('C2', 'block', e, null, `${who} 這一期加班 ${hm(tot)}，超過上限 46 小時，要減少加班才能鎖定`);
+      if (tot >= MONTH_OT) add('C2', 'block', e, null, `${who} 這一期加班 ${hm(tot)}，已滿上限 46 小時，要減少加班才能鎖定`);
       else if (tot > MONTH_OT_WARN) add('C9', 'warn', e, null, `${who} 這一期加班 ${hm(tot)}，超過 36 小時（上限 46 小時）`);
     }
     // 曆月加班（含期外月份）：超過 46 小時擋、超過 36 小時警告（Eason 2026-10-27）；RULES5_FROM 起改看週期
