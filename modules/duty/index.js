@@ -36,6 +36,7 @@ export default {
     const key = ctx.session.token || ctx.session.code;
     if (S.key !== key) reset(key);                      // 換了登入就重來，不留上一個人的資料
     S.rerender = ctx.rerender;
+    if (ctx.tab !== 'approve') S.dqFull = false;        // 離開核定工時分頁：手機回來時一律是一頁核定，完整頁只算那一次
     S.admin = ctx.session.role === 'admin';
     if (S.admin) {
       if (ctx.tab === 'overview') return renderOverview(ctx);

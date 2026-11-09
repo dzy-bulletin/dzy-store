@@ -5,14 +5,14 @@ import { S, call, h, failBar, failedStores, supportTag, loadLeave, staleLeave, l
 import * as C from './calc.js';
 import * as Q from './quick-calc.js';
 import { qrButton } from './qr.js';
+import { MOCK } from '../../js/config.js';
 
 // 總開關：改成 false、重新發布網站，手機也回到舊畫面（不必動別的）
 export const QUICK_ON = true;
 
-const VIEW_KEY = 'dzystore_dutyview';           // 'full'＝記住用完整頁；'quick'／沒有＝手機用一頁核定
 const SKIP_KEY = 'dzystore_dutyquick_skip';     // 「先跳過」只存在這個分頁（sessionStorage），不寫任何資料
-export const getView = () => { try { return localStorage.getItem(VIEW_KEY) || ''; } catch (e) { return ''; } };
-export const setView = (v) => { try { localStorage.setItem(VIEW_KEY, v); } catch (e) {} };
+// 完整頁都只進去這一次，不記住（2026-11-09 Eason：切分頁不該跑回舊畫面）。這個值只有示範模式看：其他 e2e 用它預設停在舊畫面，正式網站不讀
+const e2eFull = () => { if (!MOCK) return false; try { return localStorage.getItem('dzystore_dutyview') === 'full'; } catch (e) { return false; } };
 const skipGet = () => { try { return JSON.parse(sessionStorage.getItem(SKIP_KEY) || '{}') || {}; } catch (e) { return {}; } };
 const skipSet = (k) => { const m = skipGet(); m[k] = 1; try { sessionStorage.setItem(SKIP_KEY, JSON.stringify(m)); } catch (e) {} };
 
@@ -22,7 +22,7 @@ export function quickAvailable(ctx) {
   return QUICK_ON && !!s && typeof window.matchMedia === 'function' && window.matchMedia('(max-width:860px)').matches
     && !S.all && !S.admin && s.role !== 'admin' && dutyHours(s) && !viewNoHoursStore(s);
 }
-export const quickWanted = (ctx) => quickAvailable(ctx) && !S.dqFull && getView() !== 'full';
+export const quickWanted = (ctx) => quickAvailable(ctx) && !S.dqFull && !e2eFull();
 
 const REQ_CLS = { leave: 'leave', ot: 'ot', trip: 'trip', miss: 'miss' };
 const taipeiMin = () => { const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date()).split(':'); return Number(p[0]) * 60 + Number(p[1]); };
@@ -122,7 +122,7 @@ export function renderQuick(ctx) {
   }
 
   // ---------- 動作 ----------
-  function goFull(p) {                                       // 到完整頁核對：帶日期與同仁（既有 focus 機制）；不改「記住」的選擇
+  function goFull(p) {                                       // 到完整頁核對：帶日期與同仁（既有 focus 機制）
     if (st.date) S.date = st.date;
     S.focusEmp = p ? p.key : null; S.dqFull = true;
     ctx.rerender();
@@ -409,7 +409,7 @@ export function renderQuick(ctx) {
     if (dutyManager(ctx.session) && !S.all) foot.append(qrButton(root));
     const fl = h('button', 'dq-fulllink', '完整頁（舊畫面，可依日期查看）', { type: 'button' });
     fl.disabled = st.busy;      // 核定進行中不離開，免得看不到失敗名單
-    fl.onclick = () => { if (st.date) S.date = st.date; setView('full'); S.dqFull = true; ctx.rerender(); };
+    fl.onclick = () => { if (st.date) S.date = st.date; S.dqFull = true; ctx.rerender(); };
     foot.append(fl);
     root.append(foot);
     window.scrollTo(0, keepScroll);
@@ -426,11 +426,11 @@ export function renderQuick(ctx) {
   document.addEventListener('visibilitychange', onVis);
 }
 
-// 舊畫面（完整頁）上的「回到一頁核定」：手機才有；按了就記住、重畫
+// 舊畫面（完整頁）上的「回到一頁核定」：手機才有
 export function backBar(ctx) {
   const wrap = h('div', 'dq-back');
   const b = h('button', 'btn ghost sm', '回到一頁核定', { type: 'button', id: 'duQuickBack' });
-  b.onclick = () => { S.dqFull = false; setView('quick'); ctx.rerender(); };
+  b.onclick = () => { S.dqFull = false; ctx.rerender(); };
   wrap.append(b);
   return wrap;
 }
