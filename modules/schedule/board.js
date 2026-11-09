@@ -1,6 +1,6 @@
 // 自動排班「班表」分頁：整期格子（桌機）／單日清單（手機）、營業額與工時比、每班人數、檢查結果、自動排班、鎖定與發布。
 import { esc, busy, confirmBox } from '../../js/ui.js';
-import { timeText, segsOf, shiftMinutes, shiftCode, cellShift, cellShiftIds } from './hours.js';
+import { timeText, segsOf, shiftMinutes, shiftCode, cellShift, cellShiftIds, isExtId, localCell } from './hours.js';
 import { api } from '../../js/api.js';
 import { S, canEdit, loadAnnual, load, mutate, movePeriod, WD, md, hm, DAY_LABEL, LEAVE_LABEL, call } from './state.js';
 import { weekday, periodEnd, todayTaipei } from './period.js';
@@ -12,11 +12,14 @@ import { getSession } from '../../js/auth.js';
 const PUB_TEXT = { pending: '等待送到 LINE', sent: '已發布到 LINE', failed: '送 LINE 失敗', stale: '已被較新版本取代' };
 
 const shColor = (sh) => (sh && /^#[0-9A-Fa-f]{6}$/.test(sh.color || '') ? sh.color : '');      // 班別顏色（2026-11-03 Eason：三個班表都依班別上色，取代 10/12「班別不分顏色」）
+// 支援別家門市的班（門市互相支援排班）：班名是「新竹光復店 C班」，格子上顯示「光復C」（門市簡稱去掉縣市與「店」＋班別代碼）；本店自己的班照舊顯示代碼
+const extCode = (x) => { const t = String(x.name).split(' '); return t[0].replace(/店$/, '').replace(/^(新竹|台中|員林|台北)/, '') + shiftCode(t.slice(1).join(' ')); };
+const extLocalName = (x) => String(x.name).split(' ').slice(1).join(' ');
 function cellText(c, shifts) {
   if (!c) return { t: '', cls: 'empty' };
   if (c.shift_id) {
     const s = shifts[c.shift_id], s2 = c.shift2_id ? shifts[c.shift2_id] : null;
-    const code = (x, id) => (x ? shiftCode(x.name) : id);
+    const code = (x, id) => (x ? (isExtId(id) ? extCode(x) : shiftCode(x.name)) : id);
     return { t: code(s, c.shift_id) + (c.shift2_id ? '＋' + code(s2, c.shift2_id) : ''), cls: 'work' + (c.day_type === 'H' ? ' ot' : '') + (c.shift2_id ? ' two' : ''), ot: c.day_type === 'H', color: shColor(s) };      // 一天兩班顯示「A＋C」（2026-11-07）
   }
   if (c.day_type === 'L') return { t: LEAVE_LABEL[c.leave] || '假', cls: 'leave' };
@@ -31,8 +34,14 @@ export function renderBoard(ctx) {
   const el = ctx.el, D = S.data;
   const shifts = Object.fromEntries(D.shifts.map((s) => [s.id, s]));
   const activeShifts = D.shifts.filter((s) => s.active);
+  // 門市互相支援排班（2026-11-09）：allSh＝本店班別＋這家店的人支援別家門市的班（算個人工時、顯示格子）；shifts 只有本店的班（算當天人數、早晚、全店工時時，支援別店的班不算）
+  const extStores = D.extStores || [], extStat = D.extStations || {};
+  const allSh = Object.assign({}, shifts, Object.fromEntries((D.extShifts || []).map((s) => [s.id, s])));
+  const extStationsOf = (sid) => Object.values(extStat[sid.slice(0, sid.indexOf('.'))] || {});
   // 總部支援（2026-11-07）：總部同仁排到這家店的班，另列一區、唯讀、算進人數；門市名冊裡對到的支援帳號（ext）不列在一般同仁
-  const staff = D.staff.filter((st) => !st.ext && D.dates.some((d) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date)));
+  // 門市來源的支援帳號（st.ext==='store'）若這期還留著手動排的班，照樣列出來（標「支援帳號」），店長才點得到、清得掉（提醒清單 X1）
+  const heldExt = (st) => st.ext === 'store' && D.dates.some((d) => ((D.days[st.emp_id] || {})[d] || {}).shift_id);
+  const staff = D.staff.filter((st) => (!st.ext || heldExt(st)) && D.dates.some((d) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date)));
   const sup = D.support || [];
   const locked = D.meta.locked;
   const ses = ctx.session || getSession();
@@ -52,9 +61,12 @@ export function renderBoard(ctx) {
   const hideSt = stHidden(), stShow = hideSt ? [] : stActive;
   const stTag = (c) => {
     if (hideSt || !c || !c.shift_id) return '';
-    const one = (id) => { const x = id && stMap[id]; return x ? `<small class="sc-sn${x.active ? '' : ' off'}" data-station="${esc(x.id)}"${x.color ? ` style="color:${esc(x.color)}"` : ''}>${esc(x.name)}</small>` : ''; };
+    const one = (id, sid) => {
+      if (isExtId(sid)) { const x = id && (extStat[sid.slice(0, sid.indexOf('.'))] || {})[id]; return x ? `<small class="sc-sn sc-xsn${x.active ? '' : ' off'}" data-xstation="${esc(x.id)}"${x.color ? ` style="color:${esc(x.color)}"` : ''}>${esc(x.name)}</small>` : ''; }      // 支援別家門市的班：站別是那家店的
+      const x = id && stMap[id]; return x ? `<small class="sc-sn${x.active ? '' : ' off'}" data-station="${esc(x.id)}"${x.color ? ` style="color:${esc(x.color)}"` : ''}>${esc(x.name)}</small>` : '';
+    };
     // 一天兩班各選各的站（2026-11-07）：兩個站都列；沒選站＝空白（2026-10-31 Eason：只顯示有指定的工作站；2026-11-01 起也不列入提醒）
-    return one(c.station_id) + (c.shift2_id && c.station2_id !== c.station_id ? one(c.station2_id) : '');
+    return one(c.station_id, c.shift_id) + (c.shift2_id && (c.station2_id !== c.station_id || isExtId(c.shift_id) !== isExtId(c.shift2_id)) ? one(c.station2_id, c.shift2_id) : '');
   };
   const narrow = window.matchMedia && window.matchMedia('(max-width: 760px)').matches;
   const view = S.view || (narrow ? 'day' : 'grid');
@@ -79,17 +91,22 @@ export function renderBoard(ctx) {
     return { n, lv };
   };
   // 本期排班時數（2026-10-31 Eason：休假天數右邊加一欄；小時用小數，149:30 → 149.5）：在職日有排班的格子，照班別扣掉休息後的工時加總（含休息日加班）
-  const hoursOf = (st) => D.dates.reduce((a, d) => { const c = (D.days[st.emp_id] || {})[d], s = cellShift(shifts, c); return a + (s && inJobOn(st, d) ? shiftMinutes(s) : 0); }, 0);
+  const hoursOf = (st) => D.dates.reduce((a, d) => { const c = (D.days[st.emp_id] || {})[d], s = cellShift(allSh, c); return a + (s && inJobOn(st, d) ? shiftMinutes(s) : 0); }, 0);      // 個人工時含支援別家門市的班
   // 名字下方的剩餘特休：薪資系統的餘額（S.annual，另外抓；計時或拿不到就不顯示）
   loadAnnual(ctx.rerender);
   // 剩餘特休是薪資系統的數字，要等那天過了、考勤核定才扣；班表上今天起已排的特休另外標出來（2026-10-31 Eason：排了 1 天怎麼還是 7 天）
   const annualPlanned = (st) => D.dates.filter((d) => d >= todayTaipei() && inJobOn(st, d) && ((D.days[st.emp_id] || {})[d] || {}).day_type === 'L' && D.days[st.emp_id][d].leave === '特').length;
   const annualTxt = (st) => { const a = S.annual && S.annual[st.emp_id]; if (a == null) return ''; const n = annualPlanned(st); return `<small class="sc-al">特休剩 ${a} 天${n ? `（本期排 ${n} 天）` : ''}</small>`; };
 
+  // 支援來源標籤：總部同仁「總部支援」；別家門市排來的「門市支援・新竹光復店」，原店那一期還沒鎖定再加「原店還沒鎖定」（班表先算進人數，原店改了會跟著變）
+  const supTag = (x, tag) => (x.kind === 'store'
+    ? `<${tag} class="sc-suptag sc-storesup" data-from="${esc(x.from_store)}">門市支援・${esc(x.from_name)}</${tag}>${x.origin_locked ? '' : `<${tag} class="sc-suptag sc-unlocked">原店還沒鎖定</${tag}>`}`
+    : `<${tag} class="sc-suptag">總部支援</${tag}>`);
+  const supTitle = (x) => (x.kind === 'store' ? `${x.from_name}排的，這家店不能改${x.origin_locked ? '' : '（原店還沒鎖定）'}` : '總部同仁排的，門市不能改');
   const ratioCls = (r) => (r == null || !target ? '' : r < target ? ' low' : ' good');
   // 當天總人數（Eason 2026-10-11：不分班別，只看當天幾個人上班）；需要人數＝各班最少人數加總
   const inJobOn = (st, d) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date);
-  const cellsOn = (d) => staff.filter((st) => inJobOn(st, d)).map((st) => (D.days[st.emp_id] || {})[d]).concat(sup.map((x) => x.days[d])).filter(Boolean);      // 當天每個人的格子（含總部支援）
+  const cellsOn = (d) => staff.filter((st) => inJobOn(st, d)).map((st) => localCell((D.days[st.emp_id] || {})[d])).concat(sup.map((x) => x.days[d])).filter(Boolean);      // 當天每個人的格子（含總部／門市支援進來的；這家店的人支援別家門市的班不算）
   const dayTotal = (d) => cellsOn(d).filter((c) => c.shift_id).length;
   // 當天排定總工時（2026-11-01 Eason：當天人數下方一列）：在職、有排班的人照班別扣掉休息後的工時加總，跟右邊「排班時數」同一套算法
   const dayMin = (d) => cellsOn(d).reduce((a, c) => { const s = cellShift(shifts, c); return a + (s ? shiftMinutes(s) : 0); }, 0);
@@ -170,7 +187,7 @@ export function renderBoard(ctx) {
         const c = (D.days[st.emp_id] || {})[d];
         const inJob = (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date);
         if (!inJob) return '<td class="sc-c na"></td>';
-        const x = cellText(c, shifts), iss = byCell[st.emp_id + '|' + d] || [];
+        const x = cellText(c, allSh), iss = byCell[st.emp_id + '|' + d] || [];
         const lv = iss.length ? iss.sort((a, b) => LV_RANK[a.level] - LV_RANK[b.level])[0].level : '';
         const pin = (D.pins[st.emp_id] || {})[d];
         const sel = S.sel && S.sel.emp === st.emp_id && S.sel.date === d;
@@ -178,12 +195,12 @@ export function renderBoard(ctx) {
         return `<td class="sc-c ${x.cls}${x.color ? ' shc' : ''}${isWe(d) ? ' we' : ''}${bday(st, d) ? ' bd' : ''}${lv ? ' i-' + lv : ''}${sel ? ' sel' : ''}${pinCls}"${x.color ? ` style="--shc:${x.color}"` : ''} data-emp="${esc(st.emp_id)}" data-date="${d}" title="${esc(iss.map((r) => r.msg).concat(pin && pin.kind === 'off' ? ['指定休假'] : [], x.ot ? ['休息日加班'] : []).join('\n'))}">${esc(x.t)}${otTag(x)}${stTag(c)}${bday(st, d) ? '<i class="sc-bd" title="生日">生日</i>' : ''}</td>`;
       }).join('');
       const o = offOf(st), lvs = Object.entries(o.lv).map(([k, v]) => k + ' ' + v).join('・');
-      return `<tr><th class="sc-name" scope="row">${esc(st.name)}${annualTxt(st)}</th>${tds}<td class="sc-off"><b>${o.n}</b>${lvs ? `<small>${esc(lvs)}</small>` : ''}</td><td class="sc-hr"><b>${+(hoursOf(st) / 60).toFixed(2)}</b></td></tr>`;
+      return `<tr><th class="sc-name" scope="row">${esc(st.name)}${st.ext ? '<small class="sc-suptag sc-extacct">支援帳號</small>' : ''}${annualTxt(st)}</th>${tds}<td class="sc-off"><b>${o.n}</b>${lvs ? `<small>${esc(lvs)}</small>` : ''}</td><td class="sc-hr"><b>${+(hoursOf(st) / 60).toFixed(2)}</b></td></tr>`;
     }).join('');
     const supHr = (x) => D.dates.reduce((a, d) => { const s = cellShift(shifts, x.days[d]); return a + (s ? shiftMinutes(s) : 0); }, 0);
-    const supRows = sup.map((x) => `<tr class="sc-suprow" data-sup="${esc(x.key)}"><th class="sc-name" scope="row">${esc(x.name)}<small class="sc-suptag">總部支援</small></th>${D.dates.map((d) => {
+    const supRows = sup.map((x) => `<tr class="sc-suprow${x.kind === 'store' ? ' sc-suprow-store' : ''}" data-sup="${esc(x.key)}"><th class="sc-name" scope="row">${esc(x.name)}${supTag(x, 'small')}</th>${D.dates.map((d) => {
       const c = x.days[d], t = cellText(c, shifts);
-      return `<td class="sc-c sup ${c ? t.cls : 'empty'}${isWe(d) ? ' we' : ''}" title="總部同仁排的，門市不能改">${c ? esc(t.t) + stTag(c) : ''}</td>`;
+      return `<td class="sc-c sup ${c ? t.cls : 'empty'}${isWe(d) ? ' we' : ''}" title="${esc(supTitle(x))}">${c ? esc(t.t) + stTag(c) : ''}</td>`;
     }).join('')}<td class="sc-off"></td><td class="sc-hr"><b>${+(supHr(x) / 60).toFixed(2)}</b></td></tr>`).join('');
     const cnt = `<tr class="sc-cnt"><th scope="row">當天人數</th>${D.dates.map((d) => {
       const n = dayTotal(d), need = dayNeed(d), el = dayEL(d);
@@ -203,7 +220,8 @@ export function renderBoard(ctx) {
     // 班表最下方列班別與時間（2026-10-31 Eason）：使用中的班＋這期有排到的停用班
     const usedSh = new Set(); for (const st of staff) for (const d of D.dates) for (const id of cellShiftIds((D.days[st.emp_id] || {})[d])) usedSh.add(id);
     const legendSh = D.shifts.filter((s) => s.active || usedSh.has(s.id));
-    const legend = legendSh.length ? `<div class="sc-legend" id="scLegend">${legendSh.map((s) => `<span><b>${esc(shiftCode(s.name))}</b>：${esc(timeText(s))}</span>`).join('')}</div>` : '';
+    const legendExt = (D.extShifts || []).filter((s) => usedSh.has(s.id));      // 這期用到的支援別家門市的班
+    const legend = legendSh.length || legendExt.length ? `<div class="sc-legend" id="scLegend">${legendSh.map((s) => `<span><b>${esc(shiftCode(s.name))}</b>：${esc(timeText(s))}</span>`).join('')}${legendExt.map((s) => `<span class="sc-legx"><b>${esc(extCode(s))}</b>：${esc(s.name)} ${esc(timeText(s))}</span>`).join('')}</div>` : '';
     body = `<div class="card sc-gridcard"><div class="scroll"><table class="sc-grid">
       <thead><tr><th class="sc-name">同仁</th>${th}<th class="sc-offh">休假<small>天數</small></th><th class="sc-hrh">排班<small>時數</small></th></tr></thead>
       <tbody>${noteRows}${rows}${supRows}${cnt}${stRows}</tbody></table></div>${legend}</div>`;
@@ -211,15 +229,15 @@ export function renderBoard(ctx) {
     const d = S.day, hol = D.holidays.days[d];
     const chips = D.dates.map((x) => `<button type="button" class="sc-daychip${x === d ? ' on' : ''}${isWe(x) ? ' we' : ''}${(byDay[x] || []).length ? ' warn' : ''}" data-day="${x}">${md(x)}<small>${WD[weekday(x)]}</small></button>`).join('');
     const list = staff.filter((st) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date)).map((st) => {
-      const c = (D.days[st.emp_id] || {})[d], x = cellText(c, shifts), iss = byCell[st.emp_id + '|' + d] || [];
-      const s = cellShift(shifts, c);
+      const c = (D.days[st.emp_id] || {})[d], x = cellText(c, allSh), iss = byCell[st.emp_id + '|' + d] || [];
+      const s = cellShift(allSh, c);
       const pin = (D.pins[st.emp_id] || {})[d];
       return `<button type="button" class="sc-drow ${x.cls}${bday(st, d) ? ' bd' : ''}${pin && pin.kind === 'off' ? ' pin-off' : ''}${iss.length ? ' i-' + iss.sort((a, b) => LV_RANK[a.level] - LV_RANK[b.level])[0].level : ''}" data-emp="${esc(st.emp_id)}" data-date="${d}">
-        <span class="sc-dn">${esc(st.name)}${bday(st, d) ? ' <i class="sc-bd">生日</i>' : ''}${annualTxt(st)}</span><span class="sc-dv">${esc(x.t)}${otTag(x)}${s ? `<small>${esc(timeText(s))}</small>` : ''}${stTag(c)}</span>
+        <span class="sc-dn">${esc(st.name)}${st.ext ? ' <i class="sc-suptag sc-extacct">支援帳號</i>' : ''}${bday(st, d) ? ' <i class="sc-bd">生日</i>' : ''}${annualTxt(st)}</span><span class="sc-dv">${esc(x.t)}${otTag(x)}${s ? `<small>${esc(timeText(s))}</small>` : ''}${stTag(c)}</span>
         ${iss.length ? `<span class="sc-dmsg">${esc(iss.map((i) => i.msg).join('；'))}</span>` : ''}</button>`;
     }).join('') + sup.filter((x) => x.days[d]).map((x) => {
       const c = x.days[d], t = cellText(c, shifts), sh = cellShift(shifts, c);
-      return `<div class="sc-drow sup ${t.cls}" data-sup="${esc(x.key)}"><span class="sc-dn">${esc(x.name)} <i class="sc-suptag">總部支援</i></span><span class="sc-dv">${esc(t.t)}${sh ? `<small>${esc(timeText(sh))}</small>` : ''}${stTag(c)}</span></div>`;
+      return `<div class="sc-drow sup ${t.cls}" data-sup="${esc(x.key)}" title="${esc(supTitle(x))}"><span class="sc-dn">${esc(x.name)} ${supTag(x, 'i')}</span><span class="sc-dv">${esc(t.t)}${sh ? `<small>${esc(timeText(sh))}</small>` : ''}${stTag(c)}</span></div>`;
     }).join('');
     const n = dayTotal(d), nd = dayNeed(d), el = dayEL(d);
     const cnt = `<span class="tag ${nd && n < nd ? 'bad' : ''}" id="scDayCount">早 ${el.e} 人｜晚 ${el.l} 人</span><span class="tag" id="scDayHours">總工時 ${hrTxt(dayMin(d))} 小時</span>`
@@ -236,38 +254,52 @@ export function renderBoard(ctx) {
   // 編輯列：選了一格才出現。
   // 工作站別（station-spec §7）：站別與班別分開存——「套用」只存班別（saveDays，不收站別）、「儲存站別」只存站別（setStation）；
   // 站別下拉只在這一格目前（已存）就是上班格時出現，兩邊不會打架。期別鎖定中：其他欄位維持唯讀，只剩站別可改（不問核定密碼、不解鎖）。
+  // 門市互相支援排班（2026-11-09）：班別選單多「支援其他門市的班」（每家店一組，存成「門市代號.班別」）；支援那班的站別是那家店的站，
+  //  選班別時就在旁邊選（#scXSt／#scXSt2，跟著「套用」一起存）；已存的格子在未鎖定時不重複出現在下面的站別列，鎖定後只能改站別時才出現。
   let editor = '';
   if (S.sel) {
     const st = D.staff.find((x) => x.emp_id === S.sel.emp);
     const c = (D.days[S.sel.emp] || {})[S.sel.date] || {};
     const iss = byCell[S.sel.emp + '|' + S.sel.date] || [];
     const head2 = `<b>${esc(st ? st.name : '')}　${md(S.sel.date)}（${WD[weekday(S.sel.date)]}）</b>`;
+    const slotName = (id) => (isExtId(id) ? (allSh[id] ? extCode(allSh[id]) : id) : shiftCode((shifts[id] || {}).name || ''));
     // 一天兩班（2026-11-07）：每個班各選一個站；第二班的站下拉只在這一格已存成兩班時出現
-    const stOpts = (curId) => `<option value="">不選</option>${stList.filter((x) => x.active || x.id === curId).map((x) => `<option value="${esc(x.id)}"${x.id === curId ? ' selected' : ''}>${esc(x.name)}${x.active ? '' : '（已停用）'}</option>`).join('')}`;
-    const nm1 = c.shift2_id ? `${esc(shiftCode((shifts[c.shift_id] || {}).name || ''))} 班的` : '';
-    const stRow = c.shift_id && (stActive.length || c.station_id || c.station2_id) ? `<div class="row mt"><label for="scStationSel">${nm1}工作站</label><select id="scStationSel" aria-label="這一格的工作站">${stOpts(c.station_id)}</select>
-      ${c.shift2_id ? `<label for="scStationSel2">${esc(shiftCode((shifts[c.shift2_id] || {}).name || ''))} 班的工作站</label><select id="scStationSel2" aria-label="第二班的工作站">${stOpts(c.station2_id)}</select>` : ''}
+    const stOpts = (curId, sid) => {
+      const list = isExtId(sid) ? extStationsOf(sid) : stList;
+      return `<option value="">不選</option>${list.filter((x) => x.active || x.id === curId).map((x) => `<option value="${esc(x.id)}"${x.id === curId ? ' selected' : ''}>${esc(x.name)}${x.active ? '' : '（已停用）'}</option>`).join('')}`;
+    };
+    const nm1 = c.shift2_id ? `${esc(slotName(c.shift_id))} 班的` : '';
+    // 站別列要列哪幾個班：沒鎖定時支援別家門市的班不在這裡改（選班別時一起選）；鎖定後只剩站別能改，兩班都列
+    const slots = [[c.shift_id, c.station_id, 'scStationSel', nm1], [c.shift2_id, c.station2_id, 'scStationSel2', `${esc(slotName(c.shift2_id))} 班的`]].filter(([sid]) => sid && (locked || !isExtId(sid)));
+    const showSt = slots.some(([sid, cur]) => isExtId(sid) || stActive.length || cur);
+    const stRow = c.shift_id && showSt ? `<div class="row mt">${slots.map(([sid, cur, id, nm], i) => `<label for="${id}">${i === 0 && id === 'scStationSel' ? nm : nm || '第二班的'}工作站</label><select id="${id}" aria-label="${id === 'scStationSel' ? '這一格的工作站' : '第二班的工作站'}">${stOpts(cur, sid)}</select>`).join('')}
       <button type="button" class="btn" id="scStationOk">儲存站別</button>${locked ? '<button type="button" class="btn ghost" id="scCellX">取消</button>' : ''}</div>` : '';
     if (locked) {
-      const sh = cellShift(shifts, c);
-      editor = `<div class="card sc-editor" id="scEditor">${head2}<span class="hint">　${esc(sh ? `${cellText(c, shifts).t} ${timeText(sh)}` : '')}　已鎖定，只能改工作站（改完會自動重送 LINE）</span>${stRow || '<div class="row mt"><button type="button" class="btn ghost" id="scCellX">取消</button></div>'}</div>`;
+      const sh = cellShift(allSh, c);
+      editor = `<div class="card sc-editor" id="scEditor">${head2}<span class="hint">　${esc(sh ? `${cellText(c, allSh).t} ${timeText(sh)}` : '')}　已鎖定，只能改工作站（改完會自動重送 LINE）</span>${stRow || '<div class="row mt"><button type="button" class="btn ghost" id="scCellX">取消</button></div>'}</div>`;
     } else {
       const cur = c.shift_id ? 'S:' + c.shift_id + (c.day_type === 'H' ? ':H' : '') : c.day_type === 'L' ? 'L:' + c.leave : c.day_type || '';
       // 國定假日假：國定假日當天都可選；正職在有國定假日的期別可移到別天（Eason 2026-10-12）
       const isFt = (termAt(D.terms, S.sel.emp, S.sel.date) || {}).kind === 'ft';
       const guoOk = !!D.holidays.days[S.sel.date] || (isFt && D.dates.some((d) => D.holidays.days[d]));
       const otOpts = activeShifts.map((s) => `<option value="S:${esc(s.id)}:H">${esc(shiftCode(s.name))}（休息日出勤）</option>`).join('');
+      // 支援其他門市的班：每家店一組（只列使用中的班；原本排的那班已停用照列，才選得到原值）
+      const xList = (x) => x.shifts.filter((s) => s.active || s.id === c.shift_id || s.id === c.shift2_id);
+      const xW = extStores.map((x) => `<optgroup label="支援 ${esc(x.name)}">${xList(x).map((s) => `<option value="S:${esc(s.id)}">${esc(x.name)} ${esc(shiftCode(extLocalName(s)))} ${esc(timeText(s))}</option>`).join('')}</optgroup>`).join('');
+      const xH = extStores.map((x) => `<optgroup label="支援 ${esc(x.name)}（休息日出勤）">${xList(x).map((s) => `<option value="S:${esc(s.id)}:H">${esc(x.name)} ${esc(shiftCode(extLocalName(s)))}（休息日出勤）</option>`).join('')}</optgroup>`).join('');
       // 休息日加班只能改回休息日或換一個休息日出勤的班（伺服器同樣擋，Eason 2026-10-11）
-      const opts = c.day_type === 'H' && c.shift_id ? otOpts + '<option value="H">休息日</option>'
-        : activeShifts.map((s) => `<option value="S:${esc(s.id)}">${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('') + otOpts
+      const opts = c.day_type === 'H' && c.shift_id ? otOpts + xH + '<option value="H">休息日</option>'
+        : activeShifts.map((s) => `<option value="S:${esc(s.id)}">${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('') + xW + otOpts + xH
         + '<option value="R">例假</option><option value="H">休息日</option>' + LEAVES.map(([k, l]) => `<option value="L:${k}">${l}</option>`).join('')
         + (guoOk ? '<option value="L:國">國定假日假</option>' : '') + '<option value="CLEAR">清空</option>';
       // 第二班（2026-11-07 Eason：同一天可再選一個既有班別；只能手動加，自動排班不會排）：第一格選了班別才能選
       const firstIsShift = cur.startsWith('S:');
+      const x2 = extStores.map((x) => `<optgroup label="支援 ${esc(x.name)}">${xList(x).map((s) => `<option value="${esc(s.id)}"${s.id === c.shift2_id ? ' selected' : ''}>${esc(x.name)} ${esc(shiftCode(extLocalName(s)))} ${esc(timeText(s))}</option>`).join('')}</optgroup>`).join('');
       const two = `<label class="sc-two" for="scCellSel2">＋第二班</label><select id="scCellSel2" aria-label="第二個班別"${firstIsShift ? '' : ' disabled'}><option value="">不加</option>${
-        D.shifts.filter((s) => s.active || s.id === c.shift2_id).map((s) => `<option value="${esc(s.id)}"${s.id === c.shift2_id ? ' selected' : ''}>${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('')}</select>`;
+        D.shifts.filter((s) => s.active || s.id === c.shift2_id).map((s) => `<option value="${esc(s.id)}"${s.id === c.shift2_id ? ' selected' : ''}>${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('')}${x2}</select>`;
+      const hasX = extStores.length > 0 || isExtId(c.shift_id) || isExtId(c.shift2_id);
       editor = `<div class="card sc-editor" id="scEditor">${head2}
-      <div class="row mt"><select id="scCellSel" aria-label="這一格要排什麼">${opts.replace(`value="${cur}"`, `value="${cur}" selected`)}</select>${two}
+      <div class="row mt"><select id="scCellSel" aria-label="這一格要排什麼">${opts.replace(`value="${cur}"`, `value="${cur}" selected`)}</select>${hasX ? '<select id="scXSt" aria-label="支援門市的工作站" hidden></select>' : ''}${two}${hasX ? '<select id="scXSt2" aria-label="第二班支援門市的工作站" hidden></select>' : ''}
       <button type="button" class="btn" id="scCellOk">套用</button><button type="button" class="btn ghost" id="scCellX">取消</button></div>${stRow}
       ${iss.length ? `<ul class="sc-list">${iss.map((r) => `<li class="lv-${r.level}">${esc(r.msg)}</li>`).join('')}</ul>` : ''}</div>`;
     }
@@ -297,12 +329,12 @@ export function renderBoard(ctx) {
   el.querySelectorAll('.sc-ckfield').forEach((b) => { b.onclick = () => { const f = document.getElementById(b.dataset.field); if (f) { f.scrollIntoView({ block: 'center' }); f.focus(); } }; });
   q('#scViewDay').onclick = () => { S.view = 'day'; rerender(); };
   el.querySelectorAll('.sc-daychip').forEach((b) => { b.onclick = () => { S.day = b.dataset.day; rerender(); }; });
-  el.querySelectorAll('.sc-c[data-emp], .sc-drow').forEach((td) => {
+  el.querySelectorAll('.sc-c[data-emp], .sc-drow:not(.sup)').forEach((td) => {
     td.onclick = () => {
       if (!canLock) { say('你只能查看班表，排班請找本店店長', true); return rerender(); }
       const c = (D.days[td.dataset.emp] || {})[td.dataset.date];
       // 已鎖定：只有「上班格而且店裡有站別」能點開（只改站別）；其他照舊提示要先解鎖
-      if (locked && !(c && c.shift_id && (stActive.length || c.station_id))) { say('這一期已鎖定，要先解除鎖定才能修改', true); return rerender(); }
+      if (locked && !(c && c.shift_id && (stActive.length || c.station_id || cellShiftIds(c).some(isExtId)))) { say('這一期已鎖定，要先解除鎖定才能修改', true); return rerender(); }
       S.sel = { emp: td.dataset.emp, date: td.dataset.date }; S.noteSel = null; rerender();
     };
   });
@@ -339,7 +371,8 @@ export function renderBoard(ctx) {
   if (q('#scCellX')) q('#scCellX').onclick = () => { S.sel = null; rerender(); };
   if (q('#scStationOk')) q('#scStationOk').onclick = () => busy(q('#scStationOk'), async () => {
     try {
-      const cells = [{ emp_id: S.sel.emp, date: S.sel.date, station_id: q('#scStationSel').value || null }];
+      const cells = [];      // 沒鎖定時支援別家門市的那班不在這一列（選班別時一起選），所以兩個下拉不一定都有
+      if (q('#scStationSel')) cells.push({ emp_id: S.sel.emp, date: S.sel.date, station_id: q('#scStationSel').value || null });
       if (q('#scStationSel2')) cells.push({ emp_id: S.sel.emp, date: S.sel.date, slot: 2, station_id: q('#scStationSel2').value || null });
       const r = await mutate('setStation', { cells });
       S.sel = null; say(r.publication ? '已存站別，LINE 班表正在重新送出' : '已存站別');
@@ -349,14 +382,36 @@ export function renderBoard(ctx) {
   if (q('#scCellOk')) q('#scCellOk').onclick = () => busy(q('#scCellOk'), async () => {
     const v = q('#scCellSel').value, cell = { emp_id: S.sel.emp, date: S.sel.date };
     if (v === 'CLEAR') cell.clear = true;
-    else if (v.startsWith('S:')) { const [, id, h] = v.split(':'); Object.assign(cell, { day_type: h ? 'H' : 'W', shift_id: id }); const v2 = q('#scCellSel2') && q('#scCellSel2').value; if (v2) cell.shift2_id = v2; }
+    else if (v.startsWith('S:')) {
+      const [, id, h] = v.split(':'); Object.assign(cell, { day_type: h ? 'H' : 'W', shift_id: id });
+      if (isExtId(id)) cell.xst = (q('#scXSt') && q('#scXSt').value) || null;      // 支援別家門市的班：站別是那家店的站，跟著這次一起存
+      const v2 = q('#scCellSel2') && q('#scCellSel2').value;
+      if (v2) { cell.shift2_id = v2; if (isExtId(v2)) cell.xst2 = (q('#scXSt2') && q('#scXSt2').value) || null; }
+    }
     else if (v.startsWith('L:')) Object.assign(cell, { day_type: 'L', leave: v.slice(2) });
     else Object.assign(cell, { day_type: v });
     try { await mutate('saveDays', { cells: [cell] }); S.sel = null; say('已存'); } catch (e) { say(e.message, true); }
     rerender();
   });
+  // 支援別家門市的班：旁邊的工作站下拉列出那家店的站（沒有選支援別店的班就藏起來）
+  const syncX = () => {
+    if (!q('#scCellSel') || !q('#scXSt')) return;
+    const c0 = (D.days[S.sel.emp] || {})[S.sel.date] || {};
+    const fill = (sel, sid, curSt) => {
+      if (!isExtId(sid)) { sel.hidden = true; sel.innerHTML = ''; return; }
+      const keep = sel.dataset.sid === sid ? sel.value : (c0.shift_id === sid ? c0.station_id : c0.shift2_id === sid ? c0.station2_id : curSt) || '';
+      sel.dataset.sid = sid;
+      sel.innerHTML = '<option value="">不選工作站</option>' + extStationsOf(sid).filter((x) => x.active || x.id === keep).map((x) => `<option value="${esc(x.id)}"${x.id === keep ? ' selected' : ''}>${esc(x.name)}${x.active ? '' : '（已停用）'}</option>`).join('');
+      sel.hidden = false;
+    };
+    const v1 = q('#scCellSel').value, v2 = q('#scCellSel2') ? q('#scCellSel2').value : '';
+    fill(q('#scXSt'), v1.startsWith('S:') ? v1.split(':')[1] : '', '');
+    fill(q('#scXSt2'), v2, '');
+  };
   // 第一格不是班別（休、例、請假、清空）就不能加第二班
-  if (q('#scCellSel') && q('#scCellSel2')) q('#scCellSel').onchange = () => { const isShift = q('#scCellSel').value.startsWith('S:'); q('#scCellSel2').disabled = !isShift; if (!isShift) q('#scCellSel2').value = ''; };
+  if (q('#scCellSel') && q('#scCellSel2')) q('#scCellSel').onchange = () => { const isShift = q('#scCellSel').value.startsWith('S:'); q('#scCellSel2').disabled = !isShift; if (!isShift) q('#scCellSel2').value = ''; syncX(); };
+  if (q('#scCellSel2')) q('#scCellSel2').onchange = syncX;
+  syncX();
   if (q('#scAuto')) q('#scAuto').onclick = () => busy(q('#scAuto'), async () => {
     const all = q('#scAll').checked;
     if (all && !(await confirmBox('手動改過的格子也會被重新排，確定嗎？', '全部重排'))) return;

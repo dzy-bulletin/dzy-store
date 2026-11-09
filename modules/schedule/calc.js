@@ -1,5 +1,5 @@
 // 自動排班：工時比與特休（spec 第 7 節）。
-import { shiftMinutes } from './hours.js';
+import { shiftMinutes, isExtId } from './hours.js';
 
 /** 每工時營業額＝營業額 ÷ 工時（小時），四捨五入到整數元；沒有營業額或工時是 0 回 null */
 export function ratio(revenue, minutes) {
@@ -9,7 +9,7 @@ export function ratio(revenue, minutes) {
 /** 某天全店排班工時（分鐘） */
 export function dayMinutes(ctx, d) {
   let m = 0;
-  for (const st of ctx.staff) { const c = (ctx.days[st.emp_id] || {})[d]; if (c && c.shift_id && ctx.shifts[c.shift_id]) m += shiftMinutes(ctx.shifts[c.shift_id]); }
+  for (const st of ctx.staff) { const c = (ctx.days[st.emp_id] || {})[d]; if (c && c.shift_id && !isExtId(c.shift_id) && ctx.shifts[c.shift_id]) m += shiftMinutes(ctx.shifts[c.shift_id]); }
   return m;
 }
 /** { daily: {date: {revenue, minutes, ratio}}, period: {revenue, minutes, ratio} } */

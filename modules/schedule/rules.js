@@ -17,7 +17,7 @@
 // }
 // 回傳 [{ code, level:'block'|'warn'|'info', emp_id, date, msg }]
 import { periodDates, addDays, diffDays, weekday } from './period.js';
-import { shiftMinutes, gapMinutes, cellShift, cellShiftIds, combineShifts } from './hours.js';
+import { shiftMinutes, gapMinutes, cellShift, cellShiftIds, combineShifts, isExtId, localCell } from './hours.js';
 
 export const H = 60;
 const FT_DAY_NORMAL = 10 * H, PT_DAY_NORMAL = 8 * H;
@@ -193,7 +193,14 @@ export function checkPeriod(ctx) {
   // 總部支援（sched-support.js，2026-11-07）：ctx.support＝[{days:{date:格子}}]，只算人數；門市名冊裡對到的支援帳號（st.ext）不做個人規則檢查（班在總部班表檢查）
   const sup = ctx.support || [];
   for (const st of ctx.staff) {
-    if (st.ext) continue;
+    if (st.ext) {
+      // 門市互相支援排班（st.ext==='store'）：這位同仁在別家門市排了支援這一家的班，這一期在這裡已手動排的格子保留不動，列在提醒清單請店長清掉（總部來源 ext===true 維持原樣：不提醒）
+      if (st.ext === 'store') {
+        const held = dates.filter(d => employed(st, d) && (ctx.days[st.emp_id] || {})[d] && (ctx.days[st.emp_id] || {})[d].shift_id);
+        if (held.length) add('X1', 'warn', st.emp_id, held[0], `${st.name} 這期被別家門市排了支援這家店的班，但這裡還有 ${held.length} 天手動排的班（${held.slice(0, 4).map(md).join('、')}${held.length > 4 ? ' 等' : ''}），請點班表上那幾格改成「清空」，不然會重複算人數`);
+      }
+      continue;
+    }
     const e = st.emp_id, who = st.name;
     const mine = ctx.days[e] || {};
     const inPeriod = dates.filter(d => employed(st, d));
@@ -345,7 +352,7 @@ export function checkPeriod(ctx) {
       const c = mine[d];
       const t = termAt(ctx.terms, e, d);
       const al = allowedList(t, ctx.holidays, d);
-      for (const sid of cellShiftIds(c)) if (al.length && !al.includes(sid))
+      for (const sid of cellShiftIds(c)) if (al.length && !isExtId(sid) && !al.includes(sid))      // 支援別家門市的班不受本店「只能上的班」限制
         add('D3', 'block', e, d, `${who} ${isRedDay(ctx.holidays, d) && t.allowed_shifts_hol && t.allowed_shifts_hol.length ? '假日' : ''}不能上${(ctx.shifts[sid] || {}).name || sid}（${md(d)}）`);
       const p = (ctx.pins && ctx.pins[e] || {})[d];
       if (!p || !c) continue;
@@ -369,7 +376,7 @@ export function checkPeriod(ctx) {
     for (const st of ctx.staff) {
       if (!employed(st, d)) continue;                                  // 不在職的人就算格子有班也不算人力
       const c = (ctx.days[st.emp_id] || {})[d];
-      for (const sid of cellShiftIds(c)) { count[sid] = (count[sid] || 0) + 1; (onShift[sid] = onShift[sid] || []).push(st.emp_id); }      // 一天兩班：兩個班各算一人次
+      for (const sid of cellShiftIds(c)) { if (isExtId(sid)) continue; count[sid] = (count[sid] || 0) + 1; (onShift[sid] = onShift[sid] || []).push(st.emp_id); }      // 一天兩班：兩個班各算一人次；支援別家門市的班不算本店人數（門市互相支援排班）
     }
     for (const x of sup) for (const sid of cellShiftIds(x.days[d])) count[sid] = (count[sid] || 0) + 1;
     for (const sid in need) {
@@ -392,7 +399,7 @@ export function checkPeriod(ctx) {
       const need = (ctx.stationNeed || {})[d] || {};
       const count = {};
       for (const st of ctx.staff) {
-        const c = employed(st, d) ? (ctx.days[st.emp_id] || {})[d] : null;
+        const c = employed(st, d) ? localCell((ctx.days[st.emp_id] || {})[d]) : null;      // 支援別家門市的班（站別是別家的）不算本店站別人數
         if (c && c.shift_id && c.station_id) count[c.station_id] = (count[c.station_id] || 0) + 1;
         if (c && c.shift2_id && c.station2_id) count[c.station2_id] = (count[c.station2_id] || 0) + 1;      // 第二班各選各的站、各算一人次
       }

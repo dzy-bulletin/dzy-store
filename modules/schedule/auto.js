@@ -5,15 +5,17 @@
 // 步驟：0 輸入檢查 → 1 保留指定／手動 → 2 排日別（每週選休假日，以「休了以後各班還剩多少人」評分）
 //       → 3 逐日配對（先滿足最少人數，用增廣路徑做二分圖配對）→ 4 修復（同週對調休假日）→ 4.2 備援同仁補缺人 → 5 整期檢查，沒有「擋」才回傳
 import { periodDates, addDays } from './period.js';
-import { shiftMinutes, gapMinutes, cellShift, cellShiftIds } from './hours.js';
+import { shiftMinutes, gapMinutes, cellShift, cellShiftIds, isExtId } from './hours.js';
 import { checkPeriod, termAt, employed, isHoliday, allowedList, backupAt, ptCapMin, MIN_GAP, FT_OT_MAX, DAY_MAX } from './rules.js';
 
 const REPAIR_MAX = 200;   // DAY_MAX 改從 rules.js 來（2026-11-01 改 10 小時）
 const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
 
+// 本店自己的班別 id（ctx.shifts 裡還有支援別家門市的班「門市代號.班別」，只拿來算工時與換班間隔，自動排班不會排；門市互相支援排班，2026-11-09）
+const ownIds = (ctx) => Object.keys(ctx.shifts).filter(s => !isExtId(s));
 function allowedOf(ctx, emp, d) {
   const al = allowedList(termAt(ctx.terms, emp, d), ctx.holidays, d);       // 假日有另外設就用假日那組（2026-10-28 Eason）
-  const all = Object.keys(ctx.shifts).filter(s => ctx.shifts[s].active !== 0);
+  const all = ownIds(ctx).filter(s => ctx.shifts[s].active !== 0);
   return al.length ? all.filter(s => al.includes(s)) : all;
 }
 /** 備援同仁（2026-10-28 Eason：只限計時，其他同仁都排不開才排他）。逐日看身分條款：這天是備援的日子先休、缺人才叫 */
@@ -103,7 +105,7 @@ function ftPartialQuota(ctx, st, dates) {
 function planOffDays(ctx, dates, fixed, guoSkip) {
   const plan = {};
   const avail = {};          // avail[d][s]：這天能上 s 班、還沒休的人數
-  dates.forEach(d => { avail[d] = {}; Object.keys(ctx.shifts).forEach(s => { avail[d][s] = 0; }); });
+  dates.forEach(d => { avail[d] = {}; ownIds(ctx).forEach(s => { avail[d][s] = 0; }); });
   const staff = ctx.staff.slice();
   for (const st of staff) for (const d of dates) if (employed(st, d) && !fixed[st.emp_id][d] && !bkDay(ctx, st.emp_id, d)) allowedOf(ctx, st.emp_id, d).forEach(s => { avail[d][s]++; });
   // 備援的日子：先休（指定上班的照上），等第 4.2 步真的缺人才一天一天叫進來；不算進 avail。整期都是備援的人也不進下面的排序（不然會擠動別人的輪替順序）
@@ -223,7 +225,7 @@ export function assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixed
   fixedCount = fixedCount || {};                                     // 已固定的班（指定某班、手動）先算進人數（GPT 上線前審查 15）
   const capLeft = (extra && extra.capLeft) || {};                    // 計時同仁這期還剩幾分鐘可排（2026-10-11 Codex 審查：原本只用平均班長估天數，會超過上限）
   const fixedShift = (extra && extra.fixedShift) || {};              // 這天已固定班的人 → 班別（不排同班的配對要一起看）
-  const shiftIds = Object.keys(ctx.shifts).filter(s => ctx.shifts[s].active !== 0);
+  const shiftIds = ownIds(ctx).filter(s => ctx.shifts[s].active !== 0);
   workers = workers.slice().sort((a, b) => prioOf(ctx, a) - prioOf(ctx, b));     // 順位前面的先挑（沒人設順位時順序不變：sort 是穩定的）
   const ok = (e, s) => {
     if (!allowedOf(ctx, e, d).includes(s)) return false;
@@ -379,7 +381,7 @@ function buildDays(ctx, dates, fixed, plan) {
     }
     for (const e of unassigned) {
       out[e][d] = { day_type: 'H', shift_id: null, leave: null, source: 'auto' };
-      problems.push(`${nm(e)} ${md(d)} 沒有能上的班（${capLeft[e] !== undefined && Object.keys(ctx.shifts).every(s => shiftMinutes(ctx.shifts[s]) > capLeft[e]) ? '這期時數已經排滿' : '換班間隔或可上班別限制'}），改排休息日`);
+      problems.push(`${nm(e)} ${md(d)} 沒有能上的班（${capLeft[e] !== undefined && ownIds(ctx).every(s => shiftMinutes(ctx.shifts[s]) > capLeft[e]) ? '這期時數已經排滿' : '換班間隔或可上班別限制'}），改排休息日`);
     }
     for (const st of ctx.staff) { const c = out[st.emp_id][d]; prevShift[st.emp_id] = cellShift(ctx.shifts, c); }
   }
@@ -472,7 +474,7 @@ function scheduleCore(ctx, opts, guoSkip, keepManual) {
       // 休息日加班（H＋班）一律保留，連「全部重排」也不動：只能由店長手動改回休息日（Eason 2026-10-11，加班費不能因重排消失）
       // 自動排的國定假日假（source=auto）每次重排都重新挑日子；手動排的照請假保留
       const autoGuo = c && c.day_type === 'L' && c.leave === '國' && c.source === 'auto';
-      if (c && !autoGuo && (c.day_type === 'L' || (c.day_type === 'H' && c.shift_id) || c.shift2_id || (keepManual && c.source === 'manual'))) fixed[e][d] = c;      // 一天兩班只能手動加：重排一律保留（2026-11-07）
+      if (c && !autoGuo && (c.day_type === 'L' || (c.day_type === 'H' && c.shift_id) || c.shift2_id || cellShiftIds(c).some(isExtId) || (keepManual && c.source === 'manual'))) fixed[e][d] = c;      // 一天兩班只能手動加：重排一律保留（2026-11-07）；排了支援別家門市的班也一律保留，連「全部重排」也不動（門市互相支援排班，2026-11-09）
       const p = pinOf(ctx, e, d);
       if (p && p.kind === 'shift' && !fixed[e][d]) fixed[e][d] = { day_type: 'W', shift_id: p.shift_id, leave: null, source: 'pin' };
     }
@@ -519,9 +521,9 @@ function scheduleCore(ctx, opts, guoSkip, keepManual) {
 
   // 4.1 某天上班人數超過各班「最多」加總（有任一使用中的班沒設最多＝不限）：讓那天上班的人跟同週他休、人數還沒到上限的一天對調。
   //   原本挑休假只看最少人數，週末設了最多 4 人照樣排成 5 人（2026-10-31 Eason）。整期重驗：不能多出「擋」或缺人，超額總數要變少
-  const activeIds = Object.keys(ctx.shifts).filter(s => ctx.shifts[s].active !== 0);
+  const activeIds = ownIds(ctx).filter(s => ctx.shifts[s].active !== 0);
   const capOf = (d) => { const n = needOf(ctx, d); return activeIds.reduce((a, s) => a + ((n[s] || {}).max == null ? Infinity : n[s].max), 0); };
-  const onOf = (o, d) => ctx.staff.filter(st => employed(st, d) && (o[st.emp_id][d] || {}).shift_id).length;
+  const onOf = (o, d) => ctx.staff.filter(st => employed(st, d) && cellShiftIds(o[st.emp_id][d]).some(id => !isExtId(id))).length;      // 只支援別家門市的人不算本店在班
   const overAll = (o) => dates.reduce((a, d) => a + Math.max(0, onOf(o, d) - capOf(d)), 0);
   let overTries = 0;
   for (let progressed = overAll(out) > 0; progressed && overTries < REPAIR_MAX;) {

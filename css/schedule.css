@@ -225,6 +225,13 @@ button.hq-day{cursor:pointer}
 .sc-suprow th, .sc-c.sup, .sc-drow.sup { background: color-mix(in srgb, var(--line, #ddd) 35%, transparent); cursor: default; }
 .sc-suptag { display: inline-block; margin-left: 4px; font-size: .72em; font-style: normal; color: var(--muted, #666); }
 .hq-trip { white-space: nowrap; }
+/* 門市互相支援排班（2026-11-09）：別家門市排來的支援用另一個標籤；原店還沒鎖定時加黃色提醒；支援別家門市的圖例；名冊裡的支援帳號還留著手動排的班時列出來 */
+.sc-storesup { color: #1e5fa8; }
+.sc-unlocked { color: #8a6100; background: #fff0b3; border-radius: 3px; padding: 0 3px; }
+.sc-extacct { color: #9a4b00; }
+.sc-legx b { color: #1e5fa8; }
+.sc-xsn { font-style: normal; }
+@media print { .sc-unlocked { background: none; color: #555; } }
 
 /* 手機上格子編輯框（門市、總部）：選單各佔一整行，看得到選了哪個班（2026-11-07 截圖發現被擠成「A 1(」） */
 @media (max-width: 520px) {

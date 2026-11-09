@@ -110,3 +110,17 @@ export function cellShift(shifts, c) {
 }
 /** 一格有哪幾個班別 id（第二班放後面） */
 export const cellShiftIds = (c) => (c && c.shift_id ? (c.shift2_id ? [c.shift_id, c.shift2_id] : [c.shift_id]) : []);
+/** 支援別家門市的班別 id（「門市代號.班別」，本店自己的班別代號沒有「.」；門市互相支援排班，2026-11-09） */
+export const isExtId = (id) => typeof id === 'string' && id.indexOf('.') > 0;
+/** 只留在本店上的部分：支援別家門市的班不算本店的當天人數、早晚人數、班別人數、工作站人數、全店工時（個人工時、連上天數、一例一休照算整格，不用這個）。
+ *  兩班都在別店＝沒有班別（day_type 照舊）；一班在本店、一班在別店＝只剩本店那班（站別跟著班別走） */
+export function localCell(c) {
+  if (!c || !c.shift_id) return c;
+  const ids = cellShiftIds(c);
+  if (!ids.some(isExtId)) return c;
+  const keep = ids.map((id, i) => [id, i ? c.station2_id : c.station_id]).filter(([id]) => !isExtId(id));
+  const o = Object.assign({}, c);
+  delete o.shift2_id; delete o.station2_id;
+  if (!keep.length) { o.shift_id = null; o.station_id = null; } else { o.shift_id = keep[0][0]; o.station_id = keep[0][1] || null; }
+  return o;
+}

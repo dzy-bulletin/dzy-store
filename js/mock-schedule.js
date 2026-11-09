@@ -3,7 +3,7 @@
 import { checkPeriod, comboError, orderTwo, minutesOf, NOTE_COLORS } from '../modules/schedule/rules.js';
 import { autoSchedule } from '../modules/schedule/auto.js';
 import { periodDates, periodOf, todayTaipei, addDays, weekday, parseLabel, shiftPeriod } from '../modules/schedule/period.js';
-import { shiftMinutes, breakOk, normSegs, cellShift } from '../modules/schedule/hours.js';
+import { shiftMinutes, breakOk, normSegs, cellShift, cellShiftIds, isExtId } from '../modules/schedule/hours.js';
 import { whileLeaving } from './leaving.js';
 import { hqAction, seedHq, putDay, stationNeedFor, publishPeriod, hasActiveDay, mockSupport } from './mock-schedule-hq.js';
 
@@ -39,6 +39,54 @@ function storeOf(db, code) {
   db.sched = db.sched || {};
   if (!db.sched[code]) db.sched[code] = seed(code);
   return db.sched[code];
+}
+// ---- 門市互相支援排班（2026-11-09，同 server/sched-support.js、schedule.js）----
+// 示範資料裡的門市＝db.accounts 的門市帳號；規則同伺服器：同品牌、啟用中、門市排班、有使用中班別、不含自己、不是 TEST 開頭
+// （示範的帳號全是 TEST 開頭，e2e 用 accounts.X.supportOk=true 開例外，不然示範模式永遠看不到這個功能）
+const shortOf = (a) => { const t = String((a && a.name) || '').trim().split(/\s+/); return t[t.length - 1] || (a && a.code) || ''; };
+function mockExtStores(db, code) {
+  const me = db.accounts[code], out = [];
+  if (!me) return out;
+  for (const a of Object.values(db.accounts)) {
+    if (a.role !== 'store' || !a.active || a.hidden || a.mode || a.code === code || a.brand !== me.brand) continue;
+    if (/^TEST/.test(a.code) && !a.supportOk) continue;
+    const x = storeOf(db, a.code);
+    if (!Object.values(x.shifts).some((y) => y.active)) continue;
+    out.push(a.code);
+  }
+  return out;
+}
+/** 別家門市（含停用的班別）換成這家店看的代號：{ 'TEST2.S1': {…, id, name:'墨竹亭測試店 早班', store, local} } */
+function mockExtShifts(db, code) {
+  const out = {};
+  for (const [oc, x] of Object.entries(db.sched || {})) {
+    if (oc === code || !x || x.mode || !db.accounts[oc]) continue;
+    for (const y of Object.values(x.shifts || {})) out[oc + '.' + y.id] = Object.assign({}, y, { id: oc + '.' + y.id, name: shortOf(db.accounts[oc]) + ' ' + y.name, store: oc, local: y.id });
+  }
+  return out;
+}
+/** 別家門市排來支援 code 這家店的班（同 server storeSupportOf）：[{key, kind:'store', from_store, from_name, origin_locked, name, emp, days}] */
+function mockStoreSupport(db, code, dates, staff) {
+  const pre = code + '.', out = [], per = periodOf(dates[0]);
+  for (const [oc, x] of Object.entries(db.sched || {})) {
+    if (oc === code || !x || x.mode || !db.accounts[oc]) continue;
+    for (const s of x.staff) {
+      const days = {};
+      for (const d of dates) {
+        const c = (x.days[s.emp_id] || {})[d];
+        if (!c || (c.day_type !== 'W' && c.day_type !== 'H')) continue;
+        const slots = [[c.shift_id, c.station_id], [c.shift2_id, c.station2_id]].filter(([id]) => id && id.startsWith(pre));
+        if (!slots.length) continue;
+        const o = { day_type: c.day_type, shift_id: slots[0][0].slice(pre.length), station_id: slots[0][1] || null };
+        if (slots[1]) { o.shift2_id = slots[1][0].slice(pre.length); o.station2_id = slots[1][1] || null; }
+        days[d] = o;
+      }
+      if (!Object.keys(days).length) continue;
+      const same = (staff || []).filter((y) => y.name === s.name && !y.leave_date);
+      out.push({ key: 'ST:' + oc + ':' + s.emp_id, kind: 'store', from_store: oc, from_name: shortOf(db.accounts[oc]), origin_locked: !!(per && (x.periods[per] || {}).locked), name: s.name, emp: same.length === 1 ? same[0].emp_id : null, days });
+    }
+  }
+  return out;
 }
 // 身分設定從 fromDate 起生效：之後有已鎖定的期就不給改（照 server/schedule.js guardTermLocked）
 function termLocked(st, fromDate, emp) {              // 影響範圍只到這人下一筆身分設定的前一天（照伺服器）
@@ -82,7 +130,7 @@ export async function schedule(action, me, b, db, s, hooks) {
   const recheckNext = () => {
     const nx = shiftPeriod(period, 1), r = st.periods[nx];
     if (!r || !r.locked) return;
-    r.needs_recheck = checkPeriod(ctxOf(st, nx, hol)).some((x) => x.level === 'block' && ['C1', 'F6', 'P3'].includes(x.code));
+    r.needs_recheck = checkPeriod(Object.assign(ctxOf(st, nx, hol), { shifts: Object.assign({}, st.shifts, mockExtShifts(db, me.code)) })).some((x) => x.level === 'block' && ['C1', 'F6', 'P3'].includes(x.code));
   };
   const pubSet = (kind, per) => {
     const list = st.pubs[per || period] = st.pubs[per || period] || [];
@@ -108,17 +156,26 @@ export async function schedule(action, me, b, db, s, hooks) {
           const c = st.days[x.emp_id][d];
           if (d.slice(0, 7) === ym && c.shift_id && st.shifts[c.shift_id] && (!x.hire_date || x.hire_date <= d) && (!x.leave_date || d <= x.leave_date)) minutes += shiftMinutes(st.shifts[c.shift_id]);
         }
+        // 別家門市排來支援這家店的班，算進這家店的工時比（門市互相支援排班；總部來源不算）
+        const mFirst = ym + '-01', mLast = addDays(addDays(mFirst, 32).slice(0, 7) + '-01', -1), mDates = []; for (let d = mFirst; d <= mLast; d = addDays(d, 1)) mDates.push(d);
+        if (!st.__hq) for (const x of mockStoreSupport(db, me.code, mDates, st.staff)) for (const c of Object.values(x.days)) { const sh = cellShift(st.shifts, c); if (sh) minutes += shiftMinutes(sh); }
         const revenue = st.revenue[ym] == null ? null : st.revenue[ym];
         return { ym, revenue, minutes, ratio: revenue != null && minutes > 0 ? Math.round(revenue / (minutes / 60)) : null };
       });
       const pubs = st.pubs[period] || [];
-      const support = st.__hq ? [] : mockSupport(db, me.code, dates, st.staff);      // 總部支援（同 server buildCtx）
-      const extEmp = new Set(support.map((x) => x.emp).filter(Boolean));
-      const supStaff = extEmp.size ? st.staff.map((x) => (extEmp.has(x.emp_id) ? Object.assign({}, x, { ext: true }) : x)) : st.staff;
+      const support = st.__hq ? [] : mockSupport(db, me.code, dates, st.staff).concat(mockStoreSupport(db, me.code, dates, st.staff));      // 總部支援＋門市支援（同 server buildCtx）
+      const extEmp = new Map();
+      for (const x of support) if (x.emp) { const prev = extEmp.get(x.emp); extEmp.set(x.emp, x.kind === 'store' && (prev === undefined || prev === 'store') ? 'store' : true); }
+      const supStaff = extEmp.size ? st.staff.map((x) => (extEmp.has(x.emp_id) ? Object.assign({}, x, { ext: extEmp.get(x.emp_id) }) : x)) : st.staff;
+      const extAll = mockExtShifts(db, me.code), extCodes = new Set(mockExtStores(db, me.code));      // 這家店能選的支援門市＋格子裡已經用到的
+      for (const m of Object.values(days)) for (const c of Object.values(m)) for (const id of [c.shift_id, c.shift2_id]) if (isExtId(id)) extCodes.add(id.slice(0, id.indexOf('.')));
+      const pickX = (y) => Object.assign({ id: y.id, name: y.name, start: y.start, end: y.end, break_min: y.break_min, color: y.color, active: y.active, store: y.store, local: y.local }, y.segs ? { segs: y.segs } : {});
       return ok({ period, dates, today: todayTaipei(), store: me.code,
         meta: { version: r.version, locked: !!r.locked, locked_at: r.locked_at, locked_by: r.locked_by, needs_recheck: !!r.needs_recheck, publication: pubs.length ? pubs[pubs.length - 1] : null, clockAlias, lineFrom: '2026-11-01' },
         shifts: Object.values(st.shifts).sort((a, x) => a.sort - x.sort), staff: supStaff, terms: st.terms, days, support, actuals: st.actuals, demand: ctx.demand, demandTpl: tpl, demandOverrides: ov,
-        pins: ctx.pins, pairs: st.pairs, months, cfg: st.cfg, holidays: hol, monthOtMin: {}, results: checkPeriod(Object.assign(ctx, { days: st.days, support, staff: supStaff })), roster: { synced: clockAlias !== null },
+        pins: ctx.pins, pairs: st.pairs, months, cfg: st.cfg, holidays: hol, monthOtMin: {}, results: checkPeriod(Object.assign(ctx, { days: st.days, support, staff: supStaff, shifts: Object.assign({}, st.shifts, extAll) })), roster: { synced: clockAlias !== null },
+        extStores: st.__hq ? [] : [...extCodes].filter((c) => mockExtStores(db, me.code).includes(c)).map((c) => ({ code: c, name: shortOf(db.accounts[c]), shifts: Object.values(extAll).filter((y) => y.store === c && y.active).map(pickX), stations: Object.values(storeOf(db, c).stations).filter((y) => y.active).sort((a, x) => a.sort - x.sort) })),
+        extShifts: Object.values(extAll).filter((y) => extCodes.has(y.store)).map(pickX), extStations: Object.fromEntries([...extCodes].map((c) => [c, storeOf(db, c).stations])),
         notes: Object.fromEntries(dates.filter((d) => (st.notes || {})[d]).map((d) => [d, st.notes[d]])),
         stations: Object.values(st.stations).sort((a, x) => a.sort - x.sort || (a.id < x.id ? -1 : 1)), stationNeedTpl: st.stNeedTpl, stationNeedDay: Object.fromEntries(dates.filter((d) => hasActiveDay(st, d)).map((d) => [d, st.stNeedDay[d]])), stationNeed: ctx.stationNeed });
     }
@@ -127,6 +184,18 @@ export async function schedule(action, me, b, db, s, hooks) {
       const cells = b.cells || [];
       if (!cells.length) return fail('BAD_INPUT', '沒有要存的格子');
       if (cells.length > 2000) return fail('BAD_INPUT', '一次最多改 2000 格');
+      // 門市互相支援排班（同 server/schedule.js saveDays）：支援別家門市的班由伺服器自己驗；別家門市排來支援的人，被排的日子這邊不能改（清空可以）
+      const okStores = mockExtStores(db, me.code), extAll = mockExtShifts(db, me.code);
+      const supported = new Set();
+      if (!st.__hq) for (const x of mockStoreSupport(db, me.code, dates, st.staff)) if (x.emp) for (const d of Object.keys(x.days)) supported.add(x.emp + '|' + d);
+      const extErr = (id, xs) => {
+        const oc = id.slice(0, id.indexOf('.'));
+        if (oc === me.code) return '不能選自己這家店的班當支援';
+        if (!okStores.includes(oc) || !extAll[id]) return '這家門市不能支援：只能選同品牌、啟用中、有排班的別家門市';
+        if (!extAll[id].active) return '支援的班別已停用，請改選別的班';
+        if (xs) { const sx = storeOf(db, oc).stations[xs]; if (!(sx && sx.active)) return '支援門市的工作站不存在或已停用'; }
+        return null;
+      };
       for (const c of cells) {
         const sf = st.staff.find((x) => x.emp_id === c.emp_id);
         if (!dates.includes(c.date) || !sf) return fail('BAD_INPUT', '格子的人或日期不在這一期');
@@ -134,10 +203,18 @@ export async function schedule(action, me, b, db, s, hooks) {
         const otLocked = pv && pv.day_type === 'H' && pv.shift_id;
         if (c.clear) { if (otLocked) return fail('BAD_INPUT', '這天是休息日加班，不能清空；不需要上班請改回休息日'); if (st.days[c.emp_id]) delete st.days[c.emp_id][c.date]; continue; }
         let cell = { day_type: c.day_type, shift_id: c.shift_id || null, leave: c.leave || null, shift2_id: c.shift2_id || null };
+        if (supported.has(c.emp_id + '|' + c.date)) return fail('BAD_INPUT', `${sf.name} ${+c.date.slice(5, 7)}/${+c.date.slice(8, 10)} 已被別家門市排了支援這家店，這天在這裡不能改；要先清空才能收掉原本手動排的班`);
+        if (isExtId(cell.shift_id) || isExtId(cell.shift2_id)) {
+          const e1 = isExtId(cell.shift_id) ? extErr(cell.shift_id, c.xst || null) : null, e2 = isExtId(cell.shift2_id) ? extErr(cell.shift2_id, c.xst2 || null) : null;
+          if (e1 || e2) return fail('BAD_INPUT', e1 || e2);
+          cell.xst = isExtId(cell.shift_id) && c.xst !== undefined ? c.xst || null : undefined;
+          cell.xst2 = isExtId(cell.shift2_id) && c.xst2 !== undefined ? c.xst2 || null : undefined;
+        }
         const err = comboError(cell, hol, c.date); if (err) return fail('BAD_INPUT', err);
+        const shiftsAll = Object.assign({}, st.shifts, extAll);
         if (cell.shift2_id) {                                     // 一天兩班（同 server/schedule.js saveDays）
-          if (!st.shifts[cell.shift2_id]) return fail('BAD_INPUT', '第二班的班別不存在');
-          const o = orderTwo(st.shifts, cell); if (o.err) return fail('BAD_INPUT', o.err); cell = o.cell;
+          if (!shiftsAll[cell.shift2_id]) return fail('BAD_INPUT', '第二班的班別不存在');
+          const o = orderTwo(shiftsAll, cell); if (o.err) return fail('BAD_INPUT', o.err); cell = o.cell;
         }
         if (otLocked && cell.day_type !== 'H') return fail('BAD_INPUT', '這天是休息日加班（要付加班費），只能改回休息日；不能改成工作日、例假或請假');   // 同 server/schedule.js saveDays
         if (cell.shift_id && !((!sf.hire_date || sf.hire_date <= c.date) && (!sf.leave_date || c.date <= sf.leave_date))) return fail('BAD_INPUT', `${+c.date.slice(5, 7)}/${+c.date.slice(8, 10)} 不在職，不能排班`);
@@ -151,7 +228,8 @@ export async function schedule(action, me, b, db, s, hooks) {
       const g = guard(false); if (g) return g;
       if (!Object.values(st.shifts).some((s) => s.active)) return fail('BAD_INPUT', '還沒建班別，請先到「班別與設定」建立班別');   // 同 server/schedule.js NO_SHIFT_MSG
       const actx = ctxOf(st, period, hol);
-      actx.support = st.__hq ? [] : mockSupport(db, me.code, dates, st.staff);      // 總部支援：先扣人數、名冊裡對到的支援帳號不排（同 server auto）
+      actx.support = st.__hq ? [] : mockSupport(db, me.code, dates, st.staff).concat(mockStoreSupport(db, me.code, dates, st.staff));      // 總部＋門市支援：先扣人數、名冊裡對到的支援帳號不排（同 server auto）
+      actx.shifts = Object.assign({}, st.shifts, mockExtShifts(db, me.code));      // 這家店的人支援別家門市的班：算工時、換班間隔，自動排班不會排它（auto.js 認得「.」）並整格保留
       const extEmp = new Set(actx.support.map((x) => x.emp).filter(Boolean));
       actx.staff = st.staff.filter((x) => !extEmp.has(x.emp_id));
       const res = autoSchedule(actx, { keepManual: b.keepManual !== false });
@@ -229,6 +307,8 @@ export async function schedule(action, me, b, db, s, hooks) {
       const cells = (src, hit) => Object.entries(src || {}).flatMap(([e, m]) => Object.entries(m || {}).filter(([, c]) => c && hit(c)).map(([d]) => [d, e])).sort((a, x) => (a[0] + a[1] < x[0] + x[1] ? -1 : 1));
       const uses = [];
       const days = cells(st.days, (c) => c.shift_id === id || c.shift2_id === id); if (days.length) uses.push(`班表 ${days.length} 格（${list(days, 2)}）`);
+      const supCells = Object.entries(db.sched || {}).filter(([oc, x]) => oc !== me.code && x && !x.mode).flatMap(([oc, x]) => cells(x.days, (c) => c.shift_id === me.code + '.' + id || c.shift2_id === me.code + '.' + id).map(([d, e]) => [d, (x.staff.find((y) => y.emp_id === e) || {}).name || e]));
+      if (supCells.length) uses.push(`別家門市排的支援 ${supCells.length} 格（${supCells.slice(0, 2).map(([d, n]) => [md(d), n].join(' ')).join('、')}${supCells.length > 2 ? ' 等' : ''}）`);
       const pend = cells(st.pending, (c) => c.shift_id === id); if (pend.length) uses.push(`待核准的班表變更 ${pend.length} 格（${list(pend, 2)}）`);
       const tpl = [['wd', '平日'], ['sat', '週六'], ['sun', '週日']].filter(([k]) => (st.tpl[k] || {})[id]).map(([, n]) => n); if (tpl.length) uses.push(`每班人數範本（${tpl.join('、')}）`);
       const dd = Object.keys(st.dayDemand).filter((d) => (st.dayDemand[d] || {})[id]).sort().map((d) => [d, null]); if (dd.length) uses.push(`單日人數 ${dd.length} 天（${list(dd, 3)}）`);
@@ -419,11 +499,12 @@ export async function schedule(action, me, b, db, s, hooks) {
         const sf = st.staff.find((x) => x.emp_id === c.emp_id);
         if (!((!sf.hire_date || sf.hire_date <= c.date) && (!sf.leave_date || c.date <= sf.leave_date))) return fail('BAD_INPUT', '這天不在職，不能選站別');
         const to = c.station_id || null;
-        if (to && (!st.stations[to] || (!st.stations[to].active && to !== cur.station_id))) return fail('BAD_INPUT', '站別不存在或已停用');
-        if ((cur.station_id || null) !== to) todo.push([cur, c, to]);
+        const sidOf = slot2 ? row.shift2_id : row.shift_id, stOf = isExtId(sidOf) ? storeOf(db, sidOf.slice(0, sidOf.indexOf('.'))).stations : st.stations;      // 支援別家門市的那班，站別是那家店的
+        if (to && (!stOf[to] || (!stOf[to].active && to !== cur.station_id))) return fail('BAD_INPUT', '站別不存在或已停用');
+        if ((cur.station_id || null) !== to) todo.push([cur, c, to, stOf]);
       }
-      for (const [cur, c, to] of todo) {
-        const nm = (id) => (id ? st.stations[id].name : '未選站'), who = st.staff.find((x) => x.emp_id === c.emp_id).name;
+      for (const [cur, c, to, stOf] of todo) {
+        const nm = (id) => (id ? stOf[id].name : '未選站'), who = st.staff.find((x) => x.emp_id === c.emp_id).name;
         st.log.push({ period, who: me.code, action: 'station', detail: `${who} ${+c.date.slice(5, 7)}/${+c.date.slice(8)} ${nm(cur.station_id)}→${nm(to)}` });
         if (cur.slot2) cur.row.station2_id = to; else cur.row.station_id = to; changed++;
       }
@@ -435,7 +516,7 @@ export async function schedule(action, me, b, db, s, hooks) {
     case 'lock': {
       const n = needDuty(); if (n) return n;
       const g = guard(false); if (g) return g;
-      const blocks = checkPeriod(ctxOf(st, period, hol)).filter((r) => r.level === 'block');
+      const blocks = checkPeriod(Object.assign(ctxOf(st, period, hol), { shifts: Object.assign({}, st.shifts, mockExtShifts(db, me.code)) })).filter((r) => r.level === 'block');
       if (blocks.length) return fail('BAD_INPUT', `還有 ${blocks.length} 個地方不合規定，不能鎖定：` + blocks.slice(0, 3).map((x) => x.msg).join('；'));
       Object.assign(prow(st, period), { locked: true, locked_at: new Date().toISOString(), locked_by: me.code, needs_recheck: false });
       const publish = clockAlias !== null && parseLabel(period) >= 1;
