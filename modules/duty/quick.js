@@ -73,22 +73,35 @@ export function renderQuick(ctx) {
     return appr;
   }
   // 核准單回「已經處理過」（先前逾時其實成功了）：重讀這天的已核准與待審申請，卡片接到「核定 X 小時」
-  async function refreshReqs() {
-    const [rq, pd] = await Promise.all([call('mgr_req_day', { date: st.date }), call('mgr_req_pending')]);
-    st.appr = apprFrom(rq); st.pending = Array.isArray(pd && pd.items) ? pd.items : [];
+  async function readReqs(date) {                             // 確認用：有門市讀不到就丟錯，不拿殘缺的清單下結論
+    const [rq, pd] = await Promise.all([call('mgr_req_day', { date }), call('mgr_req_pending')]);
+    if (((rq && rq.failed) || []).length || ((pd && pd.failed) || []).length) throw new Error('部分門市讀不到');
+    return { appr: apprFrom(rq), pending: Array.isArray(pd && pd.items) ? pd.items : [] };
+  }
+  async function refreshReqs() { const r = await readReqs(st.date); st.appr = r.appr; st.pending = r.pending; }
+  // 逾時後確認這張單現在的狀況：pending／approved／gone（不在待審也沒核准）
+  async function reqFate(id, store, date) {
+    const r = await readReqs(date);
+    st.pending = r.pending; if (date === st.date) st.appr = r.appr;
+    if (r.pending.some((x) => String(x.id) === String(id) && (x.store || '') === (store || ''))) return 'pending';
+    return Object.values(r.appr).some((list) => (list || []).some((x) => String(x.id) === String(id))) ? 'approved' : 'gone';
   }
   // 逾時或連線中斷：寫入可能其實成功了。先重讀當天的人與申請再判斷，已成功就當完成或接下一步，沒成功才讓主管重送
   const uncertain = (e) => !!e && (['TIMEOUT', 'UPSTREAM', 'NETWORK'].includes(e.code) || !e.code || /逾時|太久|沒有回應|連線|網路/.test(e.message || ''));
-  async function reconcile() {
-    const d = await call('mgr_day', { date: st.date });
+  async function reconcile() {                                // 三份都讀到才一起換，中途失敗不留半套
+    const date = st.date;
+    const [d, r] = await Promise.all([call('mgr_day', { date }), readReqs(date)]);
+    if (((d && d.failed) || []).length) throw new Error('部分門市讀不到');
+    if (date !== st.date) return;
     if (Array.isArray(d && d.employees)) st.emps = d.employees;
-    await refreshReqs();
+    st.appr = r.appr; st.pending = r.pending;
   }
   async function readDay(date) {
     const [d, rq] = await Promise.all([call('mgr_day', { date }), call('mgr_req_day', { date })]);
     return { emps: Array.isArray(d.employees) ? d.employees : [], appr: apprFrom(rq), failed: [].concat((d && d.failed) || [], (rq && rq.failed) || []) };
   }
   async function load() {
+    if (st.busy) return;                                      // 寫入途中不換資料（含「重新載入」鈕）
     const tok = ++st.tok;
     st.loading = true; st.error = null; st.ui = {}; render();
     try {
@@ -124,8 +137,22 @@ export function renderQuick(ctx) {
     if (st.date && secs().left === 0) { st.manual = null; await load(); } else render();
   }
 
-  // 主管自己選日期（前一天／後一天）：只到昨天；這天處理完回到自動找下一個待處理的日子
-  const yesterday = () => C.addDaysStr(todayNow(), -1);
+  // 資料放超過 2 分鐘才在送出前重讀；重讀後要核定的內容變了就停下來請主管再看一次（回傳 true＝可以送）
+  const FRESH_MS = 2 * 60 * 1000;
+  const snap = (p) => [p.key, p.status, p.hours, JSON.stringify(p.payload)].join('|');
+  async function freshEnough(list) {
+    if (Date.now() - st.loadedAt <= FRESH_MS) return true;
+    const before = list.map(snap).join(',');
+    try { await reconcile(); }
+    catch (e) { st.failLine = '讀不到最新資料，這次沒有送出，請再按一次'; return false; }
+    st.loadedAt = Date.now(); recompute();
+    const after = list.map((p) => { const q = st.people.find((x) => x.key === p.key); return q ? snap(q) : p.key + '|gone'; }).join(',');
+    if (before === after) return true;
+    st.toast = '資料剛更新過，請看過再按一次';
+    return false;
+  }
+
+  // 主管自己選日期（前一天／後一天）：最多到今天；這天處理完回到自動找下一個待處理的日子
   function gotoDate(date) { st.manual = date; st.toast = ''; st.failLine = ''; load(); }
   function backToAuto() { st.manual = null; st.toast = ''; st.failLine = ''; load(); }
   function navEl() {
@@ -134,7 +161,7 @@ export function renderQuick(ctx) {
     const nav = h('div', 'dq-nav');
     const prev = btn('dq-navb', '‹ 前一天', () => gotoDate(C.addDaysStr(cur, -1)), { id: 'dqPrev' });
     const next = btn('dq-navb', '後一天 ›', () => gotoDate(C.addDaysStr(cur, 1)), { id: 'dqNext' });
-    prev.disabled = off; next.disabled = off || cur >= yesterday();
+    prev.disabled = off; next.disabled = off || cur >= todayNow();
     nav.append(prev);
     if (st.manual) { const b = btn('dq-navb', '回待處理', backToAuto, { id: 'dqAuto' }); b.disabled = st.busy; nav.append(b); }
     nav.append(next);
@@ -171,24 +198,27 @@ export function renderQuick(ctx) {
     if (st.busy) return;
     const list = secs().ok.slice();
     if (!list.length) return;
-    st.busy = true; st.toast = ''; st.failLine = '';
-    let okN = 0; const bad = [];
+    st.busy = true; st.toast = ''; st.failLine = ''; st.progress = '確認最新資料…'; render();
+    if (!(await freshEnough(list))) { st.busy = false; st.progress = ''; return render(); }
+    let okN = 0, halted = false; const bad = [];
     for (let i = 0; i < list.length; i++) {
       st.progress = '核定中 ' + (i + 1) + '/' + list.length; render();
       const p = list[i];
       try { await approveOne(p, mainAction(p)); okN++; }
       catch (e) {
         let msg = (e && e.message) || '沒有成功';
-        if (uncertain(e)) {
-          try { await reconcile(); const e2 = empOf(p.key); if (e2 && e2.approved) { okN++; continue; } msg += '（已重讀確認：沒有寫入）'; } catch (e3) { msg += '（連線有問題，無法確認有沒有寫入）'; }
+        if (uncertain(e)) {                                   // 逾時：資料已重讀，後面的人先停下，不拿舊清單繼續送
+          halted = true;
+          try { await reconcile(); const e2 = empOf(p.key); if (e2 && e2.approved) { okN++; break; } msg += '（已重讀確認：沒有寫入）'; } catch (e3) { msg += '（連線有問題，無法確認有沒有寫入）'; }
         }
         bad.push(p.name + '（' + msg + '）');
         Object.assign(U(p.key), { failed: msg, failedDiff: /^核定和打卡差/.test(msg) });
+        if (halted) break;
       }
     }
     st.busy = false; st.progress = '';
     st.toast = okN ? '已核定 ' + okN + ' 人，要改可到完整頁重新核定' : '';
-    st.failLine = bad.length ? '沒有核定成功 ' + bad.length + ' 人：' + bad.join('、') : '';
+    st.failLine = (bad.length ? '沒有核定成功 ' + bad.length + ' 人：' + bad.join('、') : '') + (halted ? (bad.length ? '。' : '') + '連線不穩，後面的人先停下，請看過再按一次' : '');
     await afterChange();
   }
   async function act(p, a, extra) {
@@ -201,13 +231,26 @@ export function renderQuick(ctx) {
       const reason = (u.reason || '').trim();
       if (!reason) { u.msg = '請寫退回理由（會原文給同仁看）'; render(); return; }
       st.busy = true; u.msg = ''; render();
-      try {
-        await call('mgr_req_decide', { id: a.reqId, decision: 'reject', reason, store: a.reqStore || undefined });
+      const rejected = () => {
         delete S.dayCache[st.date];
         st.handled.add(String(a.reqId) + '|' + (a.reqStore || ''));
         st.extra.push(p.name + ' 退回單');
         u.rejecting = false; u.reason = ''; u.mismatch = '';
-      } catch (e) { u.msg = '退回沒成功：' + ((e && e.message) || '請再試一次'); }
+      };
+      try {
+        await call('mgr_req_decide', { id: a.reqId, decision: 'reject', reason, store: a.reqStore || undefined });
+        rejected();
+      } catch (e) {
+        u.msg = '退回沒成功：' + ((e && e.message) || '請再試一次');
+        if (uncertain(e)) {                                   // 逾時：先重讀，單子已不在待審＝其實退回成功
+          try {
+            const fate = await reqFate(a.reqId, a.reqStore, st.date);
+            if (fate === 'gone') { rejected(); u.msg = ''; }
+            else u.msg = fate === 'approved' ? '這張單已被核准，沒有退回，請重新載入頁面再看' : '回應逾時，已重新讀取：沒有退回，可以再按一次';
+          }
+          catch (e2) { u.msg = '連線有問題，無法確認有沒有退回，請重新載入頁面再看'; }
+        }
+      }
       st.busy = false;
       return afterChange();
     }
@@ -221,12 +264,16 @@ export function renderQuick(ctx) {
       if (needA) body.start = u.pa; if (needB) body.end = u.pb;
       st.busy = true; render();
       try { const res = await call('mgr_req_proxy', body); u.proxied = res.summary || '已代開'; u.proxyOpen = false; u.msg = ''; }
-      catch (e) { u.msg = '代開失敗：' + ((e && e.message) || '請再試一次'); }
+      catch (e) {
+        if (uncertain(e)) { u.proxyMaybe = true; u.proxyOpen = false; u.msg = '回應逾時，這張單可能已送出。請先到「申請審核」確認，不要重複代開'; }      // 代開人看不到送總監的單，無法重讀確認：收掉按鈕避免重複開單
+        else u.msg = '代開失敗：' + ((e && e.message) || '請再試一次');
+      }
       st.busy = false; return render();
     }
     // 核定（照班表／照打卡／核准單）
     if (a.askReason && !(extra && extra.reason)) { u.ask = a.id; u.msg = ''; render(); return; }
     st.busy = true; st.toast = ''; u.msg = ''; render();
+    if (!(await freshEnough([p]))) { st.busy = false; return render(); }
     try {
       await approveOne(p, a, extra && extra.reason);
       st.busy = false;
@@ -268,7 +315,17 @@ export function renderQuick(ctx) {
       delete S.dayCache[it.date];
       st.handled.add(k);
       st.extra.push(it.name + (decision === 'approve' ? ' 核准' : ' 退回') + ' ' + C.REQ_KIND_LABEL[it.kind] + '單');
-    } catch (e) { st.reqMsg[k] = '沒有成功：' + ((e && e.message) || '請再試一次'); }
+    } catch (e) {
+      st.reqMsg[k] = '沒有成功：' + ((e && e.message) || '請再試一次');
+      if (uncertain(e)) {                                     // 逾時：先重讀，單子已不在待審＝其實處理成功
+        try {
+          const fate = await reqFate(it.id, it.store, it.date);
+          if (fate === (decision === 'approve' ? 'approved' : 'gone')) { st.handled.add(k); st.reqMsg[k] = ''; st.extra.push(it.name + (decision === 'approve' ? ' 核准' : ' 退回') + ' ' + C.REQ_KIND_LABEL[it.kind] + '單'); }
+          else if (fate === 'pending') st.reqMsg[k] = '回應逾時，已重新讀取：沒有寫入，可以再按一次';
+          else { st.handled.add(k); st.extra.push(it.name + ' 的申請已被處理，結果請到申請審核看'); }
+        } catch (e2) { st.reqMsg[k] = '連線有問題，無法確認有沒有寫入，請重新載入頁面再看'; }
+      }
+    }
     st.busy = false; render();
   }
 
@@ -294,7 +351,7 @@ export function renderQuick(ctx) {
     pend.forEach((it) => c.append(attachEl(it)));
     if (u.proxied) c.append(h('div', 'dq-info', '已代開：' + u.proxied + '。等總監層級在「申請審核」核准後，再回來核定。'));
     if (u.msg) c.append(h('div', 'dq-msg bad', u.msg, { role: 'alert' }));
-    const acts = p.actions.filter((a) => !(u.proxied && a.id === 'proxy'));
+    const acts = p.actions.filter((a) => !((u.proxied || u.proxyMaybe) && a.id === 'proxy'));
     const askA = u.ask ? p.actions.find((a) => a.id === u.ask) : null;
     if (askA) {                                               // 核定和打卡差 30 分鐘以上：選一個原因就完成
       c.append(h('div', 'dq-ask', '和打卡差 30 分鐘以上，選一個原因就完成'));
@@ -416,7 +473,7 @@ export function renderQuick(ctx) {
     if (st.manual && st.date && !s.left && !doneBits.length && !s.readonly.length) root.append(h('div', 'dq-done', '這天沒有要處理的人'));
     if (s.readonly.length) root.append(h('div', 'dq-done', s.readonly.length + ' 人不在你的核定名單（唯讀），請到完整頁看'));
     if (!st.date && !st.failed.length && !st.capped) root.append(h('div', 'dq-alldone', Q.allDoneText(st.skipN)));
-    if (st.capped) root.append(h('div', 'dq-done', '還有更早的日期沒看完，請到完整頁確認'));
+    if (st.capped) root.append(h('div', 'dq-done', '還有更早的日期沒看完，按上方「前一天」繼續'));
 
     // 其他申請：沒有掛在今天卡片上的待審申請
     const onCard = new Set(st.people.filter((p) => ['ok', 'abnormal', 'blocked'].includes(p.status)).map((p) => p.key));

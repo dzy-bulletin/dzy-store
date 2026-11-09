@@ -24,6 +24,7 @@ export function candidateDates(pendItems, today, reqItems) {
 // 標題上的日期：昨天 11/9（一）／前天 11/8（日）／11/6（五）
 export function dayLabel(date, today) {
   const w = C.weekdayLabel(date);
+  if (date === today) return '今天 ' + w;
   if (date === C.addDaysStr(today, -1)) return '昨天 ' + w;
   if (date === C.addDaysStr(today, -2)) return '前天 ' + w;
   return w;
@@ -116,6 +117,32 @@ export function lag(plan, segments) {
   if (s0 == null || e0 == null || fi == null || lo == null) return { late: 0, early: 0 };
   return { late: Math.max(0, norm(fi - s0)), early: Math.max(0, -norm(lo - e0)) };
 }
+/** 分段班段數相同時逐段比：每段的晚到、早退取最大（中間那兩個邊界 lag 看不到） */
+export function segLag(planSegs, segments) {
+  const segs = segsOf({ segments }).filter((x) => x.in && x.out);
+  const r = { late: 0, early: 0 };
+  if (!Array.isArray(planSegs) || planSegs.length !== segs.length) return r;
+  segs.forEach((s, i) => {
+    const a = hm(planSegs[i].start), b = hm(planSegs[i].end), fi = hm(s.in), lo = hm(s.out);
+    if (a == null || b == null || fi == null || lo == null) return;
+    r.late = Math.max(r.late, norm(fi - a)); r.early = Math.max(r.early, -norm(lo - b));
+  });
+  return r;
+}
+/** 申請時段裡有幾分鐘沒被打卡涵蓋（休息帶不算） */
+export function uncoveredMin(rs, re, segs, br) {
+  const len = (((re - rs) % 1440) + 1440) % 1440;
+  const bs = br && C.hasBreak(br) ? hm(br.start) : null, be = br && C.hasBreak(br) ? hm(br.end) : null;
+  const inRange = (t, a, b) => (a <= b ? t >= a && t < b : t >= a || t < b);
+  let n = 0;
+  for (let m = 0; m < len; m++) {
+    const t = (rs + m) % 1440;
+    if (bs != null && be != null && inRange(t, bs, be)) continue;
+    if (!segs.some((s) => { const a = hm(s.in), b = hm(s.out); return a != null && b != null && inRange(t, a, b); })) n++;
+  }
+  return n;
+}
+const periodsCover = (periods, r) => (periods || []).some((p) => p && p.start <= r.start && p.end >= r.end);
 /** 打卡比班表早到／晚走多少分（只算超出的部分，各自 ≥ 0）；plan＝comparePlanOf 的結果 */
 export function overshoot(plan, segments) {
   const segs = segsOf({ segments }).filter((s) => s.in && s.out);
@@ -144,7 +171,10 @@ export function leaveProblem(LO, empId, leaves, date) {
 
 // ---- 申請說明 ----
 const stripDate = (s) => String(s || '').replace(/^\d+\/\d+\s*/, '');
-export const reqLine = (r) => C.REQ_KIND_LABEL[r.kind] + '單：' + stripDate(r.summary) + (r.reason ? '（' + r.reason + '）' : '');
+export const reqLine = (r) => {
+  const head = (C.REQ_KIND_LABEL[r.kind] || '') + '單', sm = stripDate(r.summary);
+  return r.hours_only || !sm ? head : head + '：' + sm + (r.reason ? '（' + r.reason + '）' : '');      // hours_only＝只在工時名單的人只看得到有一張單，沒有內容（伺服器 duty.js 最小列）
+};
 const missUsed = (periods, r) => {
   const has = (f) => periods.some(f);
   if (r.miss_type === 'out') return has((p) => p.end === r.end);
@@ -179,7 +209,9 @@ function classifyRaw(inp) {
   const key = keyOf(emp);
   const base = { key, name: emp.name, empId: emp.emp_id, store: emp.store || '', date, status: '', tag: '', planText: '', punchText: '', note: '', chk: '', hours: null, payload: null, actions: [], skipped: !!skipped, reqId: null };
   if (emp.approved) {
-    if ((inp.reqs || []).some((r) => r.pending)) return Object.assign(base, { status: 'abnormal', tag: '已核定過，有新申請', note: '核定後又有新的申請，要重新核定', actions: [{ id: 'full', label: '到完整頁核對', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
+    const otLate = canHours ? reqs.filter((r) => r.kind === 'ot' && !r.pending && r.start && r.end && !periodsCover(emp.approved.periods, r)) : [];
+    if (otLate.length) return Object.assign(base, { status: 'abnormal', tag: '已核定過，加班單沒算進去', note: '核定後才核准的加班單，要重新核定', actions: [{ id: 'full', label: '到完整頁核對', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
+    if (canHours && reqs.some((r) => r.pending)) return Object.assign(base, { status: 'abnormal', tag: '已核定過，有新申請', note: '核定後又有新的申請，要重新核定', actions: [{ id: 'full', label: '到完整頁核對', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
     return Object.assign(base, { status: 'done', hours: Number(emp.approved.approved_hours) });
   }
 
@@ -201,7 +233,7 @@ function classifyRaw(inp) {
   if (C.leavesOf(emp).length) return full('已有假別記錄', '這天已經記過假別');
   if (reqs.some((r) => r.pending && !r.decidable)) {
     const r = reqs.find((q) => q.pending && !q.decidable);
-    return Object.assign(base, { status: 'blocked', tag: '等上層審核', note: reqLine(r) + ' 要由上層主管審核，審完才能核定', actions: [skip('先跳過，等上層審核')] });
+    return Object.assign(base, { status: 'blocked', tag: '等上層審核', note: (r.hours_only ? '這天有一張' + reqLine(r) + '在審核中，內容你沒有權限看，' : reqLine(r) + ' ') + '要由上層主管審核，審完才能核定', actions: [skip('先跳過，等上層審核')] });
   }
   if (reqs.length > 1) return full('有多張申請', '這天有 ' + reqs.length + ' 張申請');
 
@@ -211,6 +243,10 @@ function classifyRaw(inp) {
   const missTag = () => (!segs.length ? '沒有打卡' : segs.some((s) => !s.out) && segs.some((s) => !s.in) ? '少打卡' : segs.some((s) => !s.out) ? '少下班卡' : '少上班卡');
   const planPeriods = periodsOfPrefill(pv);
   const planHours = hoursOf(planPeriods);
+  if (date === today && pv.mode === 'plan' && inp.nowMin != null) {                      // 今天：最後一段班表結束前一律不核定；跨夜班今天還結束不了
+    const ps = emp.plan.segs, st0 = hm(ps[0].start), en0 = hm(ps[ps.length - 1].end);
+    if (st0 != null && en0 != null && (en0 <= st0 || inp.nowMin < en0)) return Object.assign(base, { status: 'blocked', tag: '今天還沒下班', note: '班表還沒結束，下班後再核定', actions: [skip('先跳過，下班後再核')] });
+  }
 
   // ================= 有一張申請 =================
   if (reqs.length === 1) {
@@ -237,6 +273,8 @@ function classifyRaw(inp) {
       if (!leaves.length) return full('假單內容不明', '');
       const lp = leaveProblem(LO, emp.emp_id, leaves, date);
       if (lp) return full('假別要確認', lp);
+      const lvH = leaves.reduce((a, x) => a + (Number(x.hours) || 0), 0);
+      if (r.kind === 'leave' && lvH > 0 && lvH < planHours - 0.01) return full('只請部分時數又沒打卡', '請假 ' + fmtH(lvH) + ' 小時，班表 ' + fmtH(planHours) + ' 小時，當天沒有打卡，其他時間要自己核對');      // 2026-11-09 Eason：半天假另一半沒來不可一鍵
       periods = [];
       const total = C.tripHoursOfList(leaves);
       const status = r.pending ? 'abnormal' : 'ok';
@@ -253,7 +291,7 @@ function classifyRaw(inp) {
       if (rs == null || re == null) return full('加班單沒有時段', '');
       const offDay = pv.mode === 'off';
       if (!offDay && pv.mode !== 'plan') return full('沒有班表', '有加班單，但沒有班表可以對');
-      if (norm(re - lastOut) > THRESHOLD_MIN || norm(firstIn - rs) > THRESHOLD_MIN) {
+      if (uncoveredMin(rs, re, segs, br) >= THRESHOLD_MIN) {
         return mismatch('打卡 ' + segs[0].in + '–' + segs[segs.length - 1].out + '，沒有涵蓋加班單 ' + r.start + '–' + r.end);
       }
       if (!offDay) {
@@ -297,6 +335,7 @@ function classifyRaw(inp) {
   }
 
   // ================= 沒有申請 =================
+  if (date === today && !complete) return Object.assign(base, { status: 'blocked', tag: '今天還沒下班', note: '打完下班卡再核定', actions: [skip('先跳過，下班後再核')] });      // 主管自己選到今天：還沒打完卡不算缺卡
   const old = date < C.addDaysStr(today, -PROXY_AFTER_DAYS);
   if (!complete && pv.mode === 'plan' && date === C.addDaysStr(today, -1) && inp.nowMin != null && segs.length && segs.every((s) => s.in) && segs.some((s) => !s.out)) {
     const ps0 = emp.plan.segs, st0 = hm(ps0[0].start), en0 = hm(ps0[ps0.length - 1].end);      // 跨夜班昨天上班、現在還沒到下班時間：還在上班，不叫人補單
@@ -340,7 +379,7 @@ function classifyRaw(inp) {
   const planAct = (primary) => ({ id: 'plan', label: '照班表 ' + fmtH(planHours) + ' 小時' + (needReason ? '（選原因）' : ''), primary, hours: planHours, payload: planPayload, askReason: needReason });
   const punchAct = (primary) => ({ id: 'punch', label: '照打卡 ' + fmtH(punchHours) + ' 小時', primary, hours: punchHours, payload: punchPayload, askReason: false });
 
-  const lg = lag(comparePlanOf(emp.plan), segs);
+  const lg = nPlanSegs >= 2 && segs.length === nPlanSegs ? segLag(emp.plan.segs, segs) : lag(comparePlanOf(emp.plan), segs);
   const lateV = Math.max(fl.late, lg.late >= THRESHOLD_MIN ? lg.late : 0), earlyV = Math.max(fl.early, lg.early >= THRESHOLD_MIN ? lg.early : 0);      // 達 15 分鐘就算（compare.js 只在超過 15 才標旗）
   if (lateV || earlyV) {
     if (punchHours > OK_MAX_H) return full('照打卡超過 ' + OK_MAX_H + ' 小時', '照打卡 ' + fmtH(punchHours) + ' 小時，沒有加班單');

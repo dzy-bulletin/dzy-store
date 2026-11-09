@@ -876,6 +876,8 @@ function dutyDo(d, action, b) {
   }
   if (action === 'mgr_req_pending') {
     const items = d.reqs.filter(r => r.status === 'pending').sort((x, y) => (x.created_at < y.created_at ? -1 : 1)).map(r => {
+      // 只在工時名單、不在申請名單的人（e2e 設 d.hoursOnlyEmps＝員編陣列；忘刷單除外）：只回最小列（對照 server/proxy/duty.js hours_only），沒有內容、不能核、不算待辦
+      if (r.kind !== 'miss' && Array.isArray(d.hoursOnlyEmps) && d.hoursOnlyEmps.includes(String(r.emp_id))) return { id: r.id, date: r.date, emp_id: r.emp_id, name: r.name, kind: r.kind, can_decide: false, hours_only: true };
       const o = reqPublic(r); o.attach_id = r.attach_id || '';
       if (r.upper_kind) o.upper_kind = r.upper_kind; if (r.proxy_by) o.proxy_by = r.proxy_by;
       if (b.__person) o.can_decide = !r.upper_kind;      // 個人登入才有（伺服器 duty.js can_decide）：代開的單這個示範主管核不了      // 主管代開的單（mgr_req_proxy）：標代開，只有總監層級核得了

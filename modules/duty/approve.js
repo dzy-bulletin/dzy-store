@@ -573,7 +573,7 @@ function buildCard(emp, date) {
   card.__setExpanded = setExpanded;
 
   // ---- 已核准的申請（2026-10-09，照 manager.html __applyReq）：還沒核定就幫主管預填；已核定過不覆蓋，改給一顆「依申請重新填」。
-  //      預填只是畫面上的值，主管按送出核定才算數（核准申請本身不寫入核定）。加班在上班日只顯示、不預填；
+  //      預填只是畫面上的值，主管按送出核定才算數（核准申請本身不寫入核定）。加班在上班日接在班表後面（2026-11-09）；
   //      班表排休那天（2026-10-29）加班申請的時段就是當天工時 → 依加班申請預填、標「來自加班申請」，並收掉補申請提示。
   card.__applyReq = reqs => {
     if (!reqs || !reqs.length || card.__reqApplied) return;
@@ -582,6 +582,8 @@ function buildCard(emp, date) {
     // 同一種假別兩張（多半一張是舊單）或兩張忘打卡，自動填會互蓋——不自動填，逐張列出給主管選，舊單可作廢。
     const plan = C.reqPlan(reqs), fillables = plan.fillables, multi = plan.multi;
     const otP = offDay ? C.otPeriods(reqs) : [];
+    const workOt = !offDay && pv.mode === 'plan' && !multi ? C.otPeriods(reqs) : [];      // 上班日已核准的加班：和手機一樣接在時段後面（2026-11-09 Eason）
+    const otMissing = workOt.filter(o => !((emp.approved && emp.approved.periods) || []).some(p => p && p.start <= o.start && p.end >= o.end));
     if (offDay && offHint && otP.length) offHint.remove();      // 加班申請沒填時段＝帶不進來，提示留著（2026-10-29 Fable 審查）
     const rbox = h('div', 'du-reqbox' + (emp.approved || multi ? ' warn' : ''));
     if (multi) rbox.append(h('div', 'du-reqlead', '⚠ 這天有 ' + fillables.length + ' 張已核准的申請，其中有同一種的（多半一張是舊單），系統不自動填：請把舊的或重複的按「作廢」，剩下的會自動填好；或按「依這張填」只填那一張。'));
@@ -648,10 +650,12 @@ function buildCard(emp, date) {
           await call('mgr_req_void', { id: r.id, reason: why, date, store: emp.store });
           const rest = reqs.filter(q => q.id !== r.id);
           const wasFilled = (card.__lastFilled || []).includes(r.id);      // 作廢的這張剛才有填進畫面
+          const clearedOt = !!(card.__otRows && card.__otRows.length);     // 自動接上的加班時段先拿掉，再依剩下的申請重建
+          (card.__otRows || []).forEach(n => n.remove()); card.__otRows = []; if (clearedOt) refresh();
           rbox.remove(); if (tag) { tag.remove(); tag = null; }
           card.__reqApplied = false; card.__lastFilled = [];
           card.__applyReq(rest);
-          const stale = wasFilled && !card.__lastFilled.length;           // 剩下的沒有重新填 → 畫面還是作廢那張的內容（2026-10-29 Fable 審查第 5、6 條）
+          const stale = wasFilled && !clearedOt && !card.__lastFilled.length;           // 剩下的沒有重新填 → 畫面還是作廢那張的內容（2026-10-29 Fable 審查第 5、6 條）
           const done = h('div', 'du-reqbox warn du-voided', '已作廢：' + r.summary + (stale ? '。畫面上已經預填的內容沒有清掉，請確認後再送出核定。' : ''));
           periodRows.parentNode.insertBefore(done, periodRows);
           delete S.dayCache[date];
@@ -683,10 +687,19 @@ function buildCard(emp, date) {
         }
       });
       if (lvFill.length) setLeaveLines(lvFill);
+      if (list === fillables && otMissing.length) {
+        const cur = readRows().filter(x => x.start && x.end).map(x => ({ start: x.start, end: x.end }));
+        const add = otMissing.filter(o => !cur.some(c => c.start === o.start && c.end === o.end));
+        if (cur.length && !C.analyzePeriods(cur.concat(add)).warnings.some(w => !/跨夜/.test(w))) {
+          card.__otRows = add.map(p => { const el = periodRow(p, refresh); periodRows.append(el); return el; });
+          card.__lastFilled = card.__lastFilled.concat(reqs.filter(r => r.kind === 'ot').map(r => r.id));
+          if (add.length && !tag) { tag = h('span', 'du-fromreq', '來自加班申請'); periodRows.parentNode.insertBefore(tag, periodRows); }
+        } else if (cur.length) setNote('加班單和班表時段重疊，沒有自動帶入，請自己確認。');
+      }
       refresh();
       if (readOnly) lockBody();
     }
-    const fillable = otP.length > 0 || fillables.length > 0;
+    const fillable = otP.length > 0 || fillables.length > 0 || otMissing.length > 0;
     if (!multi && fillable && emp.approved) {
       const b = h('button', 'du-reqfill', '這天已核定過，依申請重新填', { type: 'button' });
       if (readOnly) b.hidden = true;

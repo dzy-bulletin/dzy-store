@@ -80,7 +80,7 @@ export function setReqBadge(n) {
   window.dispatchEvent(new Event('dzystore-nav'));   // 嵌入管理系統時：頁頂分頁的數字跟著更新（shell.js postNav）
 }
 // 要我處理的待審申請：本人自己送的（伺服器標 self，送上層審核）不算（2026-10-29 Eason 4A）
-export const reqTodo = items => (Array.isArray(items) ? items : []).filter(it => !(it && it.self === true));
+export const reqTodo = items => (Array.isArray(items) ? items : []).filter(it => !(it && (it.self === true || it.hours_only === true)));
 export function refreshReqBadge() {
   if (S.admin && !S.asStore) return;
   if (S.reqAt && Date.now() - S.reqAt < 60000) return setReqBadge(S.reqCount || 0);
