@@ -14,7 +14,9 @@ const SKIP_KEY = 'dzystore_dutyquick_skip';     // 「先跳過」只存在這�
 // 完整頁都只進去這一次，不記住（2026-11-09 Eason：切分頁不該跑回舊畫面）。這個值只有示範模式看：其他 e2e 用它預設停在舊畫面，正式網站不讀
 const e2eFull = () => { if (!MOCK) return false; try { return localStorage.getItem('dzystore_dutyview') === 'full'; } catch (e) { return false; } };
 const skipGet = () => { try { return JSON.parse(sessionStorage.getItem(SKIP_KEY) || '{}') || {}; } catch (e) { return {}; } };
-const skipSet = (k) => { const m = skipGet(); m[k] = 1; try { sessionStorage.setItem(SKIP_KEY, JSON.stringify(m)); } catch (e) {} };
+const skipPut = (m) => { try { sessionStorage.setItem(SKIP_KEY, JSON.stringify(m)); } catch (e) {} };
+const skipSet = (k) => { const m = skipGet(); m[k] = 1; skipPut(m); };
+const skipDel = (keys) => { const m = skipGet(); keys.forEach((k) => delete m[k]); skipPut(m); };
 
 // 這個人、這個畫面能不能用一頁核定：手機寬度、單一門市、不是管理者代看、有核定工時的對象。全部門市與管理者各店總覽維持舊畫面。
 export function quickAvailable(ctx) {
@@ -36,7 +38,7 @@ export function renderQuick(ctx) {
   const todayNow = () => C.taipeiToday();      // 每次用都重算（頁面開過午夜也不會差一天）
   const skipKey = (date, key) => ((ctx.session && ctx.session.code) || '') + '|' + ((S.meta && S.meta.clockStore) || '') + '|' + date + '|' + key;      // 加店別：同一分頁換店，別家同員編的人不會被跳過
   const st = { tok: 0, busy: false, loading: true, error: null, date: null, emps: [], people: [], appr: {}, pending: [], handled: new Set(),
-    failed: [], capped: false, loadedAt: Date.now(), loadedToday: '',
+    failed: [], capped: false, manual: null, skipN: 0, loadedAt: Date.now(), loadedToday: '',
     toast: '', failLine: '', extra: [], progress: '', showReq: false, ui: {}, reqMsg: {}, reqReject: {} };
   const U = (k) => st.ui[k] || (st.ui[k] = {});
   const empOf = (key) => st.emps.find((e) => Q.keyOf(e) === key);
@@ -90,22 +92,23 @@ export function renderQuick(ctx) {
     const tok = ++st.tok;
     st.loading = true; st.error = null; st.ui = {}; render();
     try {
-      const [pend, rq] = await Promise.all([call('mgr_pending_approvals'), call('mgr_req_pending'), loadLeave().catch(() => null)]);
+      const [pend, rq] = await Promise.all([st.manual ? null : call('mgr_pending_approvals'), call('mgr_req_pending'), loadLeave().catch(() => null)]);      // 主管自己選日期時不用找待核定的日子
       if (tok !== st.tok || !live()) return;
       st.pending = Array.isArray(rq && rq.items) ? rq.items : [];
-      st.handled = new Set(); st.date = null; st.emps = []; st.people = []; st.appr = {}; st.extra = []; st.capped = false;
+      st.handled = new Set(); st.date = null; st.emps = []; st.people = []; st.appr = {}; st.extra = []; st.capped = false; st.skipN = 0;
       st.loadedAt = Date.now(); st.loadedToday = todayNow();
       const failedAll = [].concat((pend && pend.failed) || [], (rq && rq.failed) || []);
       const wr = (it) => canWriteRow('hours', it.emp_id, it.store);      // 先依可核工時權限過濾再找日期（唯讀的人不佔名額）
       const dates = Q.candidateDates(((pend && pend.items) || []).filter(wr), todayNow(), st.pending.filter((it) => it.self !== true && wr(it)));
       let n = 0;
-      for (const date of dates) {
+      for (const date of (st.manual ? [st.manual] : dates)) {
         if (++n > Q.MAX_DATES) { st.capped = true; break; }
         const day = await readDay(date);
         if (tok !== st.tok || !live()) return;
         failedAll.push(...day.failed);
         st.date = date; st.emps = day.emps; st.appr = day.appr; recompute();
-        if (secs().left > 0) break;
+        if (st.manual || secs().left > 0) break;
+        st.skipN += secs().skipped.length;
         st.date = null; st.emps = []; st.people = [];
       }
       st.failed = failedAll.filter((f, i, a) => a.findIndex((x) => x.store === f.store) === i);      // 任一讀取有門市讀不到：不可一鍵、不可顯示完成
@@ -118,7 +121,24 @@ export function renderQuick(ctx) {
   // 這天都處理完了 → 自動換下一天
   async function afterChange() {
     recompute();
-    if (st.date && secs().left === 0) await load(); else render();
+    if (st.date && secs().left === 0) { st.manual = null; await load(); } else render();
+  }
+
+  // 主管自己選日期（前一天／後一天）：只到昨天；這天處理完回到自動找下一個待處理的日子
+  const yesterday = () => C.addDaysStr(todayNow(), -1);
+  function gotoDate(date) { st.manual = date; st.toast = ''; st.failLine = ''; load(); }
+  function backToAuto() { st.manual = null; st.toast = ''; st.failLine = ''; load(); }
+  function navEl() {
+    const cur = st.manual || st.date || todayNow();
+    const off = st.busy || (st.loading && !st.manual);
+    const nav = h('div', 'dq-nav');
+    const prev = btn('dq-navb', '‹ 前一天', () => gotoDate(C.addDaysStr(cur, -1)), { id: 'dqPrev' });
+    const next = btn('dq-navb', '後一天 ›', () => gotoDate(C.addDaysStr(cur, 1)), { id: 'dqNext' });
+    prev.disabled = off; next.disabled = off || cur >= yesterday();
+    nav.append(prev);
+    if (st.manual) { const b = btn('dq-navb', '回待處理', backToAuto, { id: 'dqAuto' }); b.disabled = st.busy; nav.append(b); }
+    nav.append(next);
+    return nav;
   }
 
   // ---------- 動作 ----------
@@ -372,7 +392,7 @@ export function renderQuick(ctx) {
     const head = h('div', 'dq-head');
     const hl = h('div'); hl.append(h('div', 'dq-store', (S.meta && S.meta.label) || (ctx.session && ctx.session.name) || ''), h('div', 'dq-title', st.date ? Q.dayLabel(st.date, todayNow()) : '考勤管理'));
     head.append(hl, h('div', 'dq-left', st.date && s ? '還剩 ' + s.left + ' 人' : ''));
-    root.append(head);
+    root.append(head, navEl());
     if (st.loading) { root.append(h('div', 'card du-center', '載入中…', { id: 'dqLoading' })); return; }
     if (st.error) { const c = h('div', 'card'); root.append(c); failBar(c, '考勤資料', st.error, load); return; }
 
@@ -392,8 +412,10 @@ export function renderQuick(ctx) {
     if (s.blocked.length) { root.append(h('div', 'dq-sec muted', '現在不能核定 ' + s.blocked.length + ' 人')); s.blocked.forEach((p) => root.append(cardEl(p))); }
     const doneBits = s.done.map((p) => p.name + ' ' + C.round2(p.hours) + ' 小時').concat(s.skipped.map((p) => p.name + ' 先跳過'), st.extra);
     if (doneBits.length) root.append(h('div', 'dq-done', '已處理：' + doneBits.join('、')));
+    if (s.skipped.length) root.append(btn('dq-unskip', '取消跳過 ' + s.skipped.length + ' 人，重新顯示', () => { skipDel(s.skipped.map((p) => skipKey(st.date, p.key))); recompute(); render(); }));
+    if (st.manual && st.date && !s.left && !doneBits.length && !s.readonly.length) root.append(h('div', 'dq-done', '這天沒有要處理的人'));
     if (s.readonly.length) root.append(h('div', 'dq-done', s.readonly.length + ' 人不在你的核定名單（唯讀），請到完整頁看'));
-    if (!st.date && !st.failed.length && !st.capped) root.append(h('div', 'dq-alldone', Q.allDoneText()));
+    if (!st.date && !st.failed.length && !st.capped) root.append(h('div', 'dq-alldone', Q.allDoneText(st.skipN)));
     if (st.capped) root.append(h('div', 'dq-done', '還有更早的日期沒看完，請到完整頁確認'));
 
     // 其他申請：沒有掛在今天卡片上的待審申請

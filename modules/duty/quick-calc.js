@@ -179,7 +179,7 @@ function classifyRaw(inp) {
   const key = keyOf(emp);
   const base = { key, name: emp.name, empId: emp.emp_id, store: emp.store || '', date, status: '', tag: '', planText: '', punchText: '', note: '', chk: '', hours: null, payload: null, actions: [], skipped: !!skipped, reqId: null };
   if (emp.approved) {
-    if ((inp.reqs || []).some((r) => r.pending)) return Object.assign(base, { status: 'abnormal', tag: '已核定過，有新申請', note: '核定後又有新的申請，要重新核定', actions: [{ id: 'full', label: '到完整頁核對', primary: true }] });
+    if ((inp.reqs || []).some((r) => r.pending)) return Object.assign(base, { status: 'abnormal', tag: '已核定過，有新申請', note: '核定後又有新的申請，要重新核定', actions: [{ id: 'full', label: '到完整頁核對', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
     return Object.assign(base, { status: 'done', hours: Number(emp.approved.approved_hours) });
   }
 
@@ -192,7 +192,7 @@ function classifyRaw(inp) {
   if (absent && !reqs.length) return Object.assign(base, { status: 'absent' });
   if (!canHours) return Object.assign(base, { status: 'readonly' });
 
-  const full = (tag, note) => Object.assign(base, { status: 'abnormal', tag, note: note || '', actions: [{ id: 'full', label: '到完整頁核對', primary: true }] });
+  const full = (tag, note) => Object.assign(base, { status: 'abnormal', tag, note: note || '', actions: [{ id: 'full', label: '到完整頁核對', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });      // 手機上做不完的人可以先跳過，不擋更早的日子（2026-11-09 Eason）
   const skip = (label) => ({ id: 'skip', label: label || '先跳過', primary: false });
   const fullAct = { id: 'full', label: '到完整頁核對', primary: false };
   const payloadOf = (periods, leaves) => ({ periods, leaves: leaves || [], late_min: '' });
@@ -368,22 +368,23 @@ export function classify(inp) {
   const hs = [res.hours].concat((res.actions || []).map((a) => a.hours)).filter((h) => h != null);
   const bad = sends.some((x) => !periodsOk(x.periods)) || hs.some((h) => !isFinite(h) || h < 0 || h > MAX_SEND_H);
   if (bad && (res.status === 'ok' || res.status === 'abnormal')) {
-    return Object.assign(res, { status: 'abnormal', tag: '時數要核對', note: '算出來的時段或時數不合理', chk: '', hours: null, payload: null, actions: [{ id: 'full', label: '到完整頁核對', primary: true }] });
+    return Object.assign(res, { status: 'abnormal', tag: '時數要核對', note: '算出來的時段或時數不合理', chk: '', hours: null, payload: null, actions: [{ id: 'full', label: '到完整頁核對', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
   }
   return res;
 }
 
 /** 畫面上沒有待辦時的文字：月初（1～7 日）清單只有本月，上個月沒核定的看不到，不能說都核定完了 */
-export function allDoneText() {
+export function allDoneText(skipN) {
+  if (skipN > 0) return '還有 ' + skipN + ' 人先跳過、沒有核定。按上方「前一天」回到那天，再按「取消跳過」就能處理';
   return '本月都核定完了，上個月未核定請到完整頁確認';      // 只讀得到本月，不宣稱全部完成
 }
 
-/** 把一整天的人分成畫面上的幾區（skipped 的 blocked 不算「還剩」） */
+/** 把一整天的人分成畫面上的幾區（先跳過的 blocked 與只能到完整頁的異常不算「還剩」） */
 export function sections(people) {
   const s = { ok: [], abnormal: [], blocked: [], skipped: [], done: [], readonly: [] };
   (people || []).forEach((p) => {
     if (p.status === 'ok') s.ok.push(p);
-    else if (p.status === 'abnormal') s.abnormal.push(p);
+    else if (p.status === 'abnormal') (p.skipped && (p.actions || []).some((a) => a.id === 'skip') ? s.skipped : s.abnormal).push(p);
     else if (p.status === 'blocked') (p.skipped ? s.skipped : s.blocked).push(p);
     else if (p.status === 'done') s.done.push(p);
     else if (p.status === 'readonly') s.readonly.push(p);
