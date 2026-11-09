@@ -98,13 +98,20 @@ export function renderApprove(ctx) {
     if (stale) { drawDay(want, stale, [], true); markStale(); }
     else box.innerHTML = '<div class="card du-center" id="duLoading">載入中…</div>';
     const body = dateOverride ? { date: dateOverride } : {};
-    Promise.all([dayRead(body), wait]).then(([r]) => {
+    let gateDone = !gate;                 // 假別額度還沒到：名單先畫出來看，但不能按（2026-11-09 Eason：考勤選店後等太久）
+    if (gate) wait.then(() => { gateDone = true; });
+    dayRead(body).then(r => {
       if (tok !== S.dayTok || !live()) return;
       unStale();
       const failed = r.failed || [];          // 單一門市也可能有：總部那組併進來的別家讀不到（不快取、顯示提示）
       if (!S.all) S.elsewhere = Array.isArray(r.elsewhere) ? r.elsewhere : [];      // 捷徑卡（歸屬這組、在別家打卡的人）不隨日期變，快取的日子沿用
       if (!failed.length) { if (cacheable(r.date)) S.dayCache[r.date] = r.employees; else S.recent[r.date] = r.employees; }
-      drawDay(r.date, r.employees, failed); prefetch(r.date);
+      if (!gateDone) { drawDay(r.date, r.employees, failed, true); markStale('假別額度還在讀取，讀到後就可以核定…'); }
+      return wait.then(() => {            // 卡片的假別清單與額度檢查要用額度：到了才重畫成可操作的卡片，額度硬擋不會被繞過
+        if (tok !== S.dayTok || !live()) return;
+        unStale();
+        drawDay(r.date, r.employees, failed); prefetch(r.date);
+      });
     }, e => {
       if (tok !== S.dayTok || !live()) return;
       unStale();
@@ -113,9 +120,9 @@ export function renderApprove(ctx) {
     });
   }
   function unStale() { box.classList.remove('du-stale'); box.inert = false; box.removeAttribute('aria-busy'); }
-  function markStale() {
+  function markStale(text) {
     box.classList.add('du-stale'); box.inert = true; box.setAttribute('aria-busy', 'true');   // inert：鍵盤也按不到（2026-11-02 審查）
-    box.prepend(h('div', 'du-stale-note', '先顯示上次看到的資料，正在更新…', { id: 'duStale' }));
+    box.prepend(h('div', 'du-stale-note', text || '先顯示上次看到的資料，正在更新…', { id: 'duStale' }));
   }
   function drawDay(date, employees, failed, quick) {
     S.date = date; dateIn.value = date;

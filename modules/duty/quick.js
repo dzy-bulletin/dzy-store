@@ -105,7 +105,8 @@ export function renderQuick(ctx) {
     const tok = ++st.tok;
     st.loading = true; st.error = null; st.ui = {}; render();
     try {
-      const [pend, rq] = await Promise.all([st.manual ? null : call('mgr_pending_approvals'), call('mgr_req_pending'), loadLeave().catch(() => null)]);      // 主管自己選日期時不用找待核定的日子
+      const leaveReady = loadLeave().catch(() => null);          // 不等額度才去抓名單；分類前（下面 readDay 那裡）才要到齊
+      const [pend, rq] = await Promise.all([st.manual ? null : call('mgr_pending_approvals'), call('mgr_req_pending')]);      // 主管自己選日期時不用找待核定的日子
       if (tok !== st.tok || !live()) return;
       st.pending = Array.isArray(rq && rq.items) ? rq.items : [];
       st.handled = new Set(); st.date = null; st.emps = []; st.people = []; st.appr = {}; st.extra = []; st.capped = false; st.skipN = 0;
@@ -116,7 +117,7 @@ export function renderQuick(ctx) {
       let n = 0;
       for (const date of (st.manual ? [st.manual] : dates)) {
         if (++n > Q.MAX_DATES) { st.capped = true; break; }
-        const day = await readDay(date);
+        const [day] = await Promise.all([readDay(date), leaveReady]);
         if (tok !== st.tok || !live()) return;
         failedAll.push(...day.failed);
         st.date = date; st.emps = day.emps; st.appr = day.appr; recompute();

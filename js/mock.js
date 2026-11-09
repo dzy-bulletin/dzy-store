@@ -210,6 +210,9 @@ function route(method, p, q, b, token) {
       const w = window; w.__dutyInflight = (w.__dutyInflight || 0) + 1; w.__dutyMax = Math.max(w.__dutyMax || 0, w.__dutyInflight);
       return new Promise(res => setTimeout(() => { try { res(duty(m[2], mx, s, b)); } finally { w.__dutyInflight--; } }, w.__dutyDelay));
     }
+    if (m[1] === 'duty' && window.__dutyDelays && window.__dutyDelays[m[2]]) {      // e2e：指定動作拖慢（驗名單先顯示）
+      return new Promise(res => setTimeout(() => res(duty(m[2], mx, s, b)), window.__dutyDelays[m[2]]));
+    }
     if (m[1] === 'duty') return duty(m[2], mx, s, b);
     if (m[1] === 'transfer') return transferMock(m[2], mx, b, db);
     if (m[1] === 'inventory') return invMock(m[2], mx, b, db);
