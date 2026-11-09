@@ -246,9 +246,9 @@ export function checkPeriod(ctx) {
       if (!t || told) continue;
       if (t.kind === 'ft' && run >= 13) { add('F6', 'block', e, d, `${who} 到 ${md(d)} 已連續上班 ${run} 天，最多 12 天`); told = true; }
       if (t.kind === 'pt' && run >= 7) { add('P3', 'block', e, d, `${who} 到 ${md(d)} 已連續上班 ${run} 天，一定要休一天`); told = true; }
-      // 計時連上第 6 天：這天算休息日加班。已經排成「休息日出勤」的由 P2 提醒，這裡只提醒還排成一般工作日的
+      // 計時連上第 6 天：T02 起不論工作日或休息日出勤，有班就擋（Eason 2026-11-09）；T02 前照舊，已排成「休息日出勤」的由 P2 提醒，這裡只提醒還排成一般工作日的
       if (t.kind === 'ft' && run >= 7 && run <= 12 && start >= RULES5_FROM && !reviewed) { add('F9', 'warn', e, d, `${who} 到 ${md(d)} 連續上班 ${run} 天，7～12 天要部門主管覆核，鎖定時要確認已取得同意`); reviewed = true; }
-      if (t.kind === 'pt' && run === PT_OT_RUN && mine[d] && mine[d].day_type === 'W' && start >= RULES5_FROM) { add('P8', 'block', e, d, `${who} 到 ${md(d)} 連排 ${run} 天，計時最多連排 5 天（第 6 天只能排成休息日出勤）`); continue; }
+      if (t.kind === 'pt' && run === PT_OT_RUN && mine[d] && mine[d].shift_id && start >= RULES5_FROM) { add('P8', 'block', e, d, `${who} 到 ${md(d)} 連排 ${run} 天，計時最多連排 5 天（休息日出勤也算有排班）`); continue; }
       if (t.kind === 'pt' && run === PT_OT_RUN && mine[d] && mine[d].day_type === 'W') add('P7', 'warn', e, d, `${who} ${md(d)} 是連續上班第 ${PT_OT_RUN} 天，這天算休息日加班（要付加班費）：請改成「班別（休息日出勤）」`);
     }
 
@@ -324,11 +324,11 @@ export function checkPeriod(ctx) {
       if (cap != null && total > cap) add('P6', 'warn', e, end, `${who} 這期排了 ${hm(total)}，超過上限 ${hm(cap)}`);
     }
 
-    // 計時每 7 天至少 2 天沒排班（1-13）：休息日出勤不算進這 5 天
+    // 計時每 7 天至少 2 天沒排班（1-13）：休息日出勤也算有排班（Eason 2026-11-09）
     if (start >= RULES5_FROM && t0 && t0.kind === 'pt') {
       for (const d of inPeriod) {
         let n = 0;
-        for (let i = 0; i < 7; i++) { const c = (ctx.days[e] || {})[addDays(d, -i)]; if (c && c.shift_id && c.day_type === 'W') n++; }
+        for (let i = 0; i < 7; i++) { const c = (ctx.days[e] || {})[addDays(d, -i)]; if (c && c.shift_id) n++; }
         if (n > 5) { add('P9', 'block', e, d, `${who} 到 ${md(d)} 前 7 天排了 ${n} 天班，每 7 天至少要 2 天沒排班`); break; }
       }
     }
