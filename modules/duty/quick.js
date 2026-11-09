@@ -44,17 +44,18 @@ export function renderQuick(ctx) {
   const empOf = (key) => st.emps.find((e) => Q.keyOf(e) === key);
 
   // ---------- 資料 ----------
-  function reqsFor(emp) {
+  function reqsFor(emp, date, approved) {
     const key = Q.keyOf(emp);
-    const appr = (st.appr[key] || []).map((r) => Object.assign({}, r, { pending: false, decidable: true }));
-    const pend = st.pending.filter((it) => it.date === st.date && Q.keyOf(it) === key && !st.handled.has(hid(it)))
+    const appr = ((approved && approved[key]) || []).map((r) => Object.assign({}, r, { pending: false, decidable: true }));
+    const pend = st.pending.filter((it) => it.date === date && Q.keyOf(it) === key && !st.handled.has(hid(it)))
       .map((it) => Object.assign({}, it, { pending: true, decidable: Q.reqDecidable(it, canWriteRow) }));
     return appr.concat(pend);
   }
-  function classifyOne(emp) {
-    const key = Q.keyOf(emp), u = U(key);
-    const p = Q.classify({ emp, date: st.date, today: todayNow(), nowMin: taipeiMin(), brk: brk(emp.store), LO: leaveFor(emp.store), canHours: canWriteRow('hours', emp.emp_id, emp.store),
-      reqs: reqsFor(emp), skipped: !!skipGet()[skipKey(st.date, key)], mismatch: u.mismatch || '', person: !!(ctx.session && ctx.session.person) });
+  function classifyAt(emp, date, approved, u) {
+    const key = Q.keyOf(emp);
+    u = u || {};
+    const p = Q.classify({ emp, date, today: todayNow(), nowMin: taipeiMin(), brk: brk(emp.store), LO: leaveFor(emp.store), canHours: canWriteRow('hours', emp.emp_id, emp.store),
+      reqs: reqsFor(emp, date, approved), skipped: !!skipGet()[skipKey(date, key)], mismatch: u.mismatch || '', person: !!(ctx.session && ctx.session.person) });
     if (p.status === 'ok' && u.failed) {                      // 一鍵核定沒成功的人：回到異常區
       const main = Object.assign({}, p.actions[0] || { id: 'plan', hours: p.hours, payload: p.payload });
       main.primary = true; main.askReason = !!u.failedDiff; main.label = '再核定一次 ' + C.round2(p.hours) + ' 小時' + (u.failedDiff ? '（選原因）' : '');
@@ -62,6 +63,8 @@ export function renderQuick(ctx) {
     }
     return p;
   }
+  function classifyOne(emp) { return classifyAt(emp, st.date, st.appr, U(Q.keyOf(emp))); }
+  function peopleFor(date, day) { return day.emps.map((emp) => classifyAt(emp, date, day.appr, null)); }
   function recompute() { st.people = st.emps.map(classifyOne); }
   const secs = () => Q.sections(st.people);
 
@@ -114,17 +117,22 @@ export function renderQuick(ctx) {
       const failedAll = [].concat((pend && pend.failed) || [], (rq && rq.failed) || []);
       const wr = (it) => canWriteRow('hours', it.emp_id, it.store);      // 先依可核工時權限過濾再找日期（唯讀的人不佔名額）
       const dates = Q.candidateDates(((pend && pend.items) || []).filter(wr), todayNow(), st.pending.filter((it) => it.self !== true && wr(it)));
-      let n = 0;
-      for (const date of (st.manual ? [st.manual] : dates)) {
-        if (++n > Q.MAX_DATES) { st.capped = true; break; }
-        const [day] = await Promise.all([readDay(date), leaveReady]);
+      const scanDates = st.manual ? [st.manual] : dates.slice(0, Q.MAX_DATES);
+      let selected = null;
+      for (let from = 0; from < scanDates.length; from += Q.READ_BATCH_DAYS) {
+        const batchDates = scanDates.slice(from, from + Q.READ_BATCH_DAYS);
+        const [batch] = await Promise.all([Promise.all(batchDates.map((date) => readDay(date).then((day) => ({ date, day }), (error) => ({ date, error })))), leaveReady]);
         if (tok !== st.tok || !live()) return;
-        failedAll.push(...day.failed);
-        st.date = date; st.emps = day.emps; st.appr = day.appr; recompute();
-        if (st.manual || secs().left > 0) break;
-        st.skipN += secs().skipped.length;
-        st.date = null; st.emps = []; st.people = [];
+        const ready = batch.map((x) => (x.error ? x : Object.assign(x, { people: peopleFor(x.date, x.day) })));
+        const choice = Q.selectDateResult(ready.map((x) => (x.error ? { error: x.error } : Q.sections(x.people))), !!st.manual);
+        if (choice.error) throw choice.error;
+        ready.slice(0, choice.consumed).forEach((x) => failedAll.push(...x.day.failed));
+        st.skipN += choice.skipN;
+        if (choice.index >= 0) { selected = ready[choice.index]; break; }
       }
+      if (selected) {
+        st.date = selected.date; st.emps = selected.day.emps; st.appr = selected.day.appr; st.people = selected.people;
+      } else if (!st.manual && dates.length > scanDates.length) st.capped = true;
       st.failed = failedAll.filter((f, i, a) => a.findIndex((x) => x.store === f.store) === i);      // 任一讀取有門市讀不到：不可一鍵、不可顯示完成
       st.loading = false; render();
     } catch (e) {

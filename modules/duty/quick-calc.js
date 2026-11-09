@@ -9,6 +9,7 @@ export const DIFF_MIN = 30;          // 核定和打卡差達這個分鐘數，�
 export const PROXY_AFTER_DAYS = 7;   // 超過 7 天同仁自己補不了單，才給主管代開（同 approve.js）
 export const REASONS = ['臨時調班', '主管同意', '打卡機問題'];   // 另有「其他」自己填
 export const MAX_DATES = 10;         // 一次最多往前找幾天，避免卡很久
+export const READ_BATCH_DAYS = 3;    // 自動找日期時，每批最多同時讀幾天
 
 export const keyOf = (o) => (o && o.store ? o.store + '|' : '') + String(o && o.emp_id);      // 同 state.js rowKey
 
@@ -20,6 +21,24 @@ export function candidateDates(pendItems, today, reqItems) {
   (Array.isArray(pendItems) ? pendItems : []).concat(Array.isArray(reqItems) ? reqItems : []).forEach((it) => { if (it && typeof it.date === 'string' && it.date < today) set.add(it.date); });
   set.add(C.addDaysStr(today, -1));
   return [...set].sort().reverse();
+}
+/**
+ * 一批日期（近到遠）都分類完後，選最近一個還有人要處理的日子。
+ * 只回傳選定日以前（較近日期）的跳過人數與採計筆數，讓較舊但已並行讀回的資料不影響 failed／skipN。
+ * 手動選日期時固定取唯一一筆，不因為 left=0 而略過。
+ * 某天整天讀不到（{ error }）：只有輪到那天才回傳 error，等同原本逐天讀時會停在那天。
+ */
+export function selectDateResult(days, manual) {
+  const list = Array.isArray(days) ? days : [];
+  if (manual && !(list[0] && list[0].error)) return { index: list.length ? 0 : -1, skipN: 0, consumed: list.length ? 1 : 0 };
+  let skipN = 0;
+  for (let i = 0; i < list.length; i++) {
+    if (list[i] && list[i].error) return { index: -1, skipN, consumed: i, error: list[i].error };      // 依序走到讀失敗的那天才算錯；選定日更舊的日子失敗不影響結果
+    if (Number(list[i] && list[i].left) > 0) return { index: i, skipN, consumed: i + 1 };
+    const skipped = list[i] && list[i].skipped;
+    skipN += Array.isArray(skipped) ? skipped.length : Math.max(0, Number(skipped) || 0);
+  }
+  return { index: -1, skipN, consumed: list.length };
 }
 // 標題上的日期：昨天 11/9（一）／前天 11/8（日）／11/6（五）
 export function dayLabel(date, today) {
