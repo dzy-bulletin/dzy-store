@@ -427,7 +427,7 @@ export function renderQuick(ctx) {
     if (u.proxyOpen) {
       const a = p.actions.find((x) => x.id === 'proxy');
       const box = h('div', 'dq-proxy');
-      box.append(h('div', 'dq-ask', '這天已超過 7 天，同仁自己補不了單。代開的單要由總監層級核准。'));
+      box.append(h('div', 'dq-ask', '同仁自己補不了單（超過 7 天或沒綁 LINE）。代開的單要由總監層級核准。'));
       const mk = (cls, label, key) => { const w = h('label', 'dq-tm'); w.append(h('span', null, label)); const i = h('input', cls, null, { type: 'time' }); i.value = u[key] || ''; i.oninput = () => { u[key] = i.value; }; w.append(i); return w; };
       if (a && a.missType !== 'out') box.append(mk('dq-pa', a.missType === 'both' ? '實際上班' : '補上班卡', 'pa'));
       if (a && a.missType !== 'in') box.append(mk('dq-pb', a.missType === 'both' ? '實際下班' : '補下班卡', 'pb'));

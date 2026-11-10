@@ -810,6 +810,7 @@ function dutyDo(d, action, b) {
       const out = { emp_id: r.emp_id, name: r.name, segments: f.segs.map(x => ({ ...x })), reference: f.ref, attempts: f.attempts || 0,
         ...leaveOut(d.leave[date + r.emp_id]), shift_in: f.shift[0], shift_out: f.shift[1],
         plan: (d.plans && d.plans[r.emp_id]) || null };
+      if (r.no_line) out.no_line = true;                // 打卡端 mgr_day 帶的「沒綁 LINE」（2026-11-10）
       const a = d.approved[date + r.emp_id]; if (a) out.approved = { ...a };
       if (f.dup) {                                      // 重複打卡（2026-11-06）：打卡後端回 dup_groups；認定後打卡段改成合併後的那份（f.dup_segs／dup_ref）
         out.dup_groups = f.dup.map(g => ({ type: g.type, cards: g.cards.map(c => ({ ...c })) }));

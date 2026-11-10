@@ -58,13 +58,14 @@ export function segmentText(s) { return (s.in || '？') + '–' + (s.out || '？
 // manager.html:916–919
 // 第二個參數（2026-11-10 Eason）：出差、全天請假、忘刷卡有已核准的申請單，內容和核定時數都對得上＝正常（綠色）；沒傳或對不上維持 warn
 const LEAVE_ONLY_STATUS = ['出差', '全天請假'];
-const missCardsOf = p => (p === '上班忘刷卡' || p === '下班忘刷卡' || /^第.+段(上班|下班)無打卡$/.test(p)) ? 1 : p === '該段無打卡' ? 2 : 0;
+// 每項狀態代表漏幾張卡，和打卡端補單張數同一口徑（2026-11-10）：單張忘刷、第N段某張沒打各 1 張；整天沒打卡＝每段 2 張
+const missCardsOf = (p, nPeriods) => (/^(第.+段)?(上班|下班)忘刷卡$/.test(p) || /^第.+段(上班|下班)無打卡$/.test(p)) ? 1 : p === '該段無打卡' ? 2 * Math.max(1, nPeriods || 1) : 0;
 export function badgeClass(statusText, day) {
   if (!statusText || statusText === '正常') return 'normal';
   const parts = String(statusText).split('、').map(s => s.trim()).filter(Boolean);
   if (!day || !parts.length || !parts.every(p => LEAVE_ONLY_STATUS.includes(p) || missCardsOf(p))) return 'warn';
   const needLeave = parts.some(p => LEAVE_ONLY_STATUS.includes(p)) || (day.leaves || []).length > 0;
-  const needCards = parts.reduce((a, p) => a + missCardsOf(p), 0);
+  const needCards = parts.reduce((a, p) => a + missCardsOf(p, (day.periods || []).length), 0);
   return (!needLeave || leavesMatchReqs(day)) && (!needCards || missMatchesReqs(day, needCards)) ? 'normal' : 'warn';
 }
 /** 已核准的忘打卡單補足缺的卡，補的時間在核定時段頭尾 15 分鐘內，核定時數也對得上。 */

@@ -376,13 +376,15 @@ function classifyRaw(inp) {
     const lackIn = segs.some((s) => !s.in), lackOut = segs.some((s) => !s.out);
     const proxy = !segs.length ? 'both' : lackIn && lackOut ? '' : lackOut ? 'out' : 'in';
     const ps = pv.mode === 'plan' ? emp.plan.segs : null;
-    Object.assign(base, { status: 'blocked', tag, note: old ? '超過 7 天，同仁自己補不了單，可以由主管代開' : '請同仁到 LINE 補忘打卡單' });
-    if (old && proxy && !inp.person) {
-      base.note = '超過 7 天；代開要用個人帳號登入（門市帳號不能代開）';
+    const noLine = !!emp.no_line && date <= today;            // 沒綁 LINE（打卡端 mgr_day 帶）：7 天內也能代開（2026-11-10）
+    const canProxy = old || noLine;
+    Object.assign(base, { status: 'blocked', tag, note: old ? '超過 7 天，同仁自己補不了單，可以由主管代開' : noLine ? '同仁沒綁 LINE，自己補不了單，可以由主管代開' : '請同仁到 LINE 補忘打卡單' });
+    if (canProxy && proxy && !inp.person) {
+      base.note = (old ? '超過 7 天' : '同仁沒綁 LINE') + '；代開要用個人帳號登入（門市帳號不能代開）';
       base.actions = [fullAct, skip('先跳過')];
-    } else if (old && proxy) {
+    } else if (canProxy && proxy) {
       base.actions = [{ id: 'proxy', label: '主管代開忘打卡單', primary: true, missType: proxy, defStart: ps ? ps[0].start : '', defEnd: ps ? ps[ps.length - 1].end : '' }, skip('先跳過')];
-    } else if (old) base.actions = [fullAct, skip('先跳過')];
+    } else if (canProxy) base.actions = [fullAct, skip('先跳過')];
     else {
       if (inp.person) base.note = '請同仁到 LINE 補忘打卡單；同仁沒綁 LINE，請到完整頁代開';      // 這裡不知道誰沒綁，完整頁送出時打卡端會判斷（2026-11-09）
       base.actions = inp.person ? [skip('先跳過，等同仁補單'), fullAct] : [skip('先跳過，等同仁補單')];
