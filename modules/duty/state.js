@@ -1,6 +1,7 @@
 // 出勤核定：四個分頁共用的狀態與呼叫。換了登入就整包重來（不留上一個人的資料）。
 import { api } from '../../js/api.js';
 import { getSession } from '../../js/auth.js';
+import { reqDecidable } from './quick-calc.js';
 
 const FLAG = 'dzystore_dutyok';
 // 管理者（2026-10-11 Eason：看得到所有門市、也能代核）：asStore＝正在看的門市代號，每次呼叫自動帶上；stores＝各店總覽讀到的門市清單。
@@ -84,8 +85,13 @@ export function setReqBadge(n) {
   if (n > 0) { const i = document.createElement('i'); i.className = 'badge'; i.textContent = String(n); i.setAttribute('aria-label', n + ' 筆待審'); a.append(i); }
   window.dispatchEvent(new Event('dzystore-nav'));   // 嵌入管理系統時：頁頂分頁的數字跟著更新（shell.js postNav）
 }
-// 要我處理的待審申請：本人自己送的（伺服器標 self，送上層審核）不算（2026-10-29 Eason 4A）
-export const reqTodo = items => (Array.isArray(items) ? items : []).filter(it => !(it && (it.self === true || it.hours_only === true)));
+// 申請審核清單要列的：本人自己送的（伺服器標 self，送上層審核）另外放最下面、只給最小列的（hours_only）不列（2026-10-29 Eason 4A）
+export const reqShown = items => (Array.isArray(items) ? items : []).filter(it => !(it && (it.self === true || it.hours_only === true)));
+// 這張單這個人現在按不按得下去（＝那一列有沒有核准鈕；規則同手機一頁核定 quick-calc.js reqDecidable）
+export const reqCanDecide = it => reqDecidable(it, canWriteRow);
+// 要我處理的待審申請（分頁數字、標題；首頁 server/att-alerts.js 同一個算法）：只算按得下去的（2026-11-10）。
+// 只看名單的人的單、支援同仁的忘刷單、主管代開送總監層級審核中的單照樣列在清單（唯讀），但不算數字
+export const reqTodo = items => reqShown(items).filter(reqCanDecide);
 export function refreshReqBadge() {
   if (S.admin && !S.asStore) return;
   if (S.reqAt && Date.now() - S.reqAt < 60000) return setReqBadge(S.reqCount || 0);

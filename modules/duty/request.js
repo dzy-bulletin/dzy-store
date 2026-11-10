@@ -3,7 +3,7 @@
 // 照 ~/mala-clock-in manager.html（feature/requests-qr）的 loadPendingRequests／buildReqItem 搬，文案不改；外觀換成營運系統風格。
 // 核准申請「不會」直接寫入核定：只是讓那天的核定頁先幫主管填好，主管核定那天時確認送出才算數（見 approve.js 的 __applyReq）。
 import { confirmBox } from '../../js/ui.js';
-import { S, call, callAll, h, failBar, failedStores, setReqBadge, loadLeave, leaveFor, canWriteRow, supportTag, reqTodo } from './state.js';
+import { S, call, callAll, h, failBar, failedStores, setReqBadge, loadLeave, leaveFor, supportTag, reqShown, reqCanDecide } from './state.js';
 import { tsLabel, shortDate, punchEvidence, compBalanceNote, reqQuotaBlock, reqWarnLines, REQ_KIND_LABEL, REQ_BATCH_MAX } from './calc.js';
 
 export function renderRequest(ctx) {
@@ -15,21 +15,24 @@ export function renderRequest(ctx) {
     Promise.all([S.all ? callAll('mgr_req_pending') : call('mgr_req_pending'), loadLeave()]).then(([r]) => {
       if (!el.isConnected) return;
       box.innerHTML = '';
-      const items = reqTodo(r.items);
+      const items = reqShown(r.items), todoN = items.filter(reqCanDecide).length, roN = items.length - todoN;      // 數字只算按得下去的；只能看的照列（2026-11-10）
       const mine = (Array.isArray(r.items) ? r.items : []).filter(it => it && it.self === true);      // 店長本人自己送的：送上層審核中，放最下面、不算數字（2026-10-29 Eason 4A）
-      setReqBadge(items.length);
+      setReqBadge(todoN);
       failedStores(box, r.failed, load);           // 全部門市，或總部那組併進來的別家：讀不到的店標出來，其他照常審           // 全部門市：讀不到的店標出來，其他店照常審
       const mineCard = () => {
         if (!mine.length) return null;
         const c = h('div', 'du-rq-mine');
         c.append(h('div', 'du-rq-title', '我自己送出的（' + mine.length + ' 筆）'), h('div', 'du-rq-mine-hint', '值班主管本人的申請由上層主管（區督導或總監）審核，這裡只給你看進度。'));
+        if (mine.some(it => it.upper_kind === 'director' || !!it.proxy_by)) c.append(h('div', 'du-rq-mine-hint', '主管替你代開的單也列在這裡，同樣不能自己審，由上層主管或系統管理員審核。'));
         mine.forEach(it => c.append(buildMine(it)));
         return c;
       };
       if (!items.length) { box.append(h('div', 'card du-center', r.failed && r.failed.length ? '讀得到的門市目前沒有待審的申請。' : '目前沒有待審的申請。')); const m = mineCard(); if (m) box.append(m); return; }
       const card = h('div', 'du-rq-list');
-      const title = h('div', 'du-rq-title', '待審申請 ' + items.length + ' 筆（最舊的在上面）');
-      card.append(title, buildBatchBar(card, title));
+      const title = h('div', 'du-rq-title', todoN ? '待審申請 ' + todoN + ' 筆（最舊的在上面）' : '目前沒有要你審的申請');
+      card.append(title);
+      if (roN) card.append(h('div', 'du-rq-ronote', '另有 ' + roN + ' 筆只能看，不算在待審數字裡'));
+      card.append(buildBatchBar(card, title));
       items.forEach(it => card.append(buildItem(it, card, title)));
       if (!card.querySelector('.du-rq-pick')) { const bw = card.querySelector('.du-rq-batchwrap'); if (bw) bw.hidden = true; }      // 全是唯讀（只看）：沒有批次核准列
       box.append(card);
@@ -42,7 +45,7 @@ export function renderRequest(ctx) {
 
 // 待審數字：標題、分頁徽章（單筆與批次共用）
 function refreshTitle(card, title) {
-  const left = card.querySelectorAll('.du-rq-acts').length;
+  const left = card.querySelectorAll('.du-rq-ok').length;      // 還有核准鈕的列＝還沒處理、而且按得下去的（唯讀列不算）
   title.textContent = left ? '待審申請 ' + left + ' 筆（最舊的在上面）' : '待審申請都處理完了';
   setReqBadge(left);
   const bar = card.querySelector('.du-rq-batch'); if (bar && !left) bar.hidden = true;
@@ -107,7 +110,8 @@ function buildBatchBar(card, title) {
 function buildMine(it) {
   const el = h('div', 'du-rq du-rq-self'); el.dataset.reqId = String(it.id); if (it.store) el.dataset.store = it.store;
   const l1 = h('div', 'du-rq-l1'), who = h('span', 'du-rq-who');
-  who.append(h('span', 'du-rq-kind ' + (REQ_KIND_LABEL[it.kind] ? it.kind : ''), REQ_KIND_LABEL[it.kind] || it.kind), h('span', 'du-rq-name', it.name), ...(it.storeName ? [h('span', 'du-where', '打卡地點：' + it.storeName, { 'data-where': it.store })] : []));
+  const proxied = it.upper_kind === 'director' || !!it.proxy_by;      // 主管替本人代開的（2026-11-10）：本人不能審，標出來
+  who.append(h('span', 'du-rq-kind ' + (REQ_KIND_LABEL[it.kind] ? it.kind : ''), REQ_KIND_LABEL[it.kind] || it.kind), h('span', 'du-rq-name', it.name), ...(proxied ? [h('span', 'du-rq-kind upper', '主管代開')] : []), ...(it.storeName ? [h('span', 'du-where', '打卡地點：' + it.storeName, { 'data-where': it.store })] : []));
   l1.append(who, h('span', 'du-rq-date', shortDate(it.date)));
   el.append(l1, h('div', 'du-rq-l2', it.summary + (it.reason ? '\n原因：' + it.reason : '') + '\n送出：' + tsLabel(it.created_at)));
   const acts = h('div', 'du-rq-acts du-rq-acts-self');
@@ -125,7 +129,7 @@ function buildItem(it, card, title) {
   const el = h('div', 'du-rq'); el.dataset.reqId = String(it.id); el.__req = it; if (it.store) el.dataset.store = it.store;
   const l1 = h('div', 'du-rq-l1'), who = h('span', 'du-rq-who');
   const isProxy = it.upper_kind === 'director' || !!it.proxy_by;      // 主管代開（2026-11-06）：只有總監層級能核，伺服器給 can_decide
-  const canDecide = isProxy ? it.can_decide === true : canWriteRow(it.kind === 'miss' ? 'hours' : 'req', it.emp_id, it.store);      // 不在名單（只看）：沒有勾選、核准、退回、看附件，改顯示「唯讀」；忘刷單看工時名單（2026-11-04）
+  const canDecide = reqCanDecide(it);      // 不在名單（只看）：沒有勾選、核准、退回、看附件，改顯示「唯讀」；忘刷單看工時名單（2026-11-04）、代開看伺服器的 can_decide；跟分頁數字同一個判斷
   const upOn = it.upper === true && (it.kind !== 'miss' || isProxy);      // 忘刷單歸打卡店店長（2026-11-04），打卡端的「部門同仁／值班主管本人」標記不套用
   const pick = h('input', 'du-rq-pick', null, { type: 'checkbox', 'aria-label': '勾選 ' + it.name + ' ' + it.summary });
   pick.onchange = () => syncBatch(card);

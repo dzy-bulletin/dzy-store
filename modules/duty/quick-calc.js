@@ -425,7 +425,7 @@ function classifyRaw(inp) {
   const punchAct = (primary) => ({ id: 'punch', label: '照打卡 ' + fmtH(punchHours) + ' 小時', primary, hours: punchHours, payload: punchPayload, askReason: false });
 
   const lg = nPlanSegs >= 2 && segs.length === nPlanSegs ? segLag(emp.plan.segs, segs) : lag(comparePlanOf(emp.plan), segs);
-  const lateV = Math.max(fl.late, lg.late >= THRESHOLD_MIN ? lg.late : 0), earlyV = Math.max(fl.early, lg.early >= THRESHOLD_MIN ? lg.early : 0);      // 達 15 分鐘就算（compare.js 只在超過 15 才標旗）
+  const lateV = Math.max(fl.late, lg.late >= THRESHOLD_MIN ? lg.late : 0), earlyV = Math.max(fl.early, lg.early >= THRESHOLD_MIN ? lg.early : 0);      // 達 15 分鐘就算（compare.js 2026-11-10 起同一個標準；這裡另外用 lag／segLag 再算一次，兩邊取大的）
   if (lateV || earlyV) {
     if (planHours > OK_MAX_H) return full('班表超過 ' + OK_MAX_H + ' 小時', '有遲到早退，要自己核對');
     if (punchHours > OK_MAX_H) return full('打卡超過 ' + OK_MAX_H + ' 小時', '打卡 ' + fmtH(punchHours) + ' 小時，沒有加班單');

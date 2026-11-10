@@ -209,6 +209,7 @@ select{min-height:44px}
 .du-pa-group{display:flex;gap:10px;align-items:flex-start;padding:5px 0;border-top:1px dashed var(--line)}
 .du-pa-date{flex:none;width:76px;font-weight:700;font-size:13px;padding-top:6px}
 .du-pa-names{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+.du-pa-ronote{font-size:12px;color:var(--muted);padding:7px 0 3px;border-top:1px dashed var(--line)}   /* 本月待核定：只能看的日子不算天數（2026-11-10） */
 .du-chip{font:inherit;font-size:13px;font-weight:700;padding:6px 12px;min-height:34px;border-radius:20px;border:1px solid var(--pink);background:#fff;color:var(--red);cursor:pointer}
 .du-chip:hover{background:#fff1ee}
 .du-more{font:inherit;font-size:13px;font-weight:700;margin-top:6px;padding:6px 0;background:none;border:0;color:var(--red);text-decoration:underline;cursor:pointer;min-height:36px}
@@ -336,6 +337,7 @@ select{min-height:44px}
 /* 申請審核：我自己送出的（2026-10-29） */
 .du-rq-mine{margin-top:14px;background:#f2f4f3;border:1px solid var(--line);border-radius:10px;padding:12px 14px}
 .du-rq-mine-hint{font-size:12.5px;color:#5b6763;margin-bottom:6px}
+.du-rq-ronote{font-size:12.5px;color:#5b6763;margin-bottom:6px}   /* 申請審核：另有 N 筆只能看（2026-11-10） */
 .du-rq-self{opacity:.95}
 .du-rq-upper{font-size:12px;font-weight:700;padding:2px 9px;border-radius:20px;background:#efe9fa;color:#5a3d9a;align-self:center}
 .du-reqfill{display:block;margin-top:6px;font:inherit;font-size:13px;font-weight:700;padding:8px 12px;min-height:40px;border-radius:8px;border:1px solid #a15a00;background:#fff;color:#a15a00;cursor:pointer;white-space:normal}

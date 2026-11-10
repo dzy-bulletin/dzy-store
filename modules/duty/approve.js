@@ -31,11 +31,17 @@ export function renderApprove(ctx) {
     const items = S.pend || [];
     failedStores(pendEl, S.pendFailed, loadPending);
     if (!items.length) return;
-    const groups = [], by = {};
-    items.forEach(it => { if (!by[it.date]) { by[it.date] = { date: it.date, names: [] }; groups.push(by[it.date]); } by[it.date].names.push(it); });
+    // 天數只算核得了的（2026-11-10）：那天全部是只能看的人（督導看區內門市、原單位主管看支援帳號…）不是你的待辦，
+    // 不算天數、列在最後面。首頁待辦是同一個算法（calc.js pendGroups），兩邊的天數才對得起來
+    const { mine, ro } = C.pendGroups(items, it => canWriteRow('hours', it.emp_id, it.store));
+    const groups = mine.concat(ro);
     const card = h('div', 'du-pa');
-    card.append(h('div', 'du-pa-title', '本月還有 ' + groups.length + ' 天沒核定'), h('div', 'du-pa-sub', '點名字直接跳到那天核定'));
-    (S.pendAll ? groups : groups.slice(0, 5)).forEach(g => {
+    card.append(h('div', 'du-pa-title', mine.length ? '本月還有 ' + mine.length + ' 天沒核定' : '本月沒有要你核定的日子'));
+    if (mine.length) card.append(h('div', 'du-pa-sub', '點名字直接跳到那天核定'));
+    const shown = S.pendAll ? groups : groups.slice(0, 5);
+    const roNote = () => h('div', 'du-pa-ronote', mine.length ? '另有 ' + ro.length + ' 天只能看，不算在上面的天數裡' : '以下 ' + ro.length + ' 天只能看（不是你要核定的）');
+    shown.forEach(g => {
+      if (ro.length && g === ro[0]) card.append(roNote());
       const row = h('div', 'du-pa-group'), names = h('div', 'du-pa-names');
       row.append(h('div', 'du-pa-date', C.weekdayLabel(g.date)));
       g.names.forEach(n => {
@@ -47,6 +53,7 @@ export function renderApprove(ctx) {
       });
       row.append(names); card.append(row);
     });
+    if (ro.length && shown.indexOf(ro[0]) < 0) card.append(roNote());      // 只能看的日子都還收在「再顯示」裡：這行提示照樣要看得到
     if (!S.pendAll && groups.length > 5) {
       const more = h('button', 'du-more', '再顯示 ' + (groups.length - 5) + ' 天', { type: 'button' });
       more.onclick = () => { S.pendAll = true; drawPending(); };
@@ -148,7 +155,7 @@ export function renderApprove(ctx) {
     applyDayRequests(date);
     applyDayPlan(date);
   }
-  // 自動排班的班表（2026-10-11）：每人加一行「班表：早班 10:00–19:00」，打卡跟班表差超過 15 分鐘標橘色。只提示，不擋核定。
+  // 自動排班的班表（2026-10-11）：每人加一行「班表：早班 10:00–19:00」，打卡跟班表差達 15 分鐘（含剛好 15 分鐘，2026-11-10）標橘色。只提示，不擋核定。
   // 這家店沒開自動排班、或讀不到，就安靜略過。
   function applyDayPlan(date) {
     if (S.all || !((ctx.session && ctx.session.features) || []).includes('schedule')) return;      // 全部門市：班表比對只在單一門市（各店班表要各自讀，暫不合併）

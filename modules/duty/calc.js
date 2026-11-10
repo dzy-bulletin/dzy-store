@@ -19,6 +19,23 @@ export function weekdayLabel(dateStr) {
   const p = dateStr.split('-');
   return parseInt(p[1], 10) + '/' + parseInt(p[2], 10) + '（' + wd + '）';
 }
+/**
+ * 本月待核定提醒的分組（核定工時頁上方的黃框，2026-11-10）：依日期分組，同一天的人照來的順序全部列。
+ *   mine＝那天至少有一位「這個人核得了工時」的人 → 算進「本月還有 N 天沒核定」；
+ *   ro＝那天全部是只能看的人（督導看區內門市、原單位主管看支援帳號、個別給的只看考勤）→ 不是他的待辦，不算天數、列在後面。
+ * 首頁待辦（server/att-alerts.js）是同一個算法，兩邊的天數才對得起來。canWrite(it)＝這一列這個人核不核得了。
+ */
+export function pendGroups(items, canWrite) {
+  const groups = [], by = {};
+  (Array.isArray(items) ? items : []).forEach(it => {
+    if (!it) return;
+    if (!by[it.date]) { by[it.date] = { date: it.date, names: [], can: false }; groups.push(by[it.date]); }
+    by[it.date].names.push(it);
+    if (canWrite(it)) by[it.date].can = true;
+  });
+  const pick = (g) => ({ date: g.date, names: g.names });
+  return { mine: groups.filter(g => g.can).map(pick), ro: groups.filter(g => !g.can).map(pick) };
+}
 // manager.html:1772–1775：'2026-08-01T21:43:12+08:00' → '8/1 21:43'
 export function tsLabel(ts) {
   ts = String(ts || '');

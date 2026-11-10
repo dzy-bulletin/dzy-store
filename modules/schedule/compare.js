@@ -1,4 +1,5 @@
-// 出勤核定比對班表（spec 10.3）：只提示、不擋核定、不鎖定。差超過 15 分鐘標橘色（Eason 2026-10-11）。
+// 出勤核定比對班表（spec 10.3）：只提示、不擋核定、不鎖定。差達 15 分鐘就標橘色（Eason 2026-10-11 定 15 分鐘）。
+// 2026-11-10 Eason 選 2A：剛好 15 分鐘也算（原本是超過 15 分鐘才標），跟手機一頁核定 duty/quick-calc.js 同一個標準。
 // plan：{ day_type, leave, shift_name, start, end, segs?, station?, label? }（segs＝分段班各段 [['10:00','14:00'],['17:00','21:00']]，2 段以上才有）（dayPlan 的一筆；label＝月曆版休假名稱，例：休假、指定休）或 undefined；segments：打卡段 [{in:'HH:MM', out:'HH:MM'|null}]
 import { LEAVES } from './rules.js';
 export const THRESHOLD_MIN = 15;
@@ -27,11 +28,11 @@ export function comparePlan(plan, segments, opts) {
   let firstIn = toMin((segs.find((x) => x.in) || {}).in);
   if (firstIn !== null && s !== null && e > 1440 && firstIn < s && firstIn < e - 1440) firstIn += 1440;   // 跨夜班凌晨才到：打卡時間換到隔天，才算得出晚到（2026-10-11 Codex 審查）
   const lastOutRaw = toMin((segs.slice().reverse().find((x) => x.out) || {}).out);
-  if (firstIn !== null && s !== null && firstIn - s > THRESHOLD_MIN) flags.push(`晚到 ${firstIn - s} 分`);
+  if (firstIn !== null && s !== null && firstIn - s >= THRESHOLD_MIN) flags.push(`晚到 ${firstIn - s} 分`);
   const stillIn = segs.some((x) => x.in && !x.out);   // 還沒打下班卡＝當作還在、不算早退（同分段班 compareSegs；2026-10-29 光復：19:56 回來上班卻被拿 19:27 比成早退 243 分）
   if (lastOutRaw !== null && e !== null && !stillIn) {
     const out = lastOutRaw < s ? lastOutRaw + 1440 : lastOutRaw;
-    if (e - out > THRESHOLD_MIN) flags.push(`早退 ${e - out} 分`);
+    if (e - out >= THRESHOLD_MIN) flags.push(`早退 ${e - out} 分`);
   }
   return { text, flags };
 }
@@ -58,8 +59,8 @@ function compareSegs(planSegs, punches, past, brk) {
     const name = '第' + CN[k] + '段';
     if (!mine.length) { if (past) flags.push(name + '沒打卡'); return; }
     const ins = mine.map((x) => x[0]).filter((x) => x !== null), outs = mine.map((x) => x[1]).filter((x) => x !== null);
-    if (ins.length) { const fi = Math.min(...ins); if (fi - a > THRESHOLD_MIN) flags.push(`${name}晚到 ${fi - a} 分`); }
-    if (outs.length && !mine.some((x) => x[1] === null)) { const lo = Math.max(...outs); if (b - lo > THRESHOLD_MIN) flags.push(`${name}早退 ${b - lo} 分`); }
+    if (ins.length) { const fi = Math.min(...ins); if (fi - a >= THRESHOLD_MIN) flags.push(`${name}晚到 ${fi - a} 分`); }
+    if (outs.length && !mine.some((x) => x[1] === null)) { const lo = Math.max(...outs); if (b - lo >= THRESHOLD_MIN) flags.push(`${name}早退 ${b - lo} 分`); }
   });
   for (let k = 0; k + 1 < P.length; k++) {
     const gapA = P[k][1], gapB = P[k + 1][0];
