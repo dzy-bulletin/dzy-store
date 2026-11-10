@@ -64,7 +64,7 @@ export async function call(action, body) {
   if (!READS.has(action)) { S.recent = {}; S.reqPre = null; }
   try {
     const k = S.key, st = S.asStore;
-    const r = await api('POST', '/m/duty/' + action, st ? Object.assign({}, body || {}, { asStore: st }) : (body || {}));
+    const r = await api('POST', '/m/duty/' + action, st ? Object.assign({}, body || {}, { asStore: st }) : (body || {}), undefined, { read: READS.has(action) });
     if (r && r.meta && S.key === k && S.asStore === st) S.meta = r.meta;
     if (r && Array.isArray(r.home_stores) && S.key === k) for (const x of r.home_stores) if (x.ok && x.meta) S.metaBy[x.store] = x.meta;   // 總部那組併進來的別家：休息帶各用各的   // 管理者已經換店／換登入：上一家店晚到的回應不寫進來（2026-10-12 Codex 審查）
     return r;

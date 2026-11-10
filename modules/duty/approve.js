@@ -153,7 +153,7 @@ export function renderApprove(ctx) {
   function applyDayPlan(date) {
     if (S.all || !((ctx.session && ctx.session.features) || []).includes('schedule')) return;      // 全部門市：班表比對只在單一門市（各店班表要各自讀，暫不合併）
     const tok = S.dayTok;
-    api('POST', '/m/schedule/dayPlan', S.asStore ? { date, store: S.asStore } : { date }).then(res => {   // 管理者代看：讀該店的班表
+    api('POST', '/m/schedule/dayPlan', S.asStore ? { date, store: S.asStore } : { date }, undefined, { read: true }).then(res => {   // 管理者代看：讀該店的班表
       if (tok !== S.dayTok || S.date !== date || !live() || !res || !res.plan) return;
       const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);   // 台北今天
       box.querySelectorAll('.du-card').forEach(card => {

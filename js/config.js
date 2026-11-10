@@ -1,8 +1,13 @@
-// API 基底網址。上線時改成 Mac mini Funnel 網址（例 https://<主機>.ts.net/store/api）。
-// 開發：與網頁同一主機（伺服器同時供應 /store/api）。
+import { createGateway } from './gateway.js';
+// API 基底網址。開發：與網頁同一主機（伺服器同時供應 /store/api）。
 const LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
-// 正式：GitHub Pages 開頁 → 連公司 Mac mini（Tailscale Funnel 的 /store 路徑，與貨單、現金帳同一台）
-export const API_BASE = LOCAL ? '/store/api' : 'https://dingzhaoyuandemac-mini.tailc27c34.ts.net/store/api';
+// 正式：GitHub Pages 開頁 → 連公司 Mac mini。新路＝Cloudflare 櫃台；舊路＝Tailscale Funnel（與貨單、現金帳同一台），櫃台故障時自動改走
+export const GW_HOST_NEW = 'https://dzy-gw.dingzhaoyuan888.workers.dev';
+export const GW_HOST_OLD = 'https://dingzhaoyuandemac-mini.tailc27c34.ts.net';
+export const GATEWAY_ON = true;   // 總開關：false＝全部走舊網址，不再試新路
+const API_PATH = '/store/api';
+export const gateway = createGateway({ on: GATEWAY_ON, local: LOCAL, newBase: GW_HOST_NEW + API_PATH, oldBase: GW_HOST_OLD + API_PATH, storage: (() => { try { return sessionStorage; } catch (e) { return null; } })() });
+export const API_BASE = gateway.apiBase();   // 載入當下的主機；實際發請求請用 gateway.apiBase()（會隨故障記號切換）
 // 網址帶 ?mode=mock → 改用 mock.js 的瀏覽器內假後端（示範與 e2e，不需要真伺服器）。只在本機開發有效：正式網址加這個參數不理它（2026-10-11 審查）
 export const MOCK = LOCAL && new URLSearchParams(location.search).get('mode') === 'mock';
 export const KEYS = { code: 'dzystore_code', session: 'dzystore_session' };
