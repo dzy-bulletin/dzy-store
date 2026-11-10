@@ -1002,7 +1002,7 @@ function dutyDo(d, action, b) {
     return ok({ days: 30, items: (d.binds || []).map(x => ({ ts: x.ts, emp_id: x.emp_id, name: x.name, type: x.type,
       still_bound: String(x.type).indexOf('bind') === 0 && bound[x.emp_id] === x.uid })).reverse() });
   }
-  if (action === 'mgr_bind_code') return { ok: true, name: '測試同仁', code: '123456' };
+  if (action === 'mgr_bind_code') return ok({ name: '測試同仁', code: '123456' });
   if (action === 'mgr_line_unbind') {
     const last = [...(d.binds || [])].reverse().find(x => x.emp_id === String(b.emp_id || ''));
     if (!last || String(last.type).indexOf('bind') !== 0) return ok({ already: true });
