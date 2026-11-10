@@ -11,6 +11,8 @@ export const REASONS = ['臨時調班', '主管同意', '打卡機問題'];   //
 export const MAX_DATES = 10;         // 一次最多往前找幾天，避免卡很久
 export const READ_BATCH_DAYS = 3;    // 自動找日期時，每批最多同時讀幾天
 
+// 真的重疊才算；「會算成跨夜到隔天」只是提醒，同完整頁 approve.js 的判斷（2026-11-10 Fable 審查）
+const realOverlap = (periods) => C.analyzePeriods(periods).warnings.some((w) => !/跨夜/.test(w));
 export const keyOf = (o) => (o && o.store ? o.store + '|' : '') + String(o && o.emp_id);      // 同 state.js rowKey
 
 // ---- 要處理哪一天 ----
@@ -320,7 +322,7 @@ function classifyRaw(inp) {
       const ot = C.otPeriods([r]);
       if (!ot.length) return full('加班單沒有時段', '');
       periods = offDay ? ot : planPeriods.concat(ot);
-      if (C.analyzePeriods(periods).warnings.length) return full('班表和加班單時段重疊', '');
+      if (realOverlap(periods)) return full('班表和加班單時段重疊', '');
       const total = hoursOf(periods);
       const rawP = rawPunchMinutes(segs, br);
       if (rawP == null || Math.abs(rawP - total * 60) >= DIFF_MIN) return full('打卡和核定時段差太多', '打卡 ' + segs[0].in + '–' + segs[segs.length - 1].out + '（扣休息 ' + fmtH((rawP || 0) / 60) + ' 小時）和要核定的 ' + fmtH(total) + ' 小時差 30 分鐘以上，不算涵蓋');
@@ -343,7 +345,7 @@ function classifyRaw(inp) {
       if (r.miss_type === 'out' && !(hasNoOut && nOpen === 1)) return full('忘打卡單和缺卡對不上', '單子補下班，但打卡不是缺下班卡');
       if (r.miss_type === 'both' && !(pv.mode === 'plan' && segs.length === 0)) return full('忘打卡單和缺卡對不上', '補上班＋下班只能用在有班表、整天沒打卡的人');
       if (r.miss_type === 'break' && (pv.mode !== 'plan' || nOpen !== 0)) return full('忘打卡單和缺卡對不上', '補中間休息只能用在有班表、打卡齊全的人');
-      if (C.analyzePeriods(mp).warnings.length) return full('補完後時段重疊', '補完忘打卡後時段重疊，要自己核對');
+      if (realOverlap(mp)) return full('補完後時段重疊', '補完忘打卡後時段重疊，要自己核對');
       const total = hoursOf(mp);
       if (total > OK_MAX_H || (pv.mode === 'plan' && total > planHours + 0.25)) return full('補完後超過班表', '補完忘打卡後共 ' + fmtH(total) + ' 小時，比班表 ' + fmtH(planHours) + ' 小時多，沒有加班單');
       Object.assign(base, { status: 'abnormal', tag: missTag(), hours: total, payload: payloadOf(mp), chk: '補上之後 ' + mp.map((p) => p.start + '–' + p.end).join('、') });

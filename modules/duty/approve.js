@@ -157,6 +157,7 @@ export function renderApprove(ctx) {
       if (tok !== S.dayTok || S.date !== date || !live() || !res || !res.plan) return;
       const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);   // 台北今天
       box.querySelectorAll('.du-card').forEach(card => {
+        if (card.dataset.store) return;      // 總部併組進來的別家：dayPlan 只有本店班表，比對會誤標「沒排班卻有打卡」（班表已由 mgr_day 帶在姓名旁）
         const r = comparePlan(res.plan[card.dataset.empId], card.__segments, { past: date <= today, brk: brk(card.dataset.store) });
         if (!r || !card.__showPlan) return;
         card.__showPlan(r);
