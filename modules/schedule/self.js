@@ -221,7 +221,7 @@ export function renderApprove(ctx) {
 function drawApprove(ctx) {
   const el = ctx.el, D = H.data;
   const subs = D.staff.filter((s) => !D.me.includes(s.emp_id));
-  const shiftMap = Object.fromEntries(allShiftsOf(D).map((s) => [s.id, s]));
+  const shiftMap = Object.fromEntries(allShiftsOf(D).concat(D.extShifts || []).map((s) => [s.id, s]));      // 門市班（MZTGF.S1）也要查得到名稱，才會顯示「光復 S1」（2026-11-10 Eason：原本顯示代號）
   const bad = (e) => D.results.filter((r) => r.emp_id === e && r.level === 'block').length;
   const notDone = subs.filter((s) => s.filled < s.days).length;
   const list = subs.length ? subs.map((s) => {

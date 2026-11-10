@@ -10,7 +10,7 @@ export function comparePlan(plan, segments, opts) {
   const punched = segs.length > 0;
   const past = !opts || opts.past !== false;              // 今天以前（含今天）才提示「沒打卡」
   if (!plan) return punched ? { text: '班表：這天沒有排', flags: ['沒排班卻有打卡'] } : null;
-  if (!plan.start && plan.day_type === 'W') return { text: '班表：' + (plan.label || plan.shift_name || '上班'), flags: [] };   // 月曆版要上班但沒有時段（例：被設成上班的「公休」）
+  if (!plan.start && plan.day_type === 'W') return { text: '班表：' + (plan.label || plan.shift_name || '上班'), flags: [] };   // 要上班但沒有時段（例：被設成上班的「公休」）
   if (!plan.start) {
     const label = plan.label ? plan.label : plan.day_type === 'L' ? (LEAVE[plan.leave] || '請假') : plan.day_type === 'R' ? '例假' : '休息日';
     return { text: '班表：' + label, flags: punched ? [label + '卻有打卡'] : [] };
