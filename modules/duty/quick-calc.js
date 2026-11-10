@@ -110,6 +110,11 @@ export function edgeShift(plan, br) {
   const a = plan.segs[0].start, b = plan.segs[0].end;
   return C.hasBreak(br) && C.shiftCoversBreak(br, a, b) && (a === br.start || b === br.end);
 }
+/** 分段班有一段蓋過休息帶（例 08–14＋17–20、休息 12–13）：班表預填只有一段班才挖休息，照班表會多算休息時間，一頁核定不替他決定（2026-11-10 Eason） */
+export function splitBreak(plan, br) {
+  if (!plan || plan.work !== true || !Array.isArray(plan.segs) || plan.segs.length < 2 || !C.hasBreak(br)) return false;
+  return plan.segs.some((g) => C.shiftCoversBreak(br, g.start, g.end));
+}
 export const hoursOf = (periods) => C.round2(C.sumPeriods(periods || []).total);
 const periodsOfPrefill = (pv) => (pv.initial || []).filter((p) => p && p.start && p.end).map((p) => ({ start: p.start, end: p.end }));
 
@@ -268,6 +273,8 @@ function classifyRaw(inp) {
     const ps = emp.plan.segs, st0 = hm(ps[0].start), en0 = hm(ps[ps.length - 1].end);
     if (st0 != null && en0 != null && (en0 <= st0 || inp.nowMin < en0)) return Object.assign(base, { status: 'blocked', tag: '今天還沒下班', note: '班表還沒結束，下班後再核定', actions: [skip('先跳過，下班後再核')] });
   }
+  if (pv.mode === 'plan' && splitBreak(emp.plan, brk)) return full('分段班碰到休息帶', '其中一段班蓋過休息時間，照班表會多算休息，請到完整頁核對');
+
 
   // ================= 有一張申請 =================
   if (reqs.length === 1) {
