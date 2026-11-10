@@ -213,7 +213,7 @@ function route(method, p, q, b, token) {
     if (m[1] === 'duty' && b && b.peek === true) {                              // 示範／e2e：window.__dutySnapAt 有值＝Mac mini 有上次資料，馬上回、不受延遲和故障影響
       if (!window.__dutySnapAt || m[2] === 'all') return ok({ snapshot_at: null });
       const peeked = dutyDo(dutyDb(), m[2], Object.assign({}, b, { peek: undefined }));
-      if (peeked && peeked.ok && peeked.data) peeked.data.snapshot_at = window.__dutySnapAt;
+      if (peeked && peeked.ok && peeked.data) { peeked.data.snapshot_at = window.__dutySnapAt; if (window.__dutySnapReplica) peeked.data.snapshot_kind = 'replica'; }
       return peeked;
     }
     if (m[1] === 'duty' && window.__dutyDelays && window.__dutyDelays[m[2]]) {      // e2e：指定動作拖慢（驗名單先顯示）

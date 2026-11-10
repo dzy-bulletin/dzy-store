@@ -100,14 +100,14 @@ export function renderQuick(ctx) {
     st.appr = r.appr; st.pending = r.pending;
   }
   async function readDay(date) {
+    if (st.dayPre && st.dayPre.has(date)) { const p = st.dayPre.get(date); st.dayPre.delete(date); return p; }      // 副本先算出要看哪一天，已經先向打卡讀了
     const [d, rq] = await Promise.all([call('mgr_day', { date }), call('mgr_req_day', { date })]);
     return { emps: Array.isArray(d.employees) ? d.employees : [], appr: apprFrom(rq), failed: [].concat((d && d.failed) || [], (rq && rq.failed) || []) };
   }
   // Mac mini 記得的上次資料先顯示（2026-11-10 Eason）：灰色不能按，最新資料到了整份換掉。少任何一份就不顯示
-  async function peekFirst(tok, isFresh) {
+  async function peekFirst(tok, isFresh, round1) {
     const stop = () => isFresh() || tok !== st.tok || !live();
-    const opt = { peek: true };
-    const [pend, rq] = await Promise.all([st.manual ? null : call('mgr_pending_approvals', opt), call('mgr_req_pending', opt)]);
+    const [pend, rq] = await round1;
     if (stop() || (!st.manual && !(pend && pend.snapshot_at)) || !(rq && rq.snapshot_at)) return;
     const pending = Array.isArray(rq.items) ? rq.items : [];
     const wr = (it) => canWriteRow('hours', it.emp_id, it.store);
@@ -130,10 +130,23 @@ export function renderQuick(ctx) {
     const tok = ++st.tok;
     st.loading = true; st.error = null; st.ui = {}; st.peekAt = 0; st.peekSaved = null; render();
     let fresh = false;
-    peekFirst(tok, () => fresh).catch(() => {});
+    st.dayPre = new Map();
+    const opt = { peek: true };
+    const round1 = Promise.all([st.manual ? null : call('mgr_pending_approvals', opt), call('mgr_req_pending', opt)]).catch(() => [null, null]);
+    peekFirst(tok, () => fresh, round1).catch(() => {});
+    // 副本已經知道要看哪一天：同時向打卡確認那天的名單，不等申請清單回來才開始（2026-11-10）
+    const preRead = (date) => { if (!date || st.dayPre.has(date)) return; const p = (async () => { const [d, rq2] = await Promise.all([call('mgr_day', { date }), call('mgr_req_day', { date })]); return { emps: Array.isArray(d.employees) ? d.employees : [], appr: apprFrom(rq2), failed: [].concat((d && d.failed) || [], (rq2 && rq2.failed) || []) }; })(); p.catch(() => {}); st.dayPre.set(date, p); };
+    if (st.manual) preRead(st.manual);
+    else round1.then(([p, r]) => {
+      if (tok !== st.tok || !live() || !p || p.snapshot_kind !== 'replica' || !r || !r.snapshot_at) return;
+      const wr = (it) => canWriteRow('hours', it.emp_id, it.store), items = Array.isArray(r.items) ? r.items : [];
+      Q.candidateDates((p.items || []).filter(wr), todayNow(), items.filter((it) => it.self !== true && wr(it))).slice(0, Q.READ_BATCH_DAYS).forEach(preRead);      // 跟正式讀取同一批，整批一起等
+    });
     try {
       const leaveReady = loadLeave().catch(() => null);          // 不等額度才去抓名單；分類前（下面 readDay 那裡）才要到齊
-      const [pend, rq] = await Promise.all([st.manual ? null : call('mgr_pending_approvals'), call('mgr_req_pending')]);      // 主管自己選日期時不用找待核定的日子
+      // 待核定的日子只用來決定先看哪一天：有副本就用副本；申請清單要最新，不用副本
+      const pendP = st.manual ? Promise.resolve(null) : round1.then(([p]) => (p && p.snapshot_kind === 'replica' ? p : call('mgr_pending_approvals')));
+      const [pend, rq] = await Promise.all([pendP, call('mgr_req_pending')]);
       fresh = true;
       if (tok !== st.tok || !live()) return;
       st.pending = Array.isArray(rq && rq.items) ? rq.items : [];
