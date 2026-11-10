@@ -4,7 +4,7 @@
 // 核准申請「不會」直接寫入核定：只是讓那天的核定頁先幫主管填好，主管核定那天時確認送出才算數（見 approve.js 的 __applyReq）。
 import { confirmBox } from '../../js/ui.js';
 import { S, call, callAll, h, failBar, failedStores, setReqBadge, loadLeave, leaveFor, canWriteRow, supportTag, reqTodo } from './state.js';
-import { tsLabel, shortDate, punchEvidence, compBalanceNote, reqWarnLines, REQ_KIND_LABEL, REQ_BATCH_MAX } from './calc.js';
+import { tsLabel, shortDate, punchEvidence, compBalanceNote, reqQuotaBlock, reqWarnLines, REQ_KIND_LABEL, REQ_BATCH_MAX } from './calc.js';
 
 export function renderRequest(ctx) {
   const el = ctx.el;
@@ -66,8 +66,11 @@ function buildBatchBar(card, title) {
   bar.append(lab, btn); wrap.append(bar, msg);
   all.onchange = () => { card.querySelectorAll('.du-rq-pick').forEach(x => { x.checked = all.checked; }); syncBatch(card); };
   btn.onclick = async () => {
-    const els = [...card.querySelectorAll('.du-rq')].filter(el => { const c = el.querySelector('.du-rq-pick'); return c && c.checked; });
-    if (!els.length) return;
+    const picked = [...card.querySelectorAll('.du-rq')].filter(el => { const c = el.querySelector('.du-rq-pick'); return c && c.checked; });
+    const skipQ = picked.filter(el => el.__quotaBlock), els = picked.filter(el => !el.__quotaBlock);      // 額度已用完的略過並提示
+    const skipNote = skipQ.length ? '已略過 ' + skipQ.length + ' 筆（額度已用完，不能核准）：' + skipQ.map(el => el.__req.name + ' ' + el.__req.summary).join('、') : '';
+    skipQ.forEach(el => { const c = el.querySelector('.du-rq-pick'); if (c) c.checked = false; });
+    if (!els.length) { if (skipNote) { msg.className = 'du-rq-msg bad'; msg.textContent = '✕ ' + skipNote; syncBatch(card); } return; }
     if (els.length > REQ_BATCH_MAX) { msg.className = 'du-rq-msg bad'; msg.textContent = '一次最多核准 ' + REQ_BATCH_MAX + ' 筆，請少勾幾筆'; return; }
     const list = els.map(el => '・' + (el.__req.storeName ? el.__req.storeName + ' ' : '') + el.__req.name + '：' + el.__req.summary).join('\n');
     if (!await confirmBox('核准以下 ' + els.length + ' 筆申請？\n' + list + '\n\n核准後，那幾天的核定會先幫你填好，你核定那天時確認送出才算數。', '核准 ' + els.length + ' 筆')) return;
@@ -93,7 +96,7 @@ function buildBatchBar(card, title) {
       msg.className = 'du-rq-msg bad';
       msg.textContent = groups.size === 1 ? '✕ ' + bad[0].message
         : '✕ ' + bad.map(b => (b.storeName ? b.storeName + '：' : '') + b.message + '（沒送出：' + b.names.join('、') + '）').join('\n') + (nDone ? '\n其餘已核准 ' + nDone + ' 筆' : '');
-    } else msg.textContent = nSkip ? '已核准 ' + nDone + ' 筆，略過 ' + nSkip + ' 筆（已被處理過）' : '';
+    } else msg.textContent = (nSkip ? '已核准 ' + nDone + ' 筆，略過 ' + nSkip + ' 筆（已被處理過）' : '') + (skipNote ? (nSkip ? '\n' : '') + skipNote : '');
     all.disabled = false;
     refreshTitle(card, title); syncBatch(card);
   };
@@ -138,6 +141,9 @@ function buildItem(it, card, title) {
 
   const acts = h('div', 'du-rq-acts');
   const ok = h('button', 'du-rq-ok btn', '核准', { type: 'button' }), no = h('button', 'du-rq-no btn ghost', '退回', { type: 'button' });
+  const qBlock = canDecide ? reqQuotaBlock(leaveFor(it.store), it) : '';      // 生理假／家庭照顧假額度用完不能核准（2026-11-10 Eason）；事假不擋
+  el.__quotaBlock = qBlock;
+  if (qBlock) { ok.disabled = true; ok.title = qBlock; acts.append(h('span', 'du-rq-upper du-rq-quota', qBlock)); }
   if (canDecide) acts.append(ok, no); else acts.append(h('span', 'du-ro', upOn ? (isProxy ? '送總監層級審核中' : upperIsDept(it) ? '部門主管審核中' : '送上層審核中') : '唯讀'));
   if (it.attach_id && canDecide) {
     const at = h('button', 'du-rq-att btn ghost', '看附件', { type: 'button' });

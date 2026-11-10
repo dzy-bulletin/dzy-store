@@ -190,7 +190,17 @@ export function leaveProblem(LO, empId, leaves, date) {
       if (wc.note) return wc.note;
     }
     if (q0 && q0.comp && !q0.allowed) return '計時同仁沒有補休';
-    if (q0 && q0.blocked && !q0.comp) return L.type + ' 額度已用完';
+    if (C.quotaHardBlocked(d0, q0)) return L.type + ' 額度已用完';      // 事假用完不擋，改走 personalOverText（到完整頁）
+  }
+  return '';
+}
+
+/** 事假超額：手機一頁不一鍵，回提示字串（到完整頁由送出前確認框處理）；沒有回 '' */
+export function personalOverProblem(LO, empId, leaves) {
+  if (!LO) return '';
+  for (const L of leaves || []) {
+    const d0 = C.leaveDefOf(LO, L.type), q0 = d0 ? C.quotaOf(LO, String(empId), d0.code) : null;
+    if (C.personalOver(d0, q0)) return C.personalOverText(L.type, q0);
   }
   return '';
 }
@@ -301,6 +311,8 @@ function classifyRaw(inp) {
       if (!leaves.length) return full('假單內容不明', '');
       const lp = leaveProblem(LO, emp.emp_id, leaves, date);
       if (lp) return full('假別要確認', lp);
+      const po = personalOverProblem(LO, emp.emp_id, leaves);
+      if (po) return full('事假超過 14 天', po);
       const lvH = leaves.reduce((a, x) => a + (Number(x.hours) || 0), 0);
       if (r.kind === 'leave' && lvH > 0 && lvH < planHours - 0.01) return full('只請部分時數又沒打卡', '請假 ' + fmtH(lvH) + ' 小時，班表 ' + fmtH(planHours) + ' 小時，當天沒有打卡，其他時間要自己核對');      // 2026-11-09 Eason：半天假另一半沒來不可一鍵
       periods = [];

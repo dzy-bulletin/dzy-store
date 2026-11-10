@@ -134,7 +134,7 @@ export const contBreakText = w => '連續上班 ' + w.h + ' 小時沒休息 30 �
 // 申請的黃字提醒（2026-11-06，打卡 Requests.gs reqWarns_／miss_n）：舊打卡後端沒有這兩欄＝不顯示
 export function reqWarnLines(it) {
   const out = (it && Array.isArray(it.warns) ? it.warns : []).slice();
-  if (it && it.kind === 'miss' && it.miss_n) out.unshift('本月第 ' + it.miss_n + ' 次忘刷' + (it.miss_n >= 3 ? '（第 3 次起出勤紀錄表會標記）' : ''));
+  if (it && it.kind === 'miss' && it.miss_n) out.unshift('本月第 ' + it.miss_n + ' 天忘刷' + (it.miss_n >= 3 ? '（第 3 天起出勤紀錄表會標記）' : ''));
   return out;
 }
 
@@ -190,11 +190,42 @@ export function leaveOptionView(name, def, q) {
   }
   if (!def || !q || q.cap_days == null) return { text: name, disabled: false };
   const remain = Math.round((q.remain_days || 0) * 10) / 10;
+  if (q.blocked && QUOTA_SOFT_CODES.indexOf(def.code) >= 0) return { text: name + '（已超過 ' + q.cap_days + ' 日）', disabled: false };      // 事假用完不反灰，送出前確認
   if (q.blocked) return { text: name + '（額度已用完）', disabled: true };
   if (q.basis === 'event') return { text: name + '（每次上限 ' + q.cap_days + ' 日）', disabled: false };
   if (def.code === 'parental') return { text: name + '（剩 ' + (Math.round(remain / 30 * 10) / 10) + ' 個月）', disabled: false };   // 育嬰留停以月計
   return { text: name + '（剩 ' + remain + ' 日）', disabled: false };
 }
+// ---- 額度用完怎麼處理（2026-11-10 Eason 定案）----
+// 生理假、家庭照顧假額度用完＝硬擋；事假（personal）用完不擋，送出前確認框提示、超過的部分照曠職標紅；其他假別維持原本（blocked 就擋）
+export const QUOTA_SOFT_CODES = ['personal'];
+/** 核定送出：這個假別額度用完要硬擋嗎（補休走自己的規則，不在這裡） */
+export function quotaHardBlocked(def, q) { return !!(q && q.blocked && !q.comp && !(def && QUOTA_SOFT_CODES.indexOf(def.code) >= 0)); }
+/** 事假超額（只提示、不擋） */
+export function personalOver(def, q) { return !!(def && def.code === 'personal' && q && q.blocked && !q.comp); }
+export const personalOverText = (name, q) => name + ' 今年事假已超過 ' + ((q && q.cap_days != null) ? q.cap_days : 14) + ' 天，超過的部分會照曠職標紅，仍要送出嗎？';
+export const MENSTRUAL_MAX_TIMES = 3;
+// 薪資 payLeaveUsage 的生理假 used_days 就是次數（payLeaveQuotaDays_，4 小時也算 1 次）
+const menstrualUsed = q => { for (const k of ['used_days', 'used_n', 'used_times', 'used_count', 'times_used']) if (q && q[k] != null && !isNaN(Number(q[k]))) return Number(q[k]); return null; };
+/** 申請審核：這張請假單能不能核准。回 '' ＝可以；否則是核准鈕要顯示的原因。
+ *  只管生理假（已用次數 ≥ 3；後端沒給次數欄位時看 blocked）與家庭照顧假（這張單時數÷8 天 > remain_days；沒填時數時看 blocked）。事假與其他假別不擋 */
+export const REQ_QUOTA_BLOCK_TEXT = '額度已用完，不能核准';
+export function reqQuotaBlock(opts, it) {
+  if (!it || it.kind !== 'leave' || !opts || !Array.isArray(opts.types)) return '';
+  const def = leaveDefOf(opts, it.leave_type), q = def ? quotaOf(opts, String(it.emp_id), def.code) : null;
+  if (!def || !q) return '';
+  if (def.code === 'menstrual') {
+    const n = menstrualUsed(q);
+    return (n != null ? n >= MENSTRUAL_MAX_TIMES : !!q.blocked) ? REQ_QUOTA_BLOCK_TEXT : '';
+  }
+  if (def.code === 'family') {
+    const h = Number(it.hours), remain = Number(q.remain_days);
+    if (h > 0 && !isNaN(remain)) return h / 8 > remain + 1e-9 ? REQ_QUOTA_BLOCK_TEXT : '';
+    return q.blocked ? REQ_QUOTA_BLOCK_TEXT : '';
+  }
+  return '';
+}
+
 // manager.html:659–673：期限規則（婚假 3 個月內、陪產假前後 15 日內…；與後端 payLeaveWindowCheck 同一套，改這裡兩邊都要改）。
 // 以事件日為基準：婚假＝結婚登記日、陪產假＝分娩日。事件日沒登記就不擋、只提示。
 export function windowCheck(def, events, empId, leaveDate) {

@@ -310,12 +310,15 @@ function buildCard(emp, date) {
   const head = h('div', 'du-head', null, { role: 'button', tabindex: '0', 'aria-expanded': 'false' });
   const hmain = h('div', 'du-hmain'); hmain.append(nameEl, punchEl);
   head.append(hmain, mini, chev);
+  let planDone = !!emp.approved;                              // 已核定：不再顯示跟班表比的晚到早退（2026-11-10 Eason：主管會以為已經扣了；薪資照核定時段算）
   card.__showPlan = (r) => {                                  // 自動排班比對（只提示）
+    card.__planR = r;
     const old = hmain.querySelector('.du-plan'); if (old) old.remove();
     const top = pv.mode === 'plan' || pv.mode === 'off';      // 名字旁已經寫了班表 → 這行只留提醒、沒提醒就不畫（2026-11-03 Eason：班表不要顯示兩次）
-    if (top && !r.flags.length) return;
+    const flags = planDone ? [] : r.flags;
+    if (top && !flags.length) return;
     const line = h('div', 'du-plan', top ? null : r.text);
-    r.flags.forEach(f => line.append(h('span', 'du-planflag', f)));
+    flags.forEach(f => line.append(h('span', 'du-planflag', f)));
     hmain.append(line);
   };
   const body = h('div', 'du-body'); body.hidden = true;
@@ -552,7 +555,8 @@ function buildCard(emp, date) {
       }
       // 補休：只擋計時同仁（2026-11-01 起可以先休後補，不看餘額；同一天重送原本的補休紀錄放行）
       if (q0 && q0.comp && !q0.allowed) return say('bad', '✕ ' + emp.name + ' 是計時同仁，沒有補休，無法送出。');
-      if (q0 && q0.blocked && !q0.comp) return say('bad', '✕ ' + emp.name + ' 的「' + L.type + '」額度已用完（上限 ' + q0.cap_days + ' 日，已用 ' + (Math.round((q0.used_days || 0) * 10) / 10) + ' 日），無法送出。確有需要請聯絡 Eason 調整假別設定。');
+      if (C.quotaHardBlocked(d0, q0)) return say('bad', '✕ ' + emp.name + ' 的「' + L.type + '」額度已用完（上限 ' + q0.cap_days + ' 日，已用 ' + (Math.round((q0.used_days || 0) * 10) / 10) + ' 日），無法送出。確有需要請聯絡 Eason 調整假別設定。');
+      if (C.personalOver(d0, q0) && !await confirmBox(C.personalOverText(emp.name, q0), '仍要送出')) return;      // 事假用完不擋（2026-11-10 Eason）：超過的部分照曠職標紅
     }
     const lvText = C.leavesText(lv), hasTripLv = lv.some(x => x.type === '出差');
     const periods = []; let half = false;
@@ -597,6 +601,7 @@ function buildCard(emp, date) {
       say('ok', '✓ 已核定 ' + res.approved_hours + ' 小時・' + res.status_text + C.leavesSuffix(C.leavesOf(res)) + '（' + res.manager_name + '）');
       setBadge(res, C.leavesOf(res));
       card.__pending = false;
+      planDone = true; if (card.__planR) card.__showPlan(card.__planR);   // 核定後拿掉跟班表比的提醒
       card.dispatchEvent(new CustomEvent('emp-approved', { bubbles: true, detail: { emp_id: emp.emp_id, date: approveDate, store: emp.store } }));
     } catch (e) {
       say('bad', '✕ 核定失敗：' + e.message);
