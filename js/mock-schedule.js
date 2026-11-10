@@ -221,7 +221,7 @@ export async function schedule(action, me, b, db, s, hooks) {
         putDay(st, c.emp_id, c.date, cell, 'manual');
       }
       const allClear = cells.every((c) => c.clear);
-      st.log.push({ period, who: me.code, action: 'save', detail: (allClear && b.reason === 'clearPeriod' ? '整期清空 ' : allClear ? '清空 ' : '') + cells.length + ' 格' });
+      st.log.push({ period, who: me.code, action: 'save', detail: (b.reason === 'import' ? '匯入 Excel ' : allClear && b.reason === 'clearPeriod' ? '整期清空 ' : allClear ? '清空 ' : '') + cells.length + ' 格' });
       const v = bump(); recheckNext(); return ok({ version: v });
     }
     case 'auto': {

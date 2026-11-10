@@ -8,6 +8,7 @@ import { termAt, LEAVES, NOTE_COLORS } from './rules.js';
 import { stHidden, setStHidden, stToggleHtml } from './stview.js';
 import { setupChecklist } from './checklist.js';
 import { getSession } from '../../js/auth.js';
+import { importButtons, bindImport } from './importui.js';
 
 const PUB_TEXT = { pending: '等待送到 LINE', sent: '已發布到 LINE', failed: '送 LINE 失敗', stale: '已被較新版本取代' };
 
@@ -162,6 +163,7 @@ export function renderBoard(ctx) {
     ${checkHtml}
     <div class="row sc-acts">
       ${locked || !canLock ? '' : `<button type="button" class="btn" id="scAuto"${ck.blockers.length ? ' disabled' : ''}>${ck.blockers.length ? `自動排班（先完成：${esc(ck.blockers.join('、'))}）` : '自動排班'}</button><label class="sc-chk"><input type="checkbox" id="scAll"> 連手動改過的也重排</label><button type="button" class="btn ghost" id="scClear">清空這一期</button>`}
+      ${importButtons(locked, canLock)}
       ${canLock ? `<button type="button" class="btn ${locked ? 'ghost' : ''}" id="scLock">${locked ? '解除鎖定' : '鎖定並發布'}</button>` : ''}
       ${canLock && pub && (pub.status === 'failed' || pub.status === 'pending') ? '<button type="button" class="btn ghost" id="scResend">立即重送</button>' : ''}
       <button type="button" class="btn ghost" id="scPdf">匯出 PDF</button>
@@ -322,6 +324,7 @@ export function renderBoard(ctx) {
 
   const onChip = el.querySelector('.sc-daychip.on'); if (onChip && onChip.scrollIntoView) onChip.scrollIntoView({ block: 'nearest', inline: 'center' });
   q('#scPrev').onclick = () => { movePeriod(-1); say(''); rerender(); };
+  bindImport(el, ses, say, rerender);      // 匯入 Excel／下載範本（importui.js）
   q('#scNext').onclick = () => { movePeriod(1); say(''); rerender(); };
   if (q('#scStToggle')) q('#scStToggle').onclick = () => { setStHidden(!stHidden()); rerender(); };
   q('#scViewGrid').onclick = () => { S.view = 'grid'; rerender(); };
