@@ -724,7 +724,7 @@ function buildCard(emp, date) {
           // 整天出差（申請沒填時段、那天也沒打卡）：預設班別清掉，否則班別 8 小時＋出差 8 小時＝16 小時（2026-10-10 Codex 審查，manager.html 同步）
           if (!r.start && !(emp.segments || []).length) { periodRows.textContent = ''; periodRows.append(periodRow(null, refresh)); }
         } else if (r.kind === 'miss') {
-          const full = C.missPeriods(emp.segments, r);
+          const full = C.missPeriods(emp.segments, r, emp.plan && emp.plan.work ? emp.plan.segs : null);
           if (full.length) {
             periodRows.textContent = '';
             full.forEach(p => periodRows.append(periodRow(p, refresh)));

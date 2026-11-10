@@ -333,7 +333,7 @@ function classifyRaw(inp) {
 
     if (r.kind === 'miss') {
       if (!segs.length && pv.mode !== 'plan' && r.miss_type !== 'both') return mismatch('沒有打卡可以接');
-      const mp = C.missPeriods(emp.segments, r);
+      const mp = C.missPeriods(emp.segments, r, emp.plan && emp.plan.work ? emp.plan.segs : null);
       const nOpen = segs.filter(isOpenSeg).length;
       if ((r.miss_type === 'in' || r.miss_type === 'out') ? nOpen > 1 : nOpen > 0) return full('還有別段沒打卡', '一張忘打卡單只補一段，其他段還缺卡');
       if (!mp.length || !missUsed(mp, r)) return mismatch('打卡 ' + (segs.length ? segs.map(C.segmentText).join('、') : '沒有') + '，和忘打卡單對不上');

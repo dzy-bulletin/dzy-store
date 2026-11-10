@@ -233,6 +233,20 @@ export function punchEvidence(it) {
   }).join('\n') + (it.kind === 'miss' && it.punches.some(p => p.status === 'rejected_out_of_range' && p.accuracy_m >= 500)
     ? '\n→ 有按但被擋，而且定位誤差很大＝多半是手機定位失準，申請時間合理' : '');
 }
+// 忘打卡預填的上班時間：往前取整；比最近一段班表的開始還晚（遲到）或早不到 15 分鐘，留班表開始時間
+function missIn(hm, planSegs) {
+  if (!hm) return hm;
+  const m = hhmmToMin(hm);
+  if (m === null) return hm;
+  let best = null, bestD = null;
+  (planSegs || []).forEach(p => {
+    const s = p && hhmmToMin(p.start);
+    if (s === null || s === undefined) return;
+    const d = ((m - s + 720) % 1440 + 1440) % 1440 - 720;
+    if (bestD === null || Math.abs(d) < Math.abs(bestD)) { bestD = d; best = p.start; }
+  });
+  return bestD !== null && bestD > -15 ? best : round15(hm, false);      // 遲到，或早到不滿 15 分（差不到 15 分鐘算照班表）→ 班表時間
+}
 // 打卡時間照參考時數的規則取整到 15 分（上班進位、下班捨去）
 export function round15(hm, up) {
   if (!hm) return hm;
@@ -241,8 +255,10 @@ export function round15(hm, up) {
   return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
 }
 // 忘打卡預填：當天打卡段（取整）＋申請補的那一邊；只有上下班都齊的段才成為時段列。回 [{start,end}]（空陣列＝不動畫面）
-export function missPeriods(segments, r) {
-  const segs = (segments || []).map(x => ({ in: round15(x.in, true), out: round15(x.out, false) }));
+// 取整（2026-11-10 Eason）：打卡時間一律往前取整到 15 分（10:20→10:15）；上班卡比班表晚時，上班留班表時間，薪資才標得出遲到分鐘。
+// planSegs＝當天班表各段 [{start,end}]（沒有就只取整）
+export function missPeriods(segments, r, planSegs) {
+  const segs = (segments || []).map(x => ({ in: missIn(x.in, planSegs), out: round15(x.out, false) }));
   if (r.miss_type === 'break') {
     // 中間休息沒打卡（2026-11-02，打卡系統 mala-clock-in 同名功能）：end＝休息開始、start＝回來上班；
     // 把含休息開始的那段拆兩段：上班卡～休息開始、回來上班～下班卡（同 manager.html）
