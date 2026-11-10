@@ -23,7 +23,10 @@ export function renderRoster(ctx) {
     ${vo ? '' : `<div id="duLineFail"></div>
     <div class="card" id="lineBindCard"><h2>LINE 綁定紀錄</h2>
     <p class="hint">同仁第一次用 LINE「鼎兆元打卡」打卡時，要<b>人在店裡</b>並輸入全名才能綁定。下面是最近 30 天的紀錄；<b>不是本人綁的請立刻按「解除」</b>，那位同仁下次打卡要重新輸入全名。</p>
-    <div class="du-msg" id="lbResult" hidden></div><div id="lbList"></div></div>`}`;
+    <div class="du-msg" id="lbResult" hidden></div>
+    <div class="row mt"><select id="bcSelect" class="grow" aria-label="選擇要產生綁定碼的同仁"><option value="">選擇同仁…</option></select><button type="button" class="btn" id="bcBtn">產生綁定碼</button></div>
+    <p class="hint">綁定碼當天和隔天有效，請當面交給本人。已綁定的同仁不會產生新碼。</p>
+    <div class="du-msg" id="bcResult" hidden></div><div id="lbList"></div></div>`}`;
   const live = () => el.isConnected;
   const q = s => el.querySelector(s);
   const aeBox = q('#aeResult'), reBox = q('#reResult'), sel = q('#reSelect'), reBtn = q('#reBtn'), gone = q('#reInactive');   // 非主管時前四個是 null，下面都只在 dm 時用
@@ -55,7 +58,8 @@ export function renderRoster(ctx) {
     });
   }
   function load() {
-    call('mgr_roster').then(r => { if (!live()) return; q('#duRosterFail').innerHTML = ''; myName = String(r.manager_name || ''); drawRoster(r.roster || []); },
+    call('mgr_roster').then(r => { if (!live()) return; q('#duRosterFail').innerHTML = ''; myName = String(r.manager_name || ''); drawRoster(r.roster || []);
+      const bc = q('#bcSelect'); if (bc) bc.innerHTML = '<option value="">選擇同仁…</option>' + (r.roster || []).filter(x => x.active).map(x => `<option value="${esc(x.emp_id)}">${esc(x.name)}（${esc(x.emp_id)}）</option>`).join(''); },
       e => { if (live()) failBar(q('#duRosterFail'), '同仁名冊', e, load); });
   }
   async function setActive(empId, active, srcBtn) {
@@ -78,7 +82,7 @@ export function renderRoster(ctx) {
 
   // ---- LINE 綁定紀錄（照原頁 manager.html initLineBinds）----
   const lbList = q('#lbList'), lbBox = q('#lbResult');
-  const LB_TYPE = { bind_name: '輸入全名綁定', bind_auto: '跨店同名（本人確認）', bind: '用打卡連結綁定' };
+  const LB_TYPE = { bind_name: '輸入全名綁定', bind_auto: '跨店同名（本人確認）', bind: '用打卡連結綁定', code_issued: '產生綁定碼' };
   const lbWhen = iso => { const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/); return m ? Number(m[2]) + '/' + Number(m[3]) + ' ' + m[4] + ':' + m[5] : ''; };
   function drawBinds(items) {
     if (!items.length) { lbList.innerHTML = '<p class="hint">最近 30 天沒有人綁定或解除。</p>'; return; }
@@ -97,6 +101,19 @@ export function renderRoster(ctx) {
       catch (e) { show(lbBox, '✕ ' + esc(e.message || '解除失敗，請再試一次'), true); b.disabled = false; b.textContent = '解除'; }
     });
   }
+  // ---- 產生綁定碼 ----
+  const bcSel = q('#bcSelect'), bcBtn = q('#bcBtn'), bcBox = q('#bcResult');
+  if (bcBtn) bcBtn.onclick = async () => {
+    const empId = bcSel.value;
+    if (!empId) return show(bcBox, '✕ 請先選擇同仁', true);
+    bcBtn.disabled = true;
+    try {
+      const r = await call('mgr_bind_code', { emp_id: empId });
+      show(bcBox, r.already ? '<b>' + esc(r.name) + '</b> 已經綁定 LINE，不用綁定碼。' : '<b>' + esc(r.name) + '</b> 的綁定碼：<b>' + esc(r.code) + '</b>（當天和隔天有效）');
+      loadBinds();
+    } catch (e) { show(bcBox, '✕ ' + esc(e.message || '產生失敗，請再試一次'), true); }
+    finally { bcBtn.disabled = false; }
+  };
   function loadBinds() {
     call('mgr_line_binds').then(r => { if (!live()) return; q('#duLineFail').innerHTML = ''; drawBinds(r.items || []); },
       e => { if (live()) failBar(q('#duLineFail'), 'LINE 綁定紀錄', e, loadBinds); });
