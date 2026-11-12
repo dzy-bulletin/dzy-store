@@ -6,7 +6,7 @@
 //       → 3 逐日配對（先滿足最少人數，用增廣路徑做二分圖配對）→ 4 修復（同週對調休假日）→ 4.2 備援同仁補缺人 → 5 整期檢查，沒有「擋」才回傳
 import { periodDates, addDays } from './period.js';
 import { shiftMinutes, gapMinutes, cellShift, cellShiftIds, isExtId } from './hours.js';
-import { checkPeriod, termAt, employed, isHoliday, allowedList, backupAt, ptCapMin, MIN_GAP, FT_OT_MAX, DAY_MAX } from './rules.js';
+import { checkPeriod, termAt, employed, isHoliday, allowedList, backupAt, ptCapMin, MIN_GAP, FT_OT_MAX, DAY_MAX, RULES5_FROM, ptRunMax, PT_WIN_DAYS, PT_WIN_MAX } from './rules.js';
 
 const REPAIR_MAX = 200;   // DAY_MAX 改從 rules.js 來（2026-11-01 改 10 小時）
 const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
@@ -82,18 +82,30 @@ function priorRun(ctx, e, start) {
   return run;
 }
 
-/** 期中到職／離職的正職：各週休假數，加總＝檢查規則 F2 的 ceil(在職天數×8/28)（2026-10-11 審查：原本每週各自四捨五入，28 個報到日有 12 個排不出來）。
+/** 期中到職／離職的正職（以及整期在職但有一週放不下 2 天休假的正職）：各週休假數，加總＝檢查規則 F2 的 ceil(在職天數×8/28)（2026-10-11 審查：原本每週各自四捨五入，28 個報到日有 12 個排不出來）。
  *  整週給 2 天，不滿一週的按比例取整數，差額依餘數大小補到不滿一週的那幾週（不超過該週在職天數）。整期在職或計時回 null（照原本每週算）。 */
-function ftPartialQuota(ctx, st, dates) {
+function ftPartialQuota(ctx, st, dates, fixed) {
   const inP = dates.filter(d => employed(st, d));
-  if (!inP.length || inP.length === 28 || (termAt(ctx.terms, st.emp_id, inP[0]) || {}).kind !== 'ft') return null;
+  if (!inP.length || (termAt(ctx.terms, st.emp_id, inP[0]) || {}).kind !== 'ft') return null;
+  const e = st.emp_id;
   const lens = [0, 1, 2, 3].map(w => dates.slice(w * 7, w * 7 + 7).filter(d => employed(st, d)).length);
+  // 每週「放得下幾天休假」：在職、而且不是請假、手排的班、指定上班／班別、正職國定假日（預設上班）的日子。
+  // 原本用在職天數判斷，不滿一週的那幾天剛好全是請假或指定上班時，分到那一週的休假排不進去，整期被 F2 擋（2026-11-10 挑錯 #6）
+  const cap = [0, 1, 2, 3].map(w => dates.slice(w * 7, w * 7 + 7).filter(d => {
+    if (!employed(st, d)) return false;
+    const c = fixed && fixed[e] ? fixed[e][d] : null;
+    if (c) return (c.day_type === 'R' || c.day_type === 'H') && !c.shift_id;
+    const p = pinOf(ctx, e, d);
+    return !((p && p.kind !== 'off') || (!p && isHoliday(ctx.holidays, d)));
+  }).length);
+  // 整期在職、每週都放得下 2 天：照原本每週 2 天排。某一週放不下（例：春節那週請假＋指定＋國定假日要上班，只剩 1 天能休）才把差額分到別週
+  if (inP.length === 28 && cap.every(c => c >= 2)) return null;
   const raw = lens.map(n => (n === 7 ? 2 : 2 * n / 7));
-  const q = raw.map(Math.floor);
+  const q = raw.map((x, i) => Math.min(Math.floor(x), cap[i]));
   let left = Math.ceil(inP.length * 8 / 28) - q.reduce((a, b) => a + b, 0);
   const order = [0, 1, 2, 3].filter(w => lens[w] > 0 && lens[w] < 7).sort((a, b) => (raw[b] - q[b]) - (raw[a] - q[a]) || a - b);
   while (left > 0) {
-    const w = order.find(i => q[i] < lens[i]) ?? [0, 1, 2, 3].find(i => q[i] < lens[i]);
+    const w = order.find(i => q[i] < cap[i]) ?? [0, 1, 2, 3].filter(i => q[i] < cap[i]).sort((a, b) => q[a] - q[b] || a - b)[0];      // 不滿一週的都放不下了：給目前休最少的那一週
     if (w === undefined) break;
     q[w]++; left--;
     const at = order.indexOf(w); if (at >= 0) order.push(order.splice(at, 1)[0]);
@@ -119,9 +131,20 @@ function planOffDays(ctx, dates, fixed, guoSkip) {
     const e = st.emp_id;
     plan[e] = {};
     bkPlan(st);
-    const limit = (termAt(ctx.terms, e, dates[0]) || {}).kind === 'pt' ? 6 : 12;
+    // 連上上限看「這期在職第一天」的身分：期中報到、身分從報到日起的人，期首那天查不到身分，原本會被當成正職的 12 天（2026-11-10 挑錯 #12）
+    const isPt = (termAt(ctx.terms, e, dates.find(d => employed(st, d)) || dates[0]) || {}).kind === 'pt';
+    const limit = isPt ? ptRunMax(dates[0]) : 12;
+    // T02 起計時任 7 天最多排 5 天（rules.js P9）：挑休假時連同前 6 天一起看（跨週、跨期），原本只看每週日到週六各休幾天（2026-11-10 挑錯 #1）
+    const ptWin = isPt && dates[0] >= RULES5_FROM;
+    let hist = [];
+    if (ptWin) for (let i = PT_WIN_DAYS - 1; i >= 1; i--) { const c = (ctx.days[e] || {})[addDays(dates[0], -i)]; hist.push(!!(c && c.shift_id)); }
+    const winOk = (works, nextF) => {
+      const seq = hist.concat(works, nextF.slice(0, PT_WIN_DAYS - 1));      // 下一週只算「一定要上班」的天：這樣還超過，下週就沒有救了
+      for (let i = PT_WIN_DAYS - 1; i < seq.length; i++) { let n = 0; for (let k = i - PT_WIN_DAYS + 1; k <= i; k++) if (seq[k]) n++; if (n > PT_WIN_MAX) return false; }
+      return true;
+    };
     let run = priorRun(ctx, e, dates[0]);
-    const quota = ftPartialQuota(ctx, st, dates);
+    const quota = ftPartialQuota(ctx, st, dates, fixed);
     for (let w = 0; w < 4; w++) {
       const wk = dates.slice(w * 7, w * 7 + 7).filter(d => employed(st, d) && !bkDay(ctx, e, d));   // 期中才開始／結束備援：備援的日子另外處理（bkPlan）
       const free = wk.filter(d => !fixed[e][d]);
@@ -136,28 +159,33 @@ function planOffDays(ctx, dates, fixed, guoSkip) {
       const cand = free.filter(d => !mustWork.has(d) && !pinnedOff.includes(d));
       // 下一週開頭「一定要上班」的天數（固定的班、指定上班、正職國定假日）：這週結尾連上的天數要留空間給它們，
       //   不然下一週再怎麼挑都會超過連上上限（2026-10-31 光復徐佑昕：11/20、11/21 指定休湊滿第 3 週休假，11/11–11/17 被排成連上 7 天）
-      let lead = 0;
+      //   nextForced＝下一週每一天是不是「一定要上班」；lead＝從週日起連續幾天。計時任 7 天最多排 5 天（T02 起）要看整個下一週：
+      //   下週一指定上班、這週二到六又排滿，下週再怎麼挑都會超過（2026-11-10 挑錯 #1）
+      const nextForced = [];
       if (w < 3) {
         for (const d of dates.slice(w * 7 + 7, w * 7 + 14)) {
           const c = fixed[e][d], p = pinOf(ctx, e, d);
           const ftD = (termAt(ctx.terms, e, d) || {}).kind === 'ft';
-          const forced = c ? !!c.shift_id : (employed(st, d) && ((p && p.kind !== 'off') || (!p && ftD && isHoliday(ctx.holidays, d))));
-          if (!forced) break;
-          lead++;
+          nextForced.push(c ? !!c.shift_id : (employed(st, d) && ((p && p.kind !== 'off') || (!p && ftD && isHoliday(ctx.holidays, d)))));
         }
       }
-      const search = (nPick, ahead) => {
+      let lead = 0;
+      while (lead < nextForced.length && nextForced[lead]) lead++;
+      const search = (nPick, ahead, nextF) => {
         let best = null, bestScore = Infinity, bestRun = run;
         for (const pick of combos(cand, Math.min(cand.length, nPick))) {
           const offs = new Set(pinnedOff.concat(pick));
           let r = run, okRun = true;
+          const wkWorks = [];
           for (const d of dates.slice(w * 7, w * 7 + 7)) {
             const c = fixed[e][d];
             const works = c ? !!c.shift_id : (employed(st, d) && !offs.has(d) && !bkDay(ctx, e, d));
+            wkWorks.push(works);
             r = works ? r + 1 : 0;
             if (r > limit) { okRun = false; break; }
           }
           if (!okRun || r + ahead > limit) continue;
+          if (ptWin && !winOk(wkWorks, nextF)) continue;
           let score = 0;
           for (const d of pick) {
             const need2 = needOf(ctx, d);
@@ -174,9 +202,9 @@ function planOffDays(ctx, dates, fixed, guoSkip) {
       // 照該休的天數挑；挑不出不超過連上上限的組合（休假天數已被指定休假湊滿、或下一週開頭一定要上班），就多休一天再挑，
       //   一次加一天、加到挑得出來為止（寧可多休，也不排出「擋」讓整期存不了）。真的加到底都不行才照舊硬排
       const base = Math.max(0, k - pinnedOff.length);
-      let { best, bestRun } = search(base, lead);
-      for (let extra = 1; !best && base + extra <= cand.length; extra++) ({ best, bestRun } = search(base + extra, lead));
-      if (!best) ({ best, bestRun } = search(base, 0));
+      let { best, bestRun } = search(base, lead, nextForced);
+      for (let extra = 1; !best && base + extra <= cand.length; extra++) ({ best, bestRun } = search(base + extra, lead, nextForced));
+      if (!best) ({ best, bestRun } = search(base, 0, []));
       if (!best) best = new Set(pinnedOff.concat(cand.slice(0, Math.max(0, k - pinnedOff.length))));
       for (const d of dates.slice(w * 7, w * 7 + 7)) {
         if (!employed(st, d) || fixed[e][d] || bkDay(ctx, e, d)) continue;
@@ -185,6 +213,7 @@ function planOffDays(ctx, dates, fixed, guoSkip) {
       }
       run = bestRun;
       if (!best.size) { let r = run; for (const d of dates.slice(w * 7, w * 7 + 7)) { const c = fixed[e][d]; r = (c ? !!c.shift_id : plan[e][d] === 'work') ? r + 1 : 0; } run = r; }
+      if (ptWin) hist = hist.concat(dates.slice(w * 7, w * 7 + 7).map(d => { const c = fixed[e][d]; return c ? !!c.shift_id : plan[e][d] === 'work'; })).slice(-(PT_WIN_DAYS - 1));
     }
     // 正職國定假日假（Eason 2026-10-12）：本期每一天國定假日各補一天，排在離那天最近的一週（同週優先）、同一週不排兩天，
     //   再挑人手最寬裕的上班日（不挑國定假日、指定過的日子）。手動排好的國定假日假先抵掉最早的國定假日。
@@ -224,6 +253,7 @@ export function assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixed
   const need = needOf(ctx, d);
   fixedCount = fixedCount || {};                                     // 已固定的班（指定某班、手動）先算進人數（GPT 上線前審查 15）
   const capLeft = (extra && extra.capLeft) || {};                    // 計時同仁這期還剩幾分鐘可排（2026-10-11 Codex 審查：原本只用平均班長估天數，會超過上限）
+  const nextAny = (extra && extra.nextAny) || {};                    // 明天指定上班（沒指定班別）的人 → 明天能上的班；今天排的班要讓其中至少一個隔得夠（2026-11-10 挑錯 A4）
   const fixedShift = (extra && extra.fixedShift) || {};              // 這天已固定班的人 → 班別（不排同班的配對要一起看）
   const shiftIds = ownIds(ctx).filter(s => ctx.shifts[s].active !== 0);
   workers = workers.slice().sort((a, b) => prioOf(ctx, a) - prioOf(ctx, b));     // 順位前面的先挑（沒人設順位時順序不變：sort 是穩定的）
@@ -236,6 +266,7 @@ export function assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixed
     if (p && p.kind === 'shift' && p.shift_id !== s) return false;
     if (prevShift[e] && gapMinutes(addDays(d, -1), prevShift[e], d, sh) < MIN_GAP) return false;
     if (nextShift[e] && gapMinutes(d, sh, addDays(d, 1), nextShift[e]) < MIN_GAP) return false;
+    if (nextAny[e] && nextAny[e].length && !nextAny[e].some(sh2 => gapMinutes(d, sh, addDays(d, 1), sh2) >= MIN_GAP)) return false;
     return true;
   };
   // 優先班別蓋過輪替公平：有設的人先拿，同一班兩人都想要時順位前面的先拿
@@ -346,16 +377,29 @@ function buildDays(ctx, dates, fixed, plan) {
   const problems = [];
   // 計時同仁每期時數上限：先扣掉已固定的班，配班時逐天扣
   const capLeft = {};
+  const hold = {};                                                    // 替「指定上班」保留的時數：{ emp: { date: 分鐘 } }
   for (const st of ctx.staff) {
     const first = dates.find(d => employed(st, d)) || dates[0];
     const t = termAt(ctx.terms, st.emp_id, first);
     const cap = ptCapMin(ctx.terms, st.emp_id, dates, first);           // 期中改目標工時：照天數比例分段，跟 P6 同一套（2026-10-28 Codex 審查）
     if (!t || t.kind !== 'pt' || cap == null) continue;
     capLeft[st.emp_id] = cap - dates.reduce((a, d) => { const c = fixed[st.emp_id][d]; const sh = cellShift(ctx.shifts, c); return a + (sh ? shiftMinutes(sh) : 0); }, 0);
+    // 指定上班（沒指定班別）的日子先把時數留起來（照那天能上的最短的班算），輪到那天才放回去；
+    // 不然前面的日子先把上限排滿，指定上班那天「這期時數已經排滿」→ 指定落空被擋、整期排不出來（2026-11-10 挑錯 A5）
+    for (const d of dates) {
+      const p = pinOf(ctx, st.emp_id, d);
+      if (!p || p.kind !== 'work' || fixed[st.emp_id][d] || !employed(st, d) || plan[st.emp_id][d] !== 'work') continue;
+      const al = allowedOf(ctx, st.emp_id, d);
+      if (!al.length) continue;
+      const m = Math.min(...al.map(s => shiftMinutes(ctx.shifts[s])));
+      (hold[st.emp_id] = hold[st.emp_id] || {})[d] = m;
+      capLeft[st.emp_id] -= m;
+    }
   }
   for (const d of dates) {
     const workers = [];
     const nextShift = {};
+    const nextAny = {};
     const fixedCount = {};
     const fixedShift = {};
     for (const st of ctx.staff) {
@@ -365,10 +409,12 @@ function buildDays(ctx, dates, fixed, plan) {
       if (plan[e][d] === 'off') { out[e][d] = { day_type: labels[e][d], shift_id: null, leave: null, source: 'auto' }; continue; }
       if (plan[e][d] === 'guo') { out[e][d] = { day_type: 'L', shift_id: null, leave: '國', source: 'auto' }; continue; }
       workers.push(e);
-      const nx = fixed[e][addDays(d, 1)];
+      if (hold[e] && hold[e][d] !== undefined) { capLeft[e] += hold[e][d]; delete hold[e][d]; }      // 輪到指定上班這天：把替它留的時數放回來
+      const d1 = addDays(d, 1), nx = fixed[e][d1], p1 = pinOf(ctx, e, d1);
       if (nx && nx.shift_id) nextShift[e] = cellShift(ctx.shifts, nx);
+      else if (!nx && p1 && p1.kind === 'work' && dates.includes(d1) && employed(st, d1) && plan[e][d1] === 'work') nextAny[e] = allowedOf(ctx, e, d1).map(s => ctx.shifts[s]).filter(sh => shiftMinutes(sh) <= DAY_MAX);
     }
-    const { assign, unassigned, conflicts } = assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixedCount, { capLeft, fixedShift });
+    const { assign, unassigned, conflicts } = assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixedCount, { capLeft, fixedShift, nextAny });
     const nm = (e) => (ctx.staff.find(s => s.emp_id === e) || {}).name;
     for (const [a, b] of conflicts) problems.push(`${md(d)} ${nm(a)} 和 ${nm(b)} 設定不排同一班，但這天排不開（其中有人是手動固定的班），請手動調整`);
     for (const e of workers) {

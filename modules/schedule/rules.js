@@ -12,12 +12,12 @@
 //   pins: { emp_id: { date: { kind:'off'|'work'|'shift', shift_id } } },
 //   pairs: [[emp_a, emp_b]],
 //   holidays: { validThrough, days: { date: name } },
-//   monthOtMin: { 'YYYY-MM': { emp_id: 分鐘 } },     // 本期碰到的曆月、期外日子的加班分鐘（伺服器先算好）
+//   monthOtMin: {}                                   // 2026-11-11 起不用了（Eason：加班上限只看當期）；原本是同一個月、別期日子的加班分鐘。欄位留著給舊呼叫端，內容不讀
 //   stations: { id: { name, active, sort } }, stationNeed: { date: { station_id: 最少人數 } }   // 工作站別（沒有使用中的站就不檢查 T1／T2）；days 的格子多 station_id
 // }
 // 回傳 [{ code, level:'block'|'warn'|'info', emp_id, date, msg }]
 import { periodDates, addDays, diffDays, weekday } from './period.js';
-import { shiftMinutes, gapMinutes, cellShift, cellShiftIds, combineShifts, isExtId, localCell } from './hours.js';
+import { shiftMinutes, gapMinutes, cellShift, cellShiftIds, combineShifts, isExtId, localCell, breakOk } from './hours.js';
 
 export const H = 60;
 const FT_DAY_NORMAL = 10 * H, PT_DAY_NORMAL = 8 * H;
@@ -27,6 +27,12 @@ const PERIOD_NORMAL = 160 * H, WEEK_NORMAL = 40 * H;
 export const RULES5_FROM = '2026-11-29';
 export const MONTH_OT = 46 * H, MONTH_OT_WARN = 36 * H;   // 每月加班：超過 46 擋、超過 36 警告（Eason 2026-10-27，取代 10-11 的「46 只提醒」）
 const PT_OT_RUN = 6;                         // 計時連上第 6 天＝休息日加班，提醒（Eason 2026-10-27；第 7 天由 P3 擋）
+/** 計時連排「一般工作日」上限（天），自動排班與檢查共用同一組數字：T02（RULES5_FROM）起最多 5 天（第 6 天只能排成休息日出勤，排成一般工作日 P8 擋）；
+ *  之前最多 6 天（第 7 天 P3 擋）。自動排班不會替計時排休息日出勤，所以 T02 起它最多連排 5 天。
+ *  2026-11-10 挑錯 #1：檢查改了、自動排班沒跟著改，T02 起有計時同仁的店自動排班排完被自己擋下 */
+export const ptRunMax = (periodStart) => (periodStart >= RULES5_FROM ? PT_OT_RUN - 1 : PT_OT_RUN);
+/** 計時任 PT_WIN_DAYS 天最多排 PT_WIN_MAX 天一般班（P9，T02 起；休息日出勤不算）＝每 7 天至少 2 天沒排班 */
+export const PT_WIN_DAYS = 7, PT_WIN_MAX = 5;
 // 備註字體顏色（2026-11-01 Eason）：代號 → 色碼；沒選＝預設黑字。伺服器只收這幾個代號
 export const NOTE_COLORS = { red: ['紅', '#d32f2f'], blue: ['藍', '#1565c0'], green: ['綠', '#2e7d32'], orange: ['橘', '#e65100'], purple: ['紫', '#6a1b9a'] };
 export const MIN_GAP = 11 * H;                // 換班間隔：Eason 2026-10-11 改 12、10-31 改回 11（§34 下限）、11-01 定 12、2026-11-02 改回 11（人力不足；打卡 Rest.gs 同日改 11），自動排班與檢查共用這一個值；11 是法定下限不能再低
@@ -123,10 +129,16 @@ export function orderTwo(shifts, c) {
   }
   const err = twoError(shifts, cell);
   if (err) return { err };
-  const mins = shiftMinutes(cellShift(shifts, cell));
+  const both = cellShift(shifts, cell);
+  const mins = shiftMinutes(both);
   if (mins > DAY_MAX) return { err: `兩個班合起來 ${hm(mins)}，一天最多 ${DAY_MAX / H} 小時` };
+  // 兩班剛好相連會併成一段（不用中間打卡）：併起來的那一段照單一班別同一條規則——超過 6 小時、休息不到 30 分鐘就不能存。
+  // 原本只查重疊、段數、合計 10 小時，10–14＋14–18 這種連續 8 小時沒休息也存得進去（2026-11-10 挑錯 #11；Eason 2026-11-11 照建議）。相連本身仍然可以
+  if (!breakOk(both)) return { err: TWO_BREAK_MSG };
   return { cell };
 }
+/** 兩班連起來那一段超過 6 小時、休息不到 30 分鐘（勞基法 §35）：存檔時的錯誤訊息；已經存在的格子由 checkPeriod 出黃字 V2 */
+export const TWO_BREAK_MSG = '兩個班連起來有一段超過 6 小時，休息至少要 30 分鐘（勞基法 §35）：請在其中一班排休息，或把兩班隔開';
 
 /** 一人逐日分鐘：{date: {work, normal, ot}}；照 spec 第 3 節分正常與加班（四週變形：日 10 小時、期 160 小時；每週制：日 8、週 40） */
 export function minutesOf(ctx, emp, dates) {
@@ -229,6 +241,8 @@ export function checkPeriod(ctx) {
       if (c.shift_id && !ctx.shifts[c.shift_id]) add('V0', 'block', e, d, `${who} ${md(d)} 的班別已不存在`);
       const e2 = twoError(ctx.shifts, c);
       if (e2) add('V0', 'block', e, d, `${who} ${md(d)}：${e2}`);
+      // 修正前就存進去的「兩班相連、連續超過 6 小時沒休息」：只提醒不擋（新的存不進去，見 orderTwo）
+      else if (c.shift2_id) { const both = cellShift(ctx.shifts, c); if (both && both.two && !breakOk(both)) add('V2', 'warn', e, d, `${who} ${md(d)}：${TWO_BREAK_MSG}`); }
     }
 
     // 單日總工時（兩種制度都擋 DAY_MAX＝10 小時）
@@ -246,9 +260,11 @@ export function checkPeriod(ctx) {
       if (!t || told) continue;
       if (t.kind === 'ft' && run >= 13) { add('F6', 'block', e, d, `${who} 到 ${md(d)} 已連續上班 ${run} 天，最多 12 天`); told = true; }
       if (t.kind === 'pt' && run >= 7) { add('P3', 'block', e, d, `${who} 到 ${md(d)} 已連續上班 ${run} 天，一定要休一天`); told = true; }
-      // 計時連上第 6 天：T02 起不論工作日或休息日出勤，有班就擋（Eason 2026-11-09）；T02 前照舊，已排成「休息日出勤」的由 P2 提醒，這裡只提醒還排成一般工作日的
+      // 計時連上第 6 天（Eason 2026-11-11：「計時在第六天出勤要是休息日加班，第七天出勤要擋」；取代 2026-11-09 的「休息日出勤也算有排班、第 6 天一律擋」）：
+      //   T02 起第 6 天排成一般工作日＝擋，只能排成休息日出勤（P2 提醒要付加班費）；第 7 天不管哪一種都由上面的 P3 擋。
+      //   T02 前照舊：排成一般工作日只提醒（P7），已排成「休息日出勤」的由 P2 提醒
       if (t.kind === 'ft' && run >= 7 && run <= 12 && start >= RULES5_FROM && !reviewed) { add('F9', 'warn', e, d, `${who} 到 ${md(d)} 連續上班 ${run} 天，7～12 天要部門主管覆核，鎖定時要確認已取得同意`); reviewed = true; }
-      if (t.kind === 'pt' && run === PT_OT_RUN && mine[d] && mine[d].shift_id && start >= RULES5_FROM) { add('P8', 'block', e, d, `${who} 到 ${md(d)} 連排 ${run} 天，計時最多連排 5 天（休息日出勤也算有排班）`); continue; }
+      if (t.kind === 'pt' && run === PT_OT_RUN && mine[d] && mine[d].day_type === 'W' && start >= RULES5_FROM) { add('P8', 'block', e, d, `${who} 到 ${md(d)} 連排 ${run} 天，計時最多連排 5 天（第 6 天只能排成休息日出勤）`); continue; }
       if (t.kind === 'pt' && run === PT_OT_RUN && mine[d] && mine[d].day_type === 'W') add('P7', 'warn', e, d, `${who} ${md(d)} 是連續上班第 ${PT_OT_RUN} 天，這天算休息日加班（要付加班費）：請改成「班別（休息日出勤）」`);
     }
 
@@ -324,12 +340,12 @@ export function checkPeriod(ctx) {
       if (cap != null && total > cap) add('P6', 'warn', e, end, `${who} 這期排了 ${hm(total)}，超過上限 ${hm(cap)}`);
     }
 
-    // 計時每 7 天至少 2 天沒排班（1-13）：休息日出勤也算有排班（Eason 2026-11-09）
+    // 計時每 7 天至少 2 天沒排班（1-13）：休息日出勤不算進這 5 天（Eason 2026-11-11 改回；11-09 曾改成也算）
     if (start >= RULES5_FROM && t0 && t0.kind === 'pt') {
       for (const d of inPeriod) {
         let n = 0;
-        for (let i = 0; i < 7; i++) { const c = (ctx.days[e] || {})[addDays(d, -i)]; if (c && c.shift_id) n++; }
-        if (n > 5) { add('P9', 'block', e, d, `${who} 到 ${md(d)} 前 7 天排了 ${n} 天班，每 7 天至少要 2 天沒排班`); break; }
+        for (let i = 0; i < PT_WIN_DAYS; i++) { const c = (ctx.days[e] || {})[addDays(d, -i)]; if (c && c.shift_id && c.day_type === 'W') n++; }
+        if (n > PT_WIN_MAX) { add('P9', 'block', e, d, `${who} 到 ${md(d)} 前 7 天排了 ${n} 天班，每 7 天至少要 2 天沒排班`); break; }
       }
     }
     // 加班上限只看 28 天週期（4-17，Eason 2026-11-08 選定；法定上限是曆月，已告知風險）
@@ -338,11 +354,12 @@ export function checkPeriod(ctx) {
       if (tot >= MONTH_OT) add('C2', 'block', e, null, `${who} 這一期加班 ${hm(tot)}，已滿上限 46 小時，要減少加班才能鎖定`);
       else if (tot > MONTH_OT_WARN) add('C9', 'warn', e, null, `${who} 這一期加班 ${hm(tot)}，超過 36 小時（上限 46 小時）`);
     }
-    // 曆月加班（含期外月份）：超過 46 小時擋、超過 36 小時警告（Eason 2026-10-27）；RULES5_FROM 起改看週期
+    // T02 以前（T00、T01 各自落在同一個曆月）：這一期的加班超過 46 小時擋、超過 36 小時警告（Eason 2026-10-27）；RULES5_FROM 起見上面。
+    // 加班上限只看當期（Eason 2026-11-11）：不再加「同一個月、別期日子」的加班（原本 T01 會把 T02 的 11/29、11/30 算進 11 月）
     const byMonth = {};
     if (start < RULES5_FROM) for (const d of dates) { const m = d.slice(0, 7); byMonth[m] = (byMonth[m] || 0) + mins[d].ot; }
     for (const m in byMonth) {
-      const tot = byMonth[m] + ((ctx.monthOtMin && ctx.monthOtMin[m] || {})[e] || 0);
+      const tot = byMonth[m];
       if (tot > MONTH_OT) add('C2', 'block', e, null, `${who} ${+m.slice(5)} 月加班 ${hm(tot)}，超過上限 46 小時，要減少加班才能鎖定`);
       else if (tot > MONTH_OT_WARN) add('C9', 'warn', e, null, `${who} ${+m.slice(5)} 月加班 ${hm(tot)}，超過 36 小時（上限 46 小時）`);
     }

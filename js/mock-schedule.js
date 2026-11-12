@@ -130,7 +130,7 @@ export async function schedule(action, me, b, db, s, hooks) {
   const recheckNext = () => {
     const nx = shiftPeriod(period, 1), r = st.periods[nx];
     if (!r || !r.locked) return;
-    r.needs_recheck = checkPeriod(Object.assign(ctxOf(st, nx, hol), { shifts: Object.assign({}, st.shifts, mockExtShifts(db, me.code)) })).some((x) => x.level === 'block' && ['C1', 'F6', 'P3'].includes(x.code));
+    r.needs_recheck = checkPeriod(Object.assign(ctxOf(st, nx, hol), { shifts: Object.assign({}, st.shifts, mockExtShifts(db, me.code)) })).some((x) => x.level === 'block');      // 已鎖定的期只要冒出「擋」就標（同 server/schedule.js flagLocked，2026-11-10）
   };
   const pubSet = (kind, per) => {
     const list = st.pubs[per || period] = st.pubs[per || period] || [];
@@ -293,6 +293,10 @@ export async function schedule(action, me, b, db, s, hooks) {
       if (Array.isArray(x.segs) && x.segs.length >= 2) { try { sh = normSegs(x.segs); } catch (e) { return fail('BAD_INPUT', e.message); } }   // 分段班（同 server/schedule.js saveShift）
       if (!breakOk(sh)) return fail('BAD_INPUT', sh.segs ? '有一段超過 6 小時，那一段休息至少要 30 分鐘（勞基法 §35）' : '一個班超過 6 小時，休息至少要 30 分鐘（勞基法 §35）');
       if (shiftMinutes(sh) > 600) return fail('BAD_INPUT', '一班不能超過 10 小時');   // 同伺服器（2026-11-01 由 12 改 10）
+      if (x.id && x.active === false && st.shifts[x.id] && st.shifts[x.id].active) {      // 還有人的固定班別是這個班：不能停用（同 server/schedule.js saveShift，2026-11-10）
+        const fx = st.staff.filter((m) => m.fixed_shift === x.id && (!m.leave_date || m.leave_date >= todayTaipei()));
+        if (fx.length) return fail('BAD_INPUT', `還有 ${fx.length} 位同仁的固定班別是這個班（${fx.slice(0, 3).map((m) => m.name).join('、')}${fx.length > 3 ? ' 等' : ''}），停用後他們平日會沒有班。請先到「固定班別」把他們改成別的班，再停用`);
+      }
       let id = x.id; if (!id) { let i = Object.keys(st.shifts).length + 1; while (st.shifts['S' + i]) i++; id = 'S' + i; }
       st.shifts[id] = Object.assign({ id, name: String(x.name).trim(), color: x.color || '', sort: Number(x.sort) || 0, active: x.active === false ? 0 : 1 }, sh);
       return ok({ id });
@@ -527,7 +531,7 @@ export async function schedule(action, me, b, db, s, hooks) {
     case 'unlock': {
       const n = needDuty(); if (n) return n;
       const g = guard(true); if (g) return g;
-      Object.assign(prow(st, period), { locked: false, locked_at: null, locked_by: null });
+      Object.assign(prow(st, period), { locked: false, locked_at: null, locked_by: null, needs_recheck: false });
       const withdraw = clockAlias !== null && (st.pubs[period] || []).some((x) => x.kind === 'publish');
       if (withdraw) pubSet('unpublish');
       lockLogAdd('unlock', withdraw ? '從 LINE 撤下' : '');

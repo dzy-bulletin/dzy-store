@@ -97,12 +97,12 @@ function autoGen(st, hol, today) {
     if (!st.genLog[p]) { generate(st, periodDates(p), hol); st.genLog[p] = 1; }
   }
 }
-function generate(st, span, hol) {
+function generate(st, span, hol, from) {      // from＝只動這天起（重新產生這一期：明天起，同 server/schedule-hq.js fixedGenerate）
   let generated = 0, kept = 0;
   for (const e of st.staff) {
     st.days[e.emp_id] = st.days[e.emp_id] || {};
     for (const d of span) {
-      if ((st.modeFrom && d < st.modeFrom) || !employed(e, d)) continue;
+      if ((st.modeFrom && d < st.modeFrom) || (from && d < from) || !employed(e, d)) continue;
       const ex = st.days[e.emp_id][d];
       if (ex && (ex.source === 'manual' || (ex.day_type === 'L' && ex.leave !== '國'))) { kept++; continue; }
       const want = wantFixed(st, e, d, hol);
@@ -293,7 +293,7 @@ export function hqAction(action, me, b, db, hol, pa, seedStores) {
     }
     if (action === 'fixedGenerate') {
       if (st.modeFrom && span[span.length - 1] < st.modeFrom) return fail('BAD_INPUT', `${spanUnit}在固定排班開始之前`);
-      const r = generate(st, span, hol);
+      const r = generate(st, span, hol, addDays(today, 1));      // 已經過去的日子與今天不動（2026-11-10）
       if (r.generated > 0) { st.fixedVersion++; publishDates(st, span); }
       return ok({ generated: r.generated, kept: r.kept });
     }
@@ -319,6 +319,11 @@ export function hqAction(action, me, b, db, hol, pa, seedStores) {
           if (ex && sameCell(ex, want)) continue;
           putDay(st, emp.emp_id, d, want, 'auto'); generated++;
         }
+        // 期中才加進來的人：週六日還沒有格子就補上休息日／例假（同伺服器，2026-11-10）
+        for (let d = from; d <= last; d = addDays(d, 1)) {
+          if ((weekday(d) !== 0 && weekday(d) !== 6) || !employed(emp, d) || mine2[d]) continue;
+          putDay(st, emp.emp_id, d, wantFixed(st, emp, d, hol), 'auto'); generated++;
+        }
       }
       if (generated > 0) { st.fixedVersion++; const ds = []; for (let d = from; d <= last; d = addDays(d, 1)) ds.push(d); publishDates(st, ds); }
       return ok({ ok: true, generated });
@@ -341,8 +346,8 @@ export function hqAction(action, me, b, db, hol, pa, seedStores) {
     if (!mine.length && !canView && !pa.shiftAdmin) return fail('FORBIDDEN', '你沒有這家店的排班權限');      // 同 server：總部總監沒有員編也能讀班別清單
     const ids = new Set(mine);
     if (pa.approveAll) st.staff.forEach((s) => ids.add(s.emp_id)); else (pa.approveIds || []).forEach((e) => ids.add(e));
-    const rows = st.staff.filter((s) => ids.has(s.emp_id)).sort((a, c) => (mine.includes(c.emp_id) ? 1 : 0) - (mine.includes(a.emp_id) ? 1 : 0));
     const dates = spanD(month), staff = [], cells = {};
+    const rows = st.staff.filter((s) => ids.has(s.emp_id) && (mine.includes(s.emp_id) || dates.some((d) => employed(s, d)))).sort((a, c) => (mine.includes(c.emp_id) ? 1 : 0) - (mine.includes(a.emp_id) ? 1 : 0));      // 同 server：只列這一期在職的部屬
     for (const s of rows) {
       const r = mrow(st, s.emp_id, month);
       const base = Object.assign({}, st.days[s.emp_id] || {});

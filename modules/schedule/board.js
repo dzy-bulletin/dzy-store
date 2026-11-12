@@ -171,7 +171,7 @@ export function renderBoard(ctx) {
       <span class="grow"></span>
       <div class="sc-seg" role="group" aria-label="檢視方式"><button type="button" id="scViewGrid" class="${view === 'grid' ? 'on' : ''}">整期</button><button type="button" id="scViewDay" class="${view === 'day' ? 'on' : ''}">單日</button></div>
     </div>
-    ${D.meta.needs_recheck ? '<div class="note warn mt" role="alert">這一期已發布，但上一期改過之後，跨期的換班間隔或連續上班天數不合規定了。請解除鎖定、修正後再鎖定。</div>' : ''}
+    ${D.meta.needs_recheck ? '<div class="note warn mt" role="alert">這一期已鎖定，但之後的變動（上一期改班、同仁到職或離職日、別家門市排了同一個人）讓它出現不合規定的地方，請看提醒清單的紅字。請解除鎖定、修正後再鎖定。</div>' : ''}
     <div class="sc-months mt">${monthsHtml}</div>
     <div id="scMsg" class="${S.err ? 'err' : 'okmsg'}" role="status">${esc(S.err || S.msg || '')}</div>
   </div>`;

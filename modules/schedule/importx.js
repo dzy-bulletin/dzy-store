@@ -15,6 +15,22 @@ export function norm(v) {
   return String(v).normalize('NFKC').replace(/\s+/g, '').toUpperCase();
 }
 
+/** 檔名 → 'xlsx'｜'csv'｜'xls'（舊格式，請另存）｜'other'（不收）。需求：匯入只收 .xlsx／.csv（2026-11-10 挑錯：原本只擋 .xls，其他靠內容猜） */
+export function fileKind(name) {
+  const m = /\.([A-Za-z0-9]+)$/.exec(String(name || ''));
+  const ext = m ? m[1].toLowerCase() : '';
+  return ext === 'xlsx' ? 'xlsx' : ext === 'csv' ? 'csv' : ext === 'xls' ? 'xls' : 'other';
+}
+/** CSV 位元組 → 文字：先照 UTF-8 讀（去掉 BOM）；不是合法的 UTF-8 就照 Big5 讀（台灣 Windows 的 Excel「CSV（逗號分隔）」存的是 Big5，
+ *  原本一律當 UTF-8，姓名整排變亂碼；2026-11-10 挑錯）。bytes：Uint8Array 或 ArrayBuffer */
+export function decodeCsv(bytes) {
+  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let text;
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(u8); }
+  catch (e) { try { text = new TextDecoder('big5').decode(u8); } catch (e2) { text = new TextDecoder('utf-8').decode(u8); } }
+  return text.replace(/^\uFEFF/, '');
+}
+
 // Excel 日期序號（1900 系統）→ YYYY-MM-DD；用 UTC 算，不受電腦時區影響
 const serialYmd = (n) => { const t = new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 86400000); return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`; };
 
@@ -42,6 +58,24 @@ export function dateOf(v, dates) {
   m = /^(\d{1,2})日?$/.exec(s);
   if (m && +m[1] >= 1 && +m[1] <= 31) return dates.find((d) => +d.slice(8, 10) === +m[1]) || null;
   return null;
+}
+
+// 字的種類：中文、英文、數字、其他文字；空白、標點、括號＝''（可以當分隔）
+const charKind = (ch) => (!ch ? '' : /\p{Script=Han}/u.test(ch) ? 'han' : /[A-Z]/.test(ch) ? 'latin' : /[0-9]/.test(ch) ? 'digit' : /\p{L}/u.test(ch) ? 'other' : '');
+/** raw（Excel 那格的原字）裡有沒有「獨立一段」的 key（已經 norm 過的同仁姓名）：字與字之間可以夾空白；前後緊貼的字不能跟姓名頭尾同一類 */
+export function standsAlone(raw, key) {
+  const soft = String(raw === null || raw === undefined ? '' : raw).normalize('NFKC').toUpperCase();
+  const chars = Array.from(key);
+  if (!chars.length) return false;
+  const esc = (c) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(chars.map(esc).join('\\s*'), 'gu');
+  let m;
+  while ((m = re.exec(soft))) {
+    const before = Array.from(soft.slice(0, m.index)).pop(), after = Array.from(soft.slice(m.index + m[0].length))[0];
+    if ((!charKind(before) || charKind(before) !== charKind(chars[0])) && (!charKind(after) || charKind(after) !== charKind(chars[chars.length - 1]))) return true;
+    re.lastIndex = m.index + 1;
+  }
+  return false;
 }
 
 // 不是同仁的列（表格下方常見的統計列）：名字欄是這些字就整列略過，不列進「對不上的姓名」
@@ -200,16 +234,21 @@ export function buildPlan(D, parsed, picks) {
   const staff = (D.staff || []).filter((st) => !st.ext && dates.some((d) => employed(st, d)));
   const byNorm = {};
   for (const st of staff) (byNorm[norm(st.name)] = byNorm[norm(st.name)] || []).push(st);
-  // 名字比對：完全相同 → 唯一；不然看 Excel 那格有沒有「含」某位同仁的名字（「E11 林秀縈」「林秀縈(正職)」）；兩個以上算對不上
+  // 名字比對：完全相同 → 唯一；不然看 Excel 那格有沒有「含」某位同仁的名字（「E11 林秀縈」「林秀縈(正職)」）；兩個以上算對不上。
+  // 「含」要是獨立的一段：名字前後緊貼著同一類的字（中文貼中文、數字貼數字、英文貼英文）就不算——
+  // 名冊有「王明」、Excel 寫「王明華」是另一個人，原本會直接當成王明寫進去（2026-11-10 挑錯 #10）
   const autoEmp = (name) => {
     const t = norm(name);
     if (byNorm[t]) return byNorm[t].length === 1 ? byNorm[t][0].emp_id : null;
-    const hit = staff.filter((st) => norm(st.name) && t.includes(norm(st.name)));
+    const hit = staff.filter((st) => norm(st.name) && standsAlone(name, norm(st.name)));
     return hit.length === 1 ? hit[0].emp_id : null;
   };
   const supported = new Set();
   for (const x of D.support || []) if (x.kind === 'store' && x.emp) for (const d of Object.keys(x.days || {})) supported.add(x.emp + '|' + d);
   const unknownTokens = {}, unknownNames = [], rejects = [], keeps = [], dupNames = [], rows = [], writes = [];
+  // 檔案裡有哪幾天：沒列到的日期不動（同「檔案沒列到的同仁不動」）。原本缺的日期被當成空白格＝清空，只給兩週的檔案會把另外兩週清掉（2026-11-10 挑錯 #9）
+  const haveDates = new Set(parsed.dateCols ? parsed.dateCols.map((x) => x[1]) : parsed.rows.flatMap((r) => Object.keys(r.cells || {})));
+  const missingDates = dates.filter((d) => !haveDates.has(d));
   const used = new Set();
   const counts = { write: 0, change: 0, same: 0, skip: 0 };
   for (const pr of parsed.rows) {
@@ -230,6 +269,7 @@ export function buildPlan(D, parsed, picks) {
       const oldText = tokenOfCell(old, shiftMap).replace('+', '＋');
       let v = Object.prototype.hasOwnProperty.call(P.tokens, tok) && tok ? P.tokens[tok] : readToken(tok, D.shifts || []);
       const put = (status, extra) => { row.cells[d] = Object.assign({ status, tok: String(raw === undefined ? '' : raw), oldText }, extra); };
+      if (!haveDates.has(d)) { counts.same++; put('same', { text: oldText }); continue; }
       if (v === null) {
         (unknownTokens[tok] = unknownTokens[tok] || { tok: String(raw).trim(), n: 0, chosen: '' }).n++;
         counts.skip++; put('unknown', { text: String(raw).trim() }); continue;
@@ -263,7 +303,7 @@ export function buildPlan(D, parsed, picks) {
     rows.push(row);
   }
   const missing = staff.filter((st) => !used.has(st.emp_id)).map((st) => st.name);
-  return { rows, writes, counts, unknownTokens: Object.values(unknownTokens), unknownNames, missing, rejects, keeps, dupNames, outside: parsed.outside || 0 };
+  return { rows, writes, counts, unknownTokens: Object.values(unknownTokens), unknownNames, missing, missingDates, rejects, keeps, dupNames, outside: parsed.outside || 0 };
 }
 
 /** 下載範本的表格（二維陣列）：姓名＋這一期每天；第二列星期；照班表順序列出每位在職同仁現在的班 */

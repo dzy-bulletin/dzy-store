@@ -2,10 +2,10 @@
 // 讀檔、比對都在瀏覽器裡做（importx.js 純函式）；按「確認匯入」才用 saveDays 一次寫入（伺服器檢查照舊）。
 import { esc, busy } from '../../js/ui.js';
 import { S, mutate, md, WD } from './state.js';
-import { weekday } from './period.js';
+import { weekday, addDays } from './period.js';
 import { LEAVES } from './rules.js';
 import { shiftCode, timeText, isExtId } from './hours.js';
-import { norm, parseSheet, pickSheet, buildPlan, templateAoa, legendAoa } from './importx.js';
+import { norm, parseSheet, pickSheet, buildPlan, templateAoa, legendAoa, fileKind, decodeCsv } from './importx.js';
 
 let xlsxP = null;
 function loadXlsx() {
@@ -32,7 +32,7 @@ export function importButtons(locked, canLock) {
   if (!canLock) return '';
   return (locked ? '<button type="button" class="btn ghost" id="scImport" disabled title="這一期已鎖定，要先解除鎖定才能匯入">匯入 Excel（先解除鎖定）</button>'
     : '<button type="button" class="btn ghost" id="scImport">匯入 Excel</button>')
-    + '<input type="file" id="scImportFile" accept=".xlsx,.xlsm,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden>'
+    + '<input type="file" id="scImportFile" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden>'
     + '<button type="button" class="btn ghost" id="scTemplate">下載範本</button>';
 }
 
@@ -83,6 +83,12 @@ function draw(D) {
   const skipNames = pl.unknownNames.filter((n) => n.chosen === 'SKIP').map((n) => n.name);
   if (skipNames.length) notes.push(`<li>不匯入：${skipNames.map(esc).join('、')}（<button type="button" class="btn ghost sm" id="impUnskip">重新選</button>）</li>`);
   if (pl.missing.length) notes.push(`<li class="warn">檔案裡沒有：${pl.missing.map(esc).join('、')} → 這幾位的班維持原樣</li>`);
+  // 檔案沒列到的日期不動（2026-11-10 挑錯 #9）：連續的日子併成一段「12/13–12/26」
+  const spans = (ds) => { const out = []; let a0 = null, b0 = null; const push = () => { if (a0) out.push(a0 === b0 ? md(a0) : `${md(a0)}–${md(b0)}`); }; for (const d of ds) { if (b0 && addDays(b0, 1) === d) { b0 = d; continue; } push(); a0 = b0 = d; } push(); return out.join('、'); };
+  if (pl.missingDates && pl.missingDates.length) notes.push(`<li class="warn" id="impNoDates">檔案裡沒有這 ${pl.missingDates.length} 天（${spans(pl.missingDates)}）→ 這幾天的班維持原樣</li>`);
+  // Excel 寫的名字跟班表上不一樣、但自動對到的：列出來讓店長看一眼（2026-11-10 挑錯 #10）
+  const renamed = pl.rows.filter((r) => r.xlsName !== undefined && norm(r.xlsName) !== norm(r.name));
+  if (renamed.length) notes.push(`<li id="impNameMap">名字寫法不同，已對到：${renamed.map((r) => `「${esc(r.xlsName)}」→ ${esc(r.name)}`).join('、')}</li>`);
   if (pl.dupNames.length) notes.push(`<li class="bad">同一位同仁出現兩列（${pl.dupNames.map(esc).join('、')}），只匯入第一列</li>`);
   if (pl.keeps.length) notes.push(`<li>支援別家門市的班不會被匯入改掉（${pl.keeps.length} 格）</li>`);
   if (pl.outside) notes.push(`<li>檔案裡有 ${pl.outside} 天不在這一期，已略過</li>`);
@@ -146,10 +152,12 @@ export function bindImport(root, ses, say, rerender) {
       if (!f) return;
       const D = S.data;
       try {
-        if (/\.xls$/i.test(f.name)) throw new Error('這是舊版 .xls 檔，請在 Excel 用「另存新檔」存成 .xlsx 再匯入');
+        const kind = fileKind(f.name);
+        if (kind === 'xls') throw new Error('這是舊版 .xls 檔，請在 Excel 用「另存新檔」存成 .xlsx 再匯入');
+        if (kind === 'other') throw new Error('只能匯入 .xlsx 或 .csv 檔，其他格式請在 Excel 用「另存新檔」存成 .xlsx 再匯入');
         const X = await loadXlsx();
-        // CSV 用文字讀（這個 Excel 元件沒有內建編碼表，用位元組讀中文會變亂碼）；其餘照位元組讀
-        const wb = /\.csv$/i.test(f.name) ? X.read((await f.text()).replace(/^\uFEFF/, ''), { type: 'string', raw: true, cellDates: false }) : X.read(await f.arrayBuffer(), { type: 'array', cellDates: false });
+        // CSV 用文字讀（這個 Excel 元件沒有內建編碼表，用位元組讀中文會變亂碼）：先照 UTF-8，讀不出來照 Big5（Windows 的 Excel 另存 CSV）；其餘照位元組讀
+        const wb = kind === 'csv' ? X.read(decodeCsv(await f.arrayBuffer()), { type: 'string', raw: true, cellDates: false }) : X.read(await f.arrayBuffer(), { type: 'array', cellDates: false });
         const sheets = wb.SheetNames.map((n) => ({ name: n, aoa: X.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: '' }) }));
         if (!sheets.length) throw new Error('檔案裡沒有工作表');
         Object.assign(IMP, { open: true, ses, sheets, fileName: f.name, picks: validPicks(D, memLoad(ses)), done: (m, bad) => { say(m, bad); rerender(); } });

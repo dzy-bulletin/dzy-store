@@ -97,7 +97,7 @@ function drawFixed(ctx) {
     return `<td class="${need && n < need ? 'short' : ''}${[0, 6].includes(weekday(d)) || D.holidays[d] ? ' we' : ''}${mb(d, i)}" title="${esc(x.name)}${need ? `至少要 ${need} 人` : '沒有設人數'}">${n}${need ? '/' + need : ''}</td>`;
   }).join('')}</tr>`).join('');
   const tog = stList.length ? stToggleHtml('fxStToggle') : '';
-  const acts = (D.canEdit ? `<div class="row sc-acts mt"><button type="button" class="btn" id="fxGen">重新產生這一期（手改的不會被蓋掉）</button>${tog}</div>`
+  const acts = (D.canEdit ? `<div class="row sc-acts mt"><button type="button" class="btn" id="fxGen">重新產生這一期（明天起；手改的不會被蓋掉）</button>${tog}</div>`
     : `<p class="hint mt">你只能查看央廚班表，修改請找廠長。</p>${tog ? `<div class="row sc-acts mt">${tog}</div>` : ''}`);
   el.innerHTML = head(D, `央廚 ${D.staff.length} 位同仁`, `<p class="hint mt fx-hint">平日＝固定班別、週六休息日、週日例假、國定假日／補假＝國定假日假。每期開始前 10 天自動排好下一期。廠長改格子立即生效，系統約 1 分鐘內合併送到 LINE。有「・」的是手改過的格子。</p>${acts}`)
     + resultsHtml(D.results)
