@@ -59,7 +59,7 @@ export function setStore(code, name) {
 
 // 呼叫 /m/duty/<action>；回應裡的 meta（店別與休息帶）順手記下。核定通行碼失效（後台重設、換了登入）就退回輸入畫面。
 // 讀取類動作（其他動作都算寫入）：寫入後把「上次看到的名單」丟掉，下次一定等新資料（剛核定完不能先秀核定前的樣子）
-const READS = new Set(['all', 'mgr_day', 'mgr_req_day', 'mgr_req_pending', 'mgr_pending_approvals', 'mgr_roster', 'mgr_pending_devices', 'mgr_notices',
+const READS = new Set(['all', 'hr_return_list', 'mgr_day', 'mgr_req_day', 'mgr_req_pending', 'mgr_pending_approvals', 'mgr_roster', 'mgr_pending_devices', 'mgr_notices',
   'mgr_line_binds', 'mgr_qr_token', 'payroll_leave_options', 'payroll_annual_left', 'line_hub_attach_get', 'admin_stores', 'mgr_req_month']);
 export async function call(action, body) {
   if (!READS.has(action)) { S.recent = {}; S.reqPre = null; }
@@ -179,6 +179,11 @@ export function canWriteRow(kind, empId, store) {
   const v = viewOf(getSession(), store);
   if (!v || v.all) return true;
   return (kind === 'req' ? v.req : v.hours).indexOf(String(empId)) >= 0;
+}
+// 考勤作廢 att.void（2026-11-13，docs/att-void-hr）：這個人在這家店能作廢他已核准的申請（dutyView.void）；每張單能不能作廢仍看伺服器的 void_ok
+export function canVoidRow(empId, store) {
+  const v = viewOf(getSession(), store);
+  return !!(v && Array.isArray(v.void) && v.void.indexOf(String(empId)) >= 0);
 }
 // 這家店有 dutyView、不是店長等（all）、且沒有任何可核定工時的人（hours 空；可能純只看，也可能混合店：對店長有申請權、其他人只看）：
 // 沒有裝置核准、公告分頁，名冊不放 LINE 綁定紀錄（伺服器依 attKeys 過濾，本來就是空的）。這家店沒有 dutyView 的人完全不受影響

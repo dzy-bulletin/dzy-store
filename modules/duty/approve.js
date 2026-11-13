@@ -1,7 +1,7 @@
 // 核定工時：照原系統 ~/mala-clock-in/manager.html 搬。日期列（前一天／後一天／今天）、本月待核定提醒、員工卡（收合展開、時段、
 // 核定時數即時算、休息、假別、出差、遲到分鐘）、送出核定。外觀換成營運系統風格，規則與文案不改。
 import { confirmBox } from '../../js/ui.js';
-import { S, dutyManager, call, callAll, brk, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow, supportTag, rememberOne, snapLabel } from './state.js';
+import { S, dutyManager, call, callAll, brk, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow, canVoidRow, supportTag, rememberOne, snapLabel } from './state.js';
 import * as C from './calc.js';
 import { qrButton } from './qr.js';
 import { api } from '../../js/api.js';
@@ -15,8 +15,8 @@ export function renderApprove(ctx) {
   el.innerHTML = `<div id="duQrSlot"></div><div class="du-datebar"><button type="button" class="btn ghost du-nav" id="duPrev" aria-label="前一天">‹</button>
     <input type="date" id="duDate" aria-label="日期"><button type="button" class="btn ghost du-nav" id="duNext" aria-label="後一天">›</button>
     <button type="button" class="btn ghost" id="duToday">今天</button></div>
-    <div id="duPend"></div><div id="duDayBox"></div>`;
-  const dateIn = el.querySelector('#duDate'), pendEl = el.querySelector('#duPend'), box = el.querySelector('#duDayBox');
+    <div id="duRet"></div><div id="duPend"></div><div id="duDayBox"></div>`;
+  const dateIn = el.querySelector('#duDate'), pendEl = el.querySelector('#duPend'), box = el.querySelector('#duDayBox'), retEl = el.querySelector('#duRet');
   const live = () => el.isConnected;
   if (quickAvailable(ctx)) el.insertBefore(backBar(ctx), el.firstChild);      // 手機的完整頁：上面一顆「回到一頁核定」
   if (dutyManager(ctx.session) && !S.all) el.querySelector('#duQrSlot').append(qrButton(el));      // 打卡 QR（同仁定位抓不到時給他掃），日期列上方
@@ -61,8 +61,36 @@ export function renderApprove(ctx) {
     }
     pendEl.append(card);
   }
+  // ---------- 人資退回待重核（2026-11-13，管理系統 docs/att-void-hr/return-spec.md）：沒有就整塊不畫 ----------
+  function loadReturns() {
+    (S.all ? callAll('hr_return_list') : call('hr_return_list')).then(r => { if (live()) drawReturns(Array.isArray(r.items) ? r.items : []); }, () => { if (live()) retEl.innerHTML = ''; });
+  }
+  function drawReturns(items) {
+    retEl.innerHTML = '';
+    if (!items.length) return;
+    const card = h('div', 'du-pa du-hrret-list');
+    card.append(h('div', 'du-pa-title', '人資退回 ' + items.length + ' 筆，請重新核定'));
+    card.append(h('div', 'du-pa-sub', '點名字跳到那天，核對後重新送出核定就結案；原本的核定在重核前照舊算'));
+    items.slice().sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))).forEach(it => {
+      const row = h('div', 'du-pa-group');
+      row.append(h('div', 'du-pa-date', C.weekdayLabel(it.date)));
+      const right = h('div', 'du-hrret-item');
+      const chip = h('button', 'du-chip', (it.emp_name || it.emp_id) + (it.storeName ? '・' + it.storeName : ''), { type: 'button' });
+      chip.onclick = () => { S.focusEmp = rowKey(it); loadDay(it.date); };
+      right.append(chip, h('div', 'du-hrret-why', '理由：' + it.reason + '（' + it.by_name + '）' + (it.lock_unknown ? '　⚠ 退回時沒辦法確認薪資有沒有鎖定' : '')));
+      if (it.can_cancel) {
+        const cb = h('button', 'btn sm ghost du-hrret-cancel', '取消退回', { type: 'button' });
+        cb.onclick = () => { cb.disabled = true; call('hr_return_cancel', { id: it.id, store: it.store }).then(() => { delete S.dayCache[it.date]; loadReturns(); if (S.date === it.date) loadDay(it.date); }, e => { cb.disabled = false; cb.textContent = '✕ ' + (e.message || '取消失敗'); }); };
+        right.append(cb);
+      }
+      row.append(right); card.append(row);
+    });
+    retEl.append(card);
+  }
+  box.addEventListener('hr-returned', () => loadReturns());
   // 核定成功後即時從提醒移除（不必重打後端）
   box.addEventListener('emp-approved', e => {
+    loadReturns();      // 重核後人資退回就結案（伺服器做），清單重讀
     const d = e.detail; if (!d || !S.pend) return;
     const n = S.pend.length;
     S.pend = S.pend.filter(it => !(it.date === d.date && String(it.emp_id) === String(d.emp_id) && (it.store || '') === (d.store || '')));
@@ -217,6 +245,7 @@ export function renderApprove(ctx) {
 
   if (S.pend) drawPending();
   loadPending();
+  loadReturns();
   // 假別清單與額度要在畫員工卡之前到（原頁也是先 loadLeaveOptions 再 loadDay；2026-11-02 起兩個同時抓、都到了才畫）；失敗不擋人，退回內建清單
   loadDay(S.date, S.leave ? null : loadLeave());
 }
@@ -330,6 +359,35 @@ function buildCard(emp, date) {
   };
   const body = h('div', 'du-body'); body.hidden = true;
   card.append(head, body);
+
+  // ---- 人資退回待重核（2026-11-13）：店長看到理由；人資（return_ok）可以退回已核定的這天 ----
+  if (emp.hr_return) {
+    nameEl.append(h('span', 'du-hrret-tag', '人資退回'));
+    body.append(h('div', 'du-hrret', '人資退回待重核：' + emp.hr_return.reason + '（' + emp.hr_return.by_name + '）。請核對後重新送出核定，送出就結案。'));
+  } else if (emp.return_ok) {
+    const rb = h('div', 'du-hrret-box');
+    const btn = h('button', 'btn sm ghost du-hrretbtn', '退回給店長重核', { type: 'button' });
+    btn.onclick = () => {
+      btn.hidden = true;
+      const inp = h('input', 'du-voidreason', null, { type: 'text', maxlength: '200', placeholder: '退回理由（必填，店長看得到，同仁看不到）', 'aria-label': '退回理由' });
+      const go = h('button', 'btn sm du-hrretgo', '確定退回', { type: 'button' });
+      const msg = h('div', 'du-reqnote');
+      go.onclick = () => {
+        const why = inp.value.trim();
+        if (!why) { msg.textContent = '✕ 退回要寫理由'; return; }
+        go.disabled = true; msg.textContent = '送出中…';
+        call('hr_return_create', { store: emp.store, emp_id: emp.emp_id, date, reason: why }).then(r => {
+          delete S.dayCache[date];
+          rb.replaceChildren(h('div', 'du-hrret', '已退回給店長重核：' + why + (r && r.lock_unknown ? '（沒辦法確認這個月薪資有沒有鎖定，請自己確認）' : '')));
+          card.dispatchEvent(new CustomEvent('hr-returned', { bubbles: true }));
+        }, e => { go.disabled = false; msg.textContent = '✕ ' + (e.message || '退回失敗'); });
+      };
+      rb.append(inp, go, msg);
+      inp.focus();
+    };
+    rb.append(btn);
+    body.append(rb);
+  }
 
   // ---- 防呆：有打卡段還沒配對（有上班沒下班），現在核定會核不到那段（manager.html:1003–1012）----
   const dupGroups = emp.dup_groups || [];                     // 重複打卡（2026-11-06）：重複上班卡組前面那張配不到下班卡不是「還在上班」
@@ -656,7 +714,7 @@ function buildCard(emp, date) {
     const note = h('div', 'du-reqnote'); note.hidden = true;
     const setNote = t => { note.textContent = t; note.hidden = !t; };
     let tag = null;
-    const canVoid = !readOnly || canWriteRow('req', emp.emp_id, emp.store);     // 能核他工時、或能審他申請的人（Eason 2026-10-29 選 2A；伺服器再驗一次）
+    const canVoid = !readOnly || canWriteRow('req', emp.emp_id, emp.store) || canVoidRow(emp.emp_id, emp.store);     // 能核他工時、或能審他申請的人（Eason 2026-10-29 選 2A）、或有考勤作廢（2026-11-13）；伺服器再驗一次
     reqs.forEach(r => {
       const row = h('div', 'du-reqrow');
       row.append(h('div', null, '✓ 已核准的申請：' + r.summary + '（' + r.decided_by + ' 核准）'));
@@ -672,7 +730,8 @@ function buildCard(emp, date) {
       if (canVoid) {
         const vb = h('button', 'btn sm ghost du-reqvoid', '作廢', { type: 'button' });
         // 伺服器有給 void_ok（個人登入）就照它；沒有（門市登入、舊伺服器）就保守：值班主管本人與自己的單停用（2026-10-29 Fable 審查第 1 條）
-        if (r.void_ok === false || (r.void_ok === undefined && (r.upper === true || r.self === true))) { vb.disabled = true; vb.textContent = '送上層處理'; vb.title = '值班主管本人的申請，由上層主管在申請審核處理'; }
+        if (r.void_ok === false && readOnly && !canWriteRow('req', emp.emp_id, emp.store)) { vb.disabled = true; vb.textContent = '不能作廢'; vb.title = '自己的單、主管代開的單不能作廢'; }      // 考勤作廢的唯讀者（2026-11-13 審查 7）
+        else if (r.void_ok === false || (r.void_ok === undefined && (r.upper === true || r.self === true))) { vb.disabled = true; vb.textContent = '送上層處理'; vb.title = '值班主管本人的申請，由上層主管在申請審核處理'; }
         else vb.onclick = () => askVoid(r, vb, row);
         acts.append(vb);
       }
@@ -779,7 +838,7 @@ function buildCard(emp, date) {
     } else if (!multi && fillable) fill(fillables);
     periodRows.parentNode.insertBefore(rbox, tag || periodRows);    // 順序：申請說明 → 來自申請 → 時段
   };
-  const lockBody = () => body.querySelectorAll('input,select,button').forEach(x => { if (!x.closest('.du-reqbox')) x.disabled = true; });
+  const lockBody = () => body.querySelectorAll('input,select,button').forEach(x => { if (!x.closest('.du-reqbox') && !x.closest('.du-hrret-box')) x.disabled = true; });      // 人資退回鈕（2026-11-13）不鎖
   if (readOnly) {                                                // 只看：姓名旁「唯讀」小字，內文所有欄位與按鈕鎖住（申請說明框裡的「作廢」另外判斷：能審他申請的人可以作廢）
     nameEl.append(h('span', 'du-ro', '唯讀'));
     lockBody();

@@ -549,7 +549,7 @@ function dutyStore(code) {
   return db.duty2[code];
 }
 function withFake(code, fn) { const prev = curFake; curFake = code && code !== 'TEST1' ? DUTY2_FAKE : null; try { return fn(); } finally { curFake = prev; } }
-const ALL_OPS = { mgr_day: 'employees', mgr_pending_approvals: 'items', mgr_req_pending: 'items', mgr_req_day: null, payroll_leave_options: null, mgr_req_month: 'items' };
+const ALL_OPS = { mgr_day: 'employees', mgr_pending_approvals: 'items', mgr_req_pending: 'items', mgr_req_day: null, payroll_leave_options: null, mgr_req_month: 'items', hr_return_list: 'items' };
 // 合併時要併的清單（mgr_req_month 有兩份：申請 items、核定 leaves）
 const listsOfOp = op => (op === 'mgr_req_month' ? ['items', 'leaves', 'log'] : ALL_OPS[op] ? [ALL_OPS[op]] : []);
 // 支援標示（對照 server/proxy/duty.js filterFor 的 support_from，2026-10-26）：示範人物的 support＝{門市代號: {員編: 原單位名稱}}，只在個人登入時加
@@ -812,6 +812,10 @@ function dutyDo(d, action, b) {
         plan: (d.plans && d.plans[r.emp_id]) || null, ...(Array.isArray(d.ftEmps) ? { ft: d.ftEmps.includes(r.emp_id) } : {}) };      // ft：正職（2026-11-13，e2e 設 d.ftEmps 才有）
       if (r.no_line) out.no_line = true;                // 打卡端 mgr_day 帶的「沒綁 LINE」（2026-11-10）
       const a = d.approved[date + r.emp_id]; if (a) out.approved = { ...a };
+      // 人資退回（2026-11-13）：示範後端照伺服器的 attachReturns／return_ok；d.returnOk＝true 時示範人資身分（能退回）
+      const ret = (d.returns || []).find(x => x.status === 'open' && x.emp_id === r.emp_id && x.date === date);
+      if (ret) out.hr_return = { id: ret.id, emp_id: ret.emp_id, date: ret.date, emp_name: ret.emp_name, reason: ret.reason, by_name: ret.by_name, created_at: ret.created_at, lock_unknown: false };
+      out.return_ok = !!(d.returnOk && a && !ret);
       if (f.dup) {                                      // 重複打卡（2026-11-06）：打卡後端回 dup_groups；認定後打卡段改成合併後的那份（f.dup_segs／dup_ref）
         out.dup_groups = f.dup.map(g => ({ type: g.type, cards: g.cards.map(c => ({ ...c })) }));
         if (a && a.dup_ignore && a.dup_ignore.length && f.dup_segs) { out.segments = f.dup_segs.map(x => ({ ...x })); out.reference = f.dup_ref; }
@@ -886,6 +890,7 @@ function dutyDo(d, action, b) {
     (d.applog = d.applog || []).push(JSON.parse(JSON.stringify(b)));      // e2e：收到的核定內文原樣留著，驗「手機一頁核定送的和舊卡片一樣」
     const rec = { periods: periods.map(p => ({ ...p })), approved_hours: hours, status_text: status, manager_name: MGR, dup_ignore: periods.length ? dupIgn : [], ...(String(b.diff_reason ?? '').trim() ? { diff_reason: String(b.diff_reason).trim() } : {}) };
     d.approved[date + emp.emp_id] = rec; d.leave[date + emp.emp_id] = leaves;
+    for (const x of (d.returns || [])) if (x.status === 'open' && x.emp_id === emp.emp_id && x.date === date) x.status = 'resolved';      // 人資退回：重核就結案
     (d.hlog = d.hlog || []).push({ at: new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 19) + '+08:00', date, emp_id: emp.emp_id, name: emp.name, hours, status, periods: periods.map(p => p.start + '-' + p.end).join(','), by: MGR });   // 核定紀錄（打卡端 approved 分頁只追加）
     return ok({ date, emp_id: emp.emp_id, name: emp.name, periods, approved_hours: hours, ...leaveOut(leaves), status_text: status, manager_name: MGR });
   }
@@ -976,6 +981,26 @@ function dutyDo(d, action, b) {
     const r = { id: 'P' + (d.reqs.length + 1), created_at: new Date().toISOString(), emp_id: emp.emp_id, name: emp.name, kind: String(b.kind || 'miss'), date: b.date, leave_type: '', start: b.start || '', end: b.end || '', hours: null, miss_type: b.miss_type || '', reason, attach_id: '', status: 'pending', upper_kind: 'director', proxy_by: MGR };
     d.reqs.push(r);
     return ok({ id: r.id, summary: reqSummary(r) });
+  }
+  if (action === 'hr_return_list') return ok({ items: (d.returns || []).filter(x => x.status === 'open').map(x => ({ id: x.id, emp_id: x.emp_id, date: x.date, emp_name: x.emp_name, reason: x.reason, by_name: x.by_name, created_at: x.created_at, lock_unknown: false, can_cancel: !!d.returnOk })) });
+  if (action === 'hr_return_create') {           // 營運系統 proxy/duty.js localAction（2026-11-13）
+    if (!d.returnOk) return fail('FORBIDDEN', '只有人資主管、管理員或有「考勤作廢」的人資同仁可以退回給店長重核');
+    const reason = String(b.reason ?? '').trim();
+    if (!reason) return fail('BAD_INPUT', '退回要寫理由（店長看得到）');
+    if (!d.approved[String(b.date) + b.emp_id]) return fail('BAD_INPUT', '這天還沒核定，不用退回；請店長直接核定');
+    d.returns = d.returns || [];
+    if (d.returns.some(x => x.status === 'open' && x.emp_id === b.emp_id && x.date === b.date)) return fail('BAD_INPUT', '這天已經退回過、店長還沒重核');
+    const emp = d.roster.find(r => r.emp_id === b.emp_id);
+    const x = { id: d.returns.length + 1, emp_id: String(b.emp_id), date: String(b.date), emp_name: emp ? emp.name : '', reason, by_name: '示範人資', created_at: new Date().toISOString(), status: 'open' };
+    d.returns.push(x);
+    return ok({ id: x.id, lock_unknown: false });
+  }
+  if (action === 'hr_return_cancel') {
+    const x = (d.returns || []).find(y => y.id === Number(b.id) && y.status === 'open');
+    if (!x) return fail('NOT_FOUND', '這筆退回已經處理過或找不到，請重新整理');
+    if (!d.returnOk) return fail('FORBIDDEN', '只有人資主管、管理員或有「考勤作廢」的人資同仁可以取消退回');
+    x.status = 'cancelled';
+    return ok({ cancelled: true, id: x.id });
   }
   if (action === 'mgr_req_void') {               // Requests.gs handleMgrReqVoid_（2026-10-26）：只能作廢已核准的、理由必填
     const reason = String(b.reason ?? '').trim().slice(0, 100);
