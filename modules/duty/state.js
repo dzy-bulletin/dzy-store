@@ -60,13 +60,16 @@ export function setStore(code, name) {
 // 呼叫 /m/duty/<action>；回應裡的 meta（店別與休息帶）順手記下。核定通行碼失效（後台重設、換了登入）就退回輸入畫面。
 // 讀取類動作（其他動作都算寫入）：寫入後把「上次看到的名單」丟掉，下次一定等新資料（剛核定完不能先秀核定前的樣子）
 const READS = new Set(['all', 'hr_return_list', 'mgr_day', 'mgr_req_day', 'mgr_req_pending', 'mgr_pending_approvals', 'mgr_roster', 'mgr_pending_devices', 'mgr_notices',
-  'mgr_line_binds', 'mgr_qr_token', 'payroll_leave_options', 'payroll_annual_left', 'line_hub_attach_get', 'admin_stores', 'mgr_req_month']);
+  'mgr_line_binds', 'mgr_qr_token', 'payroll_leave_options', 'payroll_annual_left', 'line_hub_attach_get', 'admin_stores', 'mgr_req_month',
+  'mirror_jobs', 'mirror_ack']);      // 背景送出的進度、按知道了：不動考勤資料，不清上次看到的名單
 export async function call(action, body) {
   if (!READS.has(action)) { S.recent = {}; S.reqPre = null; }
   try {
     const k = S.key, st = S.asStore;
     const r = await api('POST', '/m/duty/' + action, st ? Object.assign({}, body || {}, { asStore: st }) : (body || {}), undefined, { read: READS.has(action) });
     if (r && r.meta && S.key === k && S.asStore === st) S.meta = r.meta;
+    // 考勤副本（2026-11-14）：Mac mini 副本讀的資料標 __mirror；有 ver 的人核定時可以背景送（bg.js canBg）
+    if (r && r.mirror_at) for (const f of ['employees', 'items']) if (Array.isArray(r[f])) for (const x of r[f]) if (x && typeof x === 'object') x.__mirror = true;
     if (r && Array.isArray(r.home_stores) && S.key === k) for (const x of r.home_stores) if (x.ok && x.meta) S.metaBy[x.store] = x.meta;   // 總部那組併進來的別家：休息帶各用各的   // 管理者已經換店／換登入：上一家店晚到的回應不寫進來（2026-10-12 Codex 審查）
     return r;
   } catch (e) {

@@ -8,6 +8,7 @@ import { api } from '../../js/api.js';
 import { comparePlan } from '../schedule/compare.js';
 import { ssoSwitch, setSession, toSession } from '../../js/auth.js';
 import { quickWanted, quickAvailable, renderQuick, backBar } from './quick.js';
+import { canBg, watchJob, refreshJobs, rejectBar } from './bg.js';
 
 export function renderApprove(ctx) {
   if (quickWanted(ctx)) return renderQuick(ctx);      // 手機寬度：預設用「一頁核定」（quick.js）；完整頁是退路
@@ -15,11 +16,14 @@ export function renderApprove(ctx) {
   el.innerHTML = `<div id="duQrSlot"></div><div class="du-datebar"><button type="button" class="btn ghost du-nav" id="duPrev" aria-label="前一天">‹</button>
     <input type="date" id="duDate" aria-label="日期"><button type="button" class="btn ghost du-nav" id="duNext" aria-label="後一天">›</button>
     <button type="button" class="btn ghost" id="duToday">今天</button></div>
-    <div id="duRet"></div><div id="duPend"></div><div id="duDayBox"></div>`;
+    <div id="duBg"></div><div id="duRet"></div><div id="duPend"></div><div id="duDayBox"></div>`;
   const dateIn = el.querySelector('#duDate'), pendEl = el.querySelector('#duPend'), box = el.querySelector('#duDayBox'), retEl = el.querySelector('#duRet');
   const live = () => el.isConnected;
   if (quickAvailable(ctx)) el.insertBefore(backBar(ctx), el.firstChild);      // 手機的完整頁：上面一顆「回到一頁核定」
   if (dutyManager(ctx.session) && !S.all) el.querySelector('#duQrSlot').append(qrButton(el));      // 打卡 QR（同仁定位抓不到時給他掃），日期列上方
+  // 考勤副本（2026-11-14）：背景送出被打卡系統退回的，列在最上面；點了跳到那天那位
+  el.querySelector('#duBg').append(rejectBar((date, empId) => { S.focusEmp = rowKey({ emp_id: empId }); delete S.dayCache[date]; loadDay(date); }));
+  refreshJobs();
 
   // ---------- 本月待核定提醒（manager.html:1604–1745）：沒有待核定＝整塊不畫 ----------
   function loadPending() {
@@ -88,6 +92,7 @@ export function renderApprove(ctx) {
     retEl.append(card);
   }
   box.addEventListener('hr-returned', () => loadReturns());
+  box.addEventListener('duty-reload-day', e => { const d = e.detail || {}; S.focusEmp = rowKey(d.emp); delete S.dayCache[d.date]; loadDay(d.date); });   // 背景送出被退回：重新載入那天
   // 核定成功後即時從提醒移除（不必重打後端）
   box.addEventListener('emp-approved', e => {
     loadReturns();      // 重核後人資退回就結案（伺服器做），清單重讀
@@ -119,6 +124,7 @@ export function renderApprove(ctx) {
   function loadDayNow(dateOverride, tok, gate) {
     unStale();                     // 上一次的「先顯示上次」還沒換掉就換日期：先解除
     const wait = gate ? gate.then(() => null, () => null) : Promise.resolve(null);
+    S.dayMirrorAt = 0;
     if (dateOverride && S.dayCache[dateOverride]) {
       wait.then(() => { if (tok === S.dayTok && live()) { drawDay(dateOverride, S.dayCache[dateOverride], []); prefetch(dateOverride); } });
       return;
@@ -147,6 +153,7 @@ export function renderApprove(ctx) {
       fresh = true;
       if (tok !== S.dayTok || !live()) return;
       unStale();
+      S.dayMirrorAt = r.mirror_at || 0;      // 考勤副本讀的：卡片上方標「資料更新於」
       const failed = r.failed || [];          // 單一門市也可能有：總部那組併進來的別家讀不到（不快取、顯示提示）
       if (!S.all) S.elsewhere = Array.isArray(r.elsewhere) ? r.elsewhere : [];      // 捷徑卡（歸屬這組、在別家打卡的人）不隨日期變，快取的日子沿用
       if (!failed.length) { if (cacheable(r.date)) S.dayCache[r.date] = r.employees; else S.recent[r.date] = r.employees; }
@@ -179,7 +186,8 @@ export function renderApprove(ctx) {
     S.date = date; dateIn.value = date;
     const focus = S.focusEmp;
     renderEmployees(box, date, employees, failed, () => { loadPending(); loadDay(date); });
-    if (quick) { S.focusEmp = focus; return; }   // 先秀上次的資料：申請、班表等新資料到了再一起套；待核定提醒點的那位留給新資料打開
+    if (quick) { S.focusEmp = focus; return; }
+    if (S.dayMirrorAt) box.prepend(h('div', 'du-mirror-at', '資料更新於 ' + snapLabel(S.dayMirrorAt) + '・從 Mac mini 讀取', { id: 'duMirrorAt' }));   // 先秀上次的資料：申請、班表等新資料到了再一起套；待核定提醒點的那位留給新資料打開
     applyDayRequests(date);
     applyDayPlan(date);
   }
@@ -616,6 +624,34 @@ function buildCard(emp, date) {
     result.after(proxyBox);
   };
 
+  // 背景送出（考勤副本）：先標「已核定・送出中」，可以繼續核下一位；打卡系統接受了換成正式結果，退回就標紅、請重新載入這天
+  function bgQueued(job, approveDate, lv) {
+    if (lv.length || initLeaves.length) staleLeave();
+    badge.className = 'du-badge sending'; badge.hidden = false; badge.textContent = '已核定・送出中（背景送到打卡系統）';
+    mini.className = 'du-mini sending'; mini.textContent = '送出中';
+    say('ok', '✓ 已核定，正在背景送到打卡系統，可以繼續核下一位');
+    card.__pending = false;
+    planDone = true; if (card.__planR) card.__showPlan(card.__planR);
+    card.dispatchEvent(new CustomEvent('emp-approved', { bubbles: true, detail: { emp_id: emp.emp_id, date: approveDate, store: emp.store } }));
+    watchJob(job, it => {
+      if (!card.isConnected) return;
+      if (it.state === 'done') {
+        const r = it.result;
+        if (r && r.approved_hours !== undefined) { setBadge(r, C.leavesOf(r)); say('ok', '✓ 已核定 ' + r.approved_hours + ' 小時・' + r.status_text + C.leavesSuffix(C.leavesOf(r)) + '（' + r.manager_name + '）'); }
+        else { badge.className = 'du-badge normal'; badge.textContent = '已核定（已送到打卡系統）'; mini.className = 'du-mini normal'; mini.textContent = '✓ 已核定'; say('ok', '✓ 已送到打卡系統'); }
+        return;
+      }
+      card.__pending = true;
+      if (card.__setExpanded) card.__setExpanded(true);      // 核完已經收起來：被退回要打開給主管看原因
+      badge.className = 'du-badge bad'; badge.hidden = false; badge.textContent = '被退回：' + (it.msg || '請重新核定');
+      mini.className = 'du-mini bad'; mini.textContent = '被退回';
+      say('bad', '✕ 被退回：' + (it.msg || '請重新核定'));
+      const rb = h('button', 'btn sm du-bgreload', '重新載入這天', { type: 'button' });
+      rb.onclick = () => card.dispatchEvent(new CustomEvent('duty-reload-day', { bubbles: true, detail: { date: approveDate, emp } }));
+      result.append(rb);
+    });
+  }
+
   submit.onclick = async () => {
     // 硬擋（Eason 2026-08-22「硬擋，不給送出」，manager.html:1296–1320）：額度用完、期限過了的假別不給送出。
     // 下拉的 disabled 只擋滑鼠，程式指定仍設得進去，所以送出前用同一份資料再判一次；原本就選著這個假別的既有紀錄放行，否則已超額的人連重送核定都做不了
@@ -672,8 +708,10 @@ function buildCard(emp, date) {
       const payload = { store: emp.store, date: approveDate, emp_id: emp.emp_id, periods, late_min: lateIn.value, leaves: lv };
       if (diffIn.value.trim()) payload.diff_reason = diffIn.value.trim();
       if (dupGroups.length) payload.dup_ignore = C.dupIgnoreFrom(dupGroups, dupPicks);   // 有重複卡組才送（空陣列＝取消認定）；沒有就不送，打卡端沿用原本的
+      if (canBg(emp)) { payload.base_ver = emp.ver; payload.bg = true; }      // 資料是 Mac mini 副本讀的：先顯示、背景送，打卡端比對版本（2026-11-14）
       const res = await call('mgr_approve', payload);
       delete S.dayCache[approveDate];
+      if (res && res.queued) { bgQueued(res.job, approveDate, lv); return; }
       if (lv.length || initLeaves.length) staleLeave();      // 有請假的核定會動到額度，下次進核定頁重抓
       say('ok', '✓ 已核定 ' + res.approved_hours + ' 小時・' + res.status_text + C.leavesSuffix(C.leavesOf(res)) + '（' + res.manager_name + '）');
       setBadge(res, C.leavesOf(res));

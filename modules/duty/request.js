@@ -4,6 +4,7 @@
 // 核准申請「不會」直接寫入核定：只是讓那天的核定頁先幫主管填好，主管核定那天時確認送出才算數（見 approve.js 的 __applyReq）。
 import { confirmBox } from '../../js/ui.js';
 import { S, call, callAll, h, failBar, failedStores, setReqBadge, loadLeave, leaveFor, supportTag, reqShown, reqCanDecide } from './state.js';
+import { watchJob } from './bg.js';
 import { tsLabel, shortDate, punchEvidence, compBalanceNote, reqQuotaBlock, reqWarnLines, REQ_KIND_LABEL, REQ_BATCH_MAX } from './calc.js';
 
 export function renderRequest(ctx) {
@@ -191,8 +192,20 @@ function buildItem(it, card, title) {
       body.reason = reason.value.trim();
     } else if (!await confirmBox('核准 ' + it.name + '：' + it.summary + '？\n核准後，那天的核定會先幫你填好，你核定那天時確認送出才算數。', '核准')) return;
     ok.disabled = no.disabled = true; say('', '送出中…');
+    if (it.__mirror) body.bg = true;      // Mac mini 副本讀的清單：先顯示、背景送（2026-11-14），打卡端照樣檢查還是不是待審
     try {
       const r = await call('mgr_req_decide', body);
+      if (r && r.queued) {
+        say('', (decision === 'approve' ? '已核准' : '已退回') + '，正在背景送到打卡系統…');
+        watchJob(r.job, (j) => {
+          if (j.state === 'done') {
+            el.__markDone((decision === 'approve' ? '✓ 已核准：' : '✕ 已退回：') + it.name + ' ' + it.summary);
+            refreshTitle(card, title); syncBatch(card);
+            if (decision === 'approve') delete S.dayCache[it.date];
+          } else { ok.disabled = no.disabled = false; say('bad', '✕ 被退回：' + (j.msg || '打卡系統沒有接受，請重新整理再處理')); }
+        });
+        return;
+      }
       // 那天已經核定過（Eason 2026-11-13 紅燈 a2 選 A）：照常核准，提醒重新核定一次，假別才會寫進薪資
       el.__markDone((decision === 'approve' ? '✓ 已核准：' : '✕ 已退回：') + it.name + ' ' + it.summary + (r && r.warn ? '\n⚠ ' + (r.message || '那天已經核定過，請重新核定一次') : ''));
       refreshTitle(card, title); syncBatch(card);

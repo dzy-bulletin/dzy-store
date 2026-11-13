@@ -230,6 +230,14 @@ select{min-height:44px}
 .du-mini.absent{background:#eef1f4;color:#8a8f98}
 .du-mini.normal{background:#e6f3ea;color:var(--ok)}
 .du-mini.warn{background:#fdf0ee;color:var(--bad)}
+.du-mini.sending,.du-badge.sending{background:#e8f0fb;color:#1f5fbf}
+.du-mini.bad,.du-badge.bad{background:#fdf0ee;color:var(--bad)}
+/* 考勤副本（2026-11-14）：頁頂被退回、資料更新時間 */
+.du-bgbar{margin:0 0 12px;background:#fdf0ee;border-left:4px solid var(--red,#c0392b);border-radius:0 8px 8px 0;padding:10px 12px;display:grid;gap:8px}
+.du-bgbar-t{font-weight:800;color:var(--bad);font-size:14px}
+.du-bgbar-r{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13px}
+.du-bgbar-w{flex:1 1 220px;min-width:0;overflow-wrap:anywhere}
+.du-mirror-at{font-size:12px;color:var(--muted);padding:2px 2px 8px}
 .du-chev{flex:none;color:var(--muted);font-size:11px;transition:transform .15s}
 .du-card.open .du-chev{transform:rotate(180deg)}
 .du-body{padding:2px 14px 14px;border-top:1px solid var(--line)}

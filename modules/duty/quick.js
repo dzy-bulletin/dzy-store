@@ -5,6 +5,7 @@ import { S, call, h, failBar, failedStores, supportTag, loadLeave, staleLeave, l
 import * as C from './calc.js';
 import * as Q from './quick-calc.js';
 import { qrButton } from './qr.js';
+import { canBg, watchJob, refreshJobs, rejectBar } from './bg.js';
 import { MOCK } from '../../js/config.js';
 
 // 總開關：改成 false、重新發布網站，手機也回到舊畫面（不必動別的）
@@ -129,6 +130,7 @@ export function renderQuick(ctx) {
     if (st.busy) return;                                      // 寫入途中不換資料（含「重新載入」鈕）
     const tok = ++st.tok;
     st.loading = true; st.error = null; st.ui = {}; st.peekAt = 0; st.peekSaved = null; render();
+    refreshJobs();
     let fresh = false;
     st.dayPre = new Map();
     const opt = { peek: true };
@@ -226,6 +228,7 @@ export function renderQuick(ctx) {
   }
   async function approveOne(p, a, reason) {
     const emp = empOf(p.key);
+    const viaDecide = !!a.decide;                            // 先核准申請再核定：核准後版本會變，核定改前景送（不帶 base_ver）
     if (a.decide) {
       try { await call('mgr_req_decide', { id: a.decide.id, decision: 'approve', store: a.decide.store || undefined }); } catch (e) { e.stage = 'decide'; throw e; }      // 失敗（逾時、斷線、伺服器拒絕）就留在原卡顯示原因、原按鈕可重試；不判成「對不上」
       delete S.dayCache[st.date];
@@ -236,10 +239,21 @@ export function renderQuick(ctx) {
     }
     const payload = Object.assign({ store: emp.store, date: st.date, emp_id: emp.emp_id }, a.payload || p.payload);
     if (reason) payload.diff_reason = reason;
+    if (!viaDecide && canBg(emp)) { payload.base_ver = emp.ver; payload.bg = true; }      // Mac mini 副本讀的：先顯示、背景送（2026-11-14）
     const res = await call('mgr_approve', payload);
     delete S.dayCache[st.date];
     if ((payload.leaves || []).length) staleLeave();
-    emp.approved = res;
+    if (res && res.queued) {
+      const date = st.date;
+      emp.approved = { approved_hours: p.hours, status_text: '送出中', manager_name: '', periods: payload.periods, queued: res.job };
+      watchJob(res.job, (it) => {
+        if (st.date !== date || !emp.approved || emp.approved.queued !== res.job) return;
+        if (it.state === 'done') { emp.approved = it.result && it.result.approved_hours !== undefined ? it.result : Object.assign({}, emp.approved, { status_text: '已送出', queued: null }); recompute(); render(); return; }
+        emp.approved = null;
+        Object.assign(U(p.key), { failed: '被退回：' + (it.msg || '請重新核定'), failedDiff: false });
+        reconcile().catch(() => {}).then(() => { recompute(); render(); });      // 重讀這天：拿最新的資料（版本）才能重核
+      });
+    } else emp.approved = res;
     U(p.key).failed = ''; U(p.key).ask = null; U(p.key).msg = '';
     return res;
   }
@@ -501,6 +515,7 @@ export function renderQuick(ctx) {
     const hl = h('div'); hl.append(h('div', 'dq-store', (S.meta && S.meta.label) || (ctx.session && ctx.session.name) || ''), h('div', 'dq-title', st.date ? Q.dayLabel(st.date, todayNow()) : '考勤管理'));
     head.append(hl, h('div', 'dq-left', st.date && s ? '還剩 ' + s.left + ' 人' : ''));
     root.append(head, navEl());
+    root.append(rejectBar((date) => gotoDate(date)));      // 背景送出被打卡系統退回的（考勤副本，2026-11-14）
     if (st.loading && !stale) { root.append(h('div', 'card du-center', '載入中…', { id: 'dqLoading' })); return; }
     if (st.error && !stale) { const c = h('div', 'card'); root.append(c); failBar(c, '考勤資料', st.error, load); return; }
     if (stale) {

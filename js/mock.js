@@ -760,7 +760,16 @@ function duty(action, me, s, b) {
   if (me.person && action === 'mgr_req_pending') b = Object.assign({}, b, { __person: true });
   const ms = markSelf(d, action, b);
   if (ms && ms.deny) return ms.deny;
-  const r = tgt ? withFake(tgt, () => dutyDo(d, action, b)) : dutyDo(d, action, b);
+  // 考勤副本（2026-11-14，server/duty-mirror.js）：e2e 設 d.mirror＝true 才開（個人登入）。讀取帶 mirror_at、mgr_day 每人帶 ver；
+  // 帶 bg 的核定／核准先回 queued，下一次 mirror_jobs 才真的做（跟伺服器背景送一樣慢一拍）；ver 對不上＝退回
+  const runD = (a2, b2) => (tgt ? withFake(tgt, () => dutyDo(d, a2, b2)) : dutyDo(d, a2, b2));
+  if (action === 'mirror_jobs' || action === 'mirror_ack') return d.mirror && me.person ? mockMirror(d, action, b, runD) : ok({ on: false, items: [], acked: 0 });
+  if (d.mirror && me.person) { const mm = mockMirror(d, action, b, runD); if (mm) return mm; }
+  const r = runD(action, b);
+  if (d.mirror && me.person && r.ok && ['mgr_day', 'mgr_req_pending', 'mgr_req_day', 'mgr_pending_approvals'].includes(action)) {
+    r.data.mirror_at = Date.now();
+    if (action === 'mgr_day') r.data.employees.forEach(e => { e.ver = mverOf(d, r.data.date, e.emp_id); });
+  }
   if (fault && fault.mode === 'partial' && r.ok) r.data.failed = [{ store: 'cf', storeName: '央廚', message: '打卡系統暫時沒有回應，請稍後再試' }];      // 部分門市讀不到（伺服器 failed 契約）
   if (r.ok && ms && ms.mine) {
     if (action === 'mgr_req_pending') r.data.items = r.data.items.map(it => (ms.mine(it.emp_id) ? { ...it, self: true } : it));
@@ -798,6 +807,33 @@ function mockMergeHome(per, action, b, data, els) {
       data.by_store = data.by_store || {}; data.by_store[code] = o;
     }
   }
+}
+// window.__mirrorBump[日期+員編]＝e2e 假裝「主管打開之後資料變了」（不用重新載入頁面）
+const mverOf = (d, date, emp) => 'v' + (((d.mirrorVer || {})[date + emp] || 0) + ((window.__mirrorBump || {})[date + emp] || 0));
+function mockMirror(d, action, b, run) {
+  d.jobs = d.jobs || [];
+  if (action === 'mirror_jobs') {
+    for (const j of d.jobs) {
+      if (j.state !== 'pending') continue;
+      if (j.act === 'mgr_approve' && j.body.base_ver !== mverOf(d, j.body.date, j.body.emp_id)) { j.state = 'rejected'; j.msg = '你打開之後，這位同仁這天的資料有變動（補了打卡、申請單有變化，或別人已經核定），請看過最新的再核定一次'; continue; }
+      const body = Object.assign({}, j.body); delete body.bg; delete body.base_ver;
+      const r = run(j.act, body);
+      if (r.ok) {
+        j.state = 'done'; j.result = r.data; j.doneAt = Date.now();
+        if (j.act === 'mgr_approve') { d.mirrorVer = d.mirrorVer || {}; const k = j.body.date + j.body.emp_id; d.mirrorVer[k] = (d.mirrorVer[k] || 0) + 1; }
+      } else { j.state = 'rejected'; j.msg = r.message || '打卡系統沒有接受這筆，請重新核定'; }
+    }
+    const later = (j) => d.jobs.some(x => x.id > j.id && x.state === 'done' && x.act === j.act && x.emp_id === j.emp_id && x.date === j.date);
+    return ok({ on: true, items: d.jobs.filter(j => j.state === 'pending' || (j.state === 'done' ? Date.now() - j.doneAt < 600000 : !j.acked && !later(j)))
+      .map(j => ({ id: j.id, act: j.act, emp_id: j.emp_id, date: j.date, state: j.state, msg: j.msg || '', result: j.state === 'done' ? j.result : undefined })) });
+  }
+  if (action === 'mirror_ack') { const j = d.jobs.find(x => x.id === Number(b.id) && x.state === 'rejected'); if (j) j.acked = true; return ok({ acked: j ? 1 : 0 }); }
+  if (b.bg === true && (action === 'mgr_req_decide' || (action === 'mgr_approve' && b.base_ver))) {
+    const id = (d.jobSeq = (d.jobSeq || 0) + 1);
+    d.jobs.push({ id, act: action, body: Object.assign({}, b), emp_id: action === 'mgr_approve' ? b.emp_id : 'req:' + b.id, date: action === 'mgr_approve' ? b.date : '', state: 'pending', at: Date.now() });
+    return ok({ queued: true, job: id });
+  }
+  return null;
 }
 function dutyDo(d, action, b) {
   const MGR = '門市營運系統';
