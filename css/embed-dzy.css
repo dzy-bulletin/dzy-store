@@ -1,0 +1,42 @@
+/* 嵌在管理系統裡的考勤管理（?embed=dzy&only=duty）改用管理系統的外觀（2026-11-14 Eason：「把考勤管理的介面改成跟管理系統一致」）。
+   色票、字體、圓角、陰影照管理系統 ~/dev/dzy/platform/css/tokens.css／components.css，只在 body.embed 生效；
+   營運系統自己的頁面（門市入口、獨立網址）不受影響。管理系統改色票時這裡要跟著改（兩邊沒有共用檔）。 */
+body.embed{
+  --dzy-brand:#c8402c; --dzy-brand-dark:#a8331f; --dzy-brand-light:#fbe9e6; --dzy-tab-line:#EF856D;
+  --dzy-ink:#1c1a19; --dzy-muted:#6f665f; --dzy-line:#e2dbd4; --dzy-bg:#f7f4f1; --dzy-card:#fff;
+  --dzy-ok:#2f6b3a; --dzy-ok-light:#e8f2ea; --dzy-warn:#b8860b; --dzy-warn-light:#faf1de; --dzy-danger:#b3261e; --dzy-danger-light:#fbe9e7;
+  --dzy-radius:10px; --dzy-radius-sm:6px; --dzy-shadow:0 1px 3px rgba(0,0,0,.06);
+  --dzy-font:-apple-system,BlinkMacSystemFont,"PingFang TC","Heiti TC","Microsoft JhengHei","Noto Sans TC","Segoe UI",sans-serif;
+  /* 營運系統的變數全部換成管理系統的值（.btn、.card、input 等共用元件跟著變） */
+  --red:var(--dzy-brand)!important; --red-dark:var(--dzy-brand-dark)!important; --pink:var(--dzy-tab-line); --black:var(--dzy-ink)!important;
+  --bg:var(--dzy-bg); --card:var(--dzy-card); --line:var(--dzy-line); --muted:var(--dzy-muted); --head:var(--dzy-bg);
+  --ok:var(--dzy-ok); --bad:var(--dzy-danger); --gold:var(--dzy-warn); --brand:var(--dzy-brand); --brand-ink:#fff;
+  --font:var(--dzy-font);
+  font-size:15px; color:var(--dzy-ink); background:var(--dzy-bg);
+}
+body.embed main{padding-top:16px}
+/* 卡片：管理系統 .card＝白底、1px 框、圓角 10px、淡陰影 */
+body.embed .card, body.embed .du-card, body.embed .du-pa, body.embed .dq-card, body.embed .dq-okbox{border-color:var(--dzy-line);border-radius:var(--dzy-radius);box-shadow:var(--dzy-shadow)}
+/* 按鈕：高 44px、圓角 10px；主要＝鼎兆元紅、次要＝白底框線 */
+body.embed .btn{border-radius:var(--dzy-radius);min-height:44px;padding:10px 18px;font-weight:600}
+body.embed .btn.sm{min-height:34px;padding:6px 12px;border-radius:8px}
+body.embed .btn.ghost{background:var(--dzy-card);color:var(--dzy-ink);border:1px solid var(--dzy-line)}
+body.embed .btn.ghost:hover{background:var(--dzy-bg)}
+/* 輸入框：高 44px、圓角 6px、選到時紅框＋淡紅光暈 */
+body.embed input:not([type=checkbox]):not([type=radio]):not([type=color]), body.embed select, body.embed textarea{min-height:44px;border-color:var(--dzy-line);border-radius:var(--dzy-radius-sm);font-size:15px}
+body.embed input:focus, body.embed select:focus, body.embed textarea:focus{outline:0;border-color:var(--dzy-brand);box-shadow:0 0 0 3px var(--dzy-brand-light)}
+/* 表格表頭：管理系統底色＋次要字 */
+body.embed th{background:var(--dzy-bg);color:var(--dzy-muted)}
+/* 提示框：警告＝黃、錯誤＝紅（管理系統的 warn／danger） */
+body.embed .note, body.embed .banner{background:var(--dzy-warn-light);border-left-color:var(--dzy-warn);border-radius:0 var(--dzy-radius-sm) var(--dzy-radius-sm) 0}
+body.embed .note.warn{background:var(--dzy-danger-light);border-left-color:var(--dzy-danger)}
+body.embed .du-pa{background:var(--dzy-warn-light);border-color:#ecd9a6}
+body.embed .du-chip{border-color:#e7b9ae;color:var(--dzy-brand);background:var(--dzy-card)}
+body.embed .du-bgbar{background:var(--dzy-danger-light);border-left-color:var(--dzy-danger)}
+/* 狀態膠囊：管理系統的 ok／warn／danger */
+body.embed .du-mini.normal, body.embed .du-badge.normal, body.embed .tag.ok{background:var(--dzy-ok-light);color:var(--dzy-ok)}
+body.embed .du-mini.pending, body.embed .du-badge.warn{background:var(--dzy-warn-light);color:#8a6408}
+body.embed .du-mini.warn, body.embed .du-mini.bad, body.embed .du-badge.bad, body.embed .tag.bad{background:var(--dzy-danger-light);color:var(--dzy-danger)}
+/* 上方「系統管理者・總部　換店　操作手冊」：管理系統的次要字、紅色連結 */
+body.embed .embed-who, body.embed .embed-bar{color:var(--dzy-muted)}
+body.embed .embed-who a, body.embed .embed-bar a, body.embed .embed-bar button.linkish{color:var(--dzy-brand)}
