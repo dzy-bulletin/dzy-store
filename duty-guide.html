@@ -99,11 +99,12 @@ th { background:var(--surface); font-weight:600; color:var(--ink-bright); white-
 <header class="top"><div class="wrap">
   <div class="eyebrow">鼎兆元管理系統・給店長</div>
   <h1>考勤管理操作手冊</h1>
-  <p class="lede">同仁的工時核定、加班請假申請，從 10 月 24 日起都在管理系統的「人資部門 → 考勤管理」處理。舊的打卡核定頁先不要再用。這份手冊照畫面一步一步說。</p>
+  <p class="lede">同仁的工時核定、加班請假申請，從 10 月 24 日起都在管理系統的「人資部門 → 考勤管理」處理。舊的打卡核定頁已經關閉。這份手冊照畫面一步一步說。</p>
   <div class="facts">
     <span class="fact">網址 <b>dzy.mozhuting.com</b></span>
     <span class="fact">位置 <b>人資部門 → 考勤管理</b></span>
     <span class="fact"><b>10/30 起</b> 店長本人的單改由上層審</span>
+    <span class="fact"><b>11/1 起</b> 正職上班日要滿 8 小時</span>
   </div>
   <nav class="toc" aria-label="目錄">
     <a href="#login"><span>1</span>登入、進考勤管理、換店換日期</a>
@@ -112,6 +113,7 @@ th { background:var(--surface); font-weight:600; color:var(--ink-bright); white-
     <a href="#requests"><span>3</span>申請審核</a>
     <a href="#upper"><span>4</span>誰核誰（11/4 起）</a>
     <a href="#faq"><span>5</span>常見狀況</a>
+    <a href="#ft8"><span>6</span>正職上班日要滿 8 小時（11/1 起）</a>
   </nav>
 </div></header>
 
@@ -200,6 +202,7 @@ th { background:var(--surface); font-weight:600; color:var(--ink-bright); white-
     <tr><td>申請和打卡對不上</td><td>退回，請同仁改時間</td><td>到完整頁核對</td></tr>
     <tr><td>少打卡、沒有單（超過 7 天）</td><td>主管代開忘打卡單</td><td>先跳過</td></tr>
     <tr><td>少打卡、沒有單（7 天內）。同仁有綁 LINE：請同仁補單；沒綁 LINE：到完整頁送出核定，被擋時會跳出代開表單</td><td>先跳過，等同仁補單</td><td>到完整頁核對</td></tr>
+    <tr><td>正職未滿 8 小時（上班＋出差＋假單不到 8 小時）</td><td>到完整頁核對（在那裡補假單或補休單）</td><td>—</td></tr>
     <tr><td>沒有班表、多張申請、重複打卡、遲到又晚走、中途離店、排休日有假單、出差單沒時數、打卡比加班單多 30 分鐘以上、時數算出來不合理…</td><td>到完整頁核對</td><td>—</td></tr>
   </table></div>
 
@@ -287,6 +290,7 @@ th { background:var(--surface); font-weight:600; color:var(--ink-bright); white-
     <figure><img src="img/duty-guide/11-confirm.jpg" alt="送出前的確認框"><figcaption>送出前的確認框</figcaption></figure>
     <figure><img src="img/duty-guide/12-done.jpg" alt="已核定後出現重新送出核定"><figcaption>核定完：綠字＋「重新送出核定」</figcaption></figure>
   </div>
+  <div class="note warn"><b>正職同仁看「合計」這行</b>正職同仁在班表上班的日子，核定時數下面會多一行「正職上班日：上班 7.5＋出差 0＋假單 0＝7.5／8 小時，還差 0.5 小時…」。紅字＝不到 8 小時，送不出去，做法見第 6 段。</div>
   <div class="note"><b>已經核過，後來又核准了申請？</b>那張卡會多一顆「這天已核定過，依申請重新填」。按了會照申請填好，你確認後再按「重新送出核定」才算數。</div>
 </section>
 
@@ -426,6 +430,36 @@ th { background:var(--surface); font-weight:600; color:var(--ink-bright); white-
   <p>先在電腦按 Cmd＋Shift＋R（Windows 按 Ctrl＋F5）重新整理，手機把網頁關掉重開。還是不對，截圖傳給資訊部。</p>
 
   <p class="demo">本手冊截圖全部用示範資料拍的：門市（示範門市、示範二店）、同仁姓名、日期都是假的，不是任何一家店的真實資料。</p>
+</section>
+
+<section id="ft8">
+  <h2><span class="no">6</span>正職上班日要滿 8 小時（11/1 起）</h2>
+  <p class="sub">正職同仁在班表上是上班的日子，<b>核定的上班時數＋出差時數＋已核准的假單時數</b>要滿 8 小時才能核定。只看這三個加起來，不看班表排了幾小時：班表本來就排不到 8 小時，也一樣要補假單。計時同仁、排休日不檢查。</p>
+
+  <h3>不到 8 小時怎麼辦</h3>
+  <ol class="steps">
+    <li>核定時數下面的「正職上班日」那行變紅字，寫著還差幾小時。按送出會被擋，訊息寫「正職上班日要滿 8 小時…還差 N 小時，要有已核准的假單或補休單」。</li>
+    <li>請同仁在 LINE「加班請假」送假單（任何假別都可以，補休也是假單裡的一種），時數至少補足差的部分。</li>
+    <li>你在「申請審核」核准後，回到那天，「合計」那行會算進去，變成滿 8 小時就能送出。</li>
+  </ol>
+  <div class="note"><b>同仁沒辦法自己送單</b>（沒綁 LINE、超過 7 天）：被擋時卡片下方會跳出代開表單，已經幫你選好「假單」、假別「補休」、時數（差多少往上取到半小時，例差 0.25 就填 0.5）。要換假別、改時數可以自己改，寫原因後送出，由總監層級審核。</div>
+  <div class="note"><b>手機一頁核定</b>：不滿 8 小時的同仁不會有「一鍵核定」或「照班表」按鈕，只有「到完整頁核對」，在完整頁照上面的步驟處理。</div>
+
+  <h3>同一天在兩家店上班</h3>
+  <ul class="dots">
+    <li>兩家<b>核定時數加起來</b>滿 8 小時就可以。先核的那家，如果另一家有打卡但還沒核定，會先讓你送出；後核的那家會檢查兩家加起來夠不夠。</li>
+    <li>兩家加起來超過 8 小時，超過的部分算加班，<b>加班單開在被支援的那家店</b>。</li>
+  </ul>
+
+  <h3>11/1～11/13 已核定、不到 8 小時的日子</h3>
+  <p>這條規則上線前已經核定、但不到 8 小時的日子，11/13 已經撤銷核定（共 25 天）。這些卡片會變回「沒核定」，照上面的步驟補單後重新核定。月底結薪前要補完。</p>
+
+  <h3>誰算正職、怎麼改</h3>
+  <div class="tbl"><table>
+    <tr><th>門市</th><td>看排班管理裡那位同仁的身分（正職或計時），不用另外設定。</td></tr>
+    <tr><th>央廚</th><td>「排班管理 → 央廚 → 固定班別」每個人旁邊有 <span class="ui">正職</span> <span class="ui">計時</span> 兩個勾選框，二選一。<b>都沒勾的人不會檢查</b>，頁面上會用紅字提醒還有幾位沒勾。</td></tr>
+    <tr><th>總部</th><td>「排班管理 → 部屬班表」點那位同仁，卡片上有 <span class="ui">正職</span> <span class="ui">計時</span> 勾選框。<b>都沒勾＝正職</b>。只有人資主管、系統管理員能改，其他人只看得到「正職」或「計時」。</td></tr>
+  </table></div>
 </section>
 </main>
 
