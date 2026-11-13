@@ -899,7 +899,7 @@ function dutyDo(d, action, b) {
       let wk = trip; periods.forEach(p => { const [a, c] = [p.start, p.end].map(t => +t.slice(0, 2) * 60 + +t.slice(3)); wk += ((c <= a ? c + 1440 : c) - a) / 60; });
       const lv = d.reqs.filter(r => r.emp_id === emp.emp_id && r.date === date && r.status === 'approved' && r.kind === 'leave').reduce((a, r) => a + (Number(r.hours) || 0), 0);
       const sum = Math.round((wk + lv) * 100) / 100;
-      if (sum < 7.995) return fail('BAD_INPUT', '這天還不能核定：正職上班日要滿 8 小時（上班 ' + Math.round((wk - trip) * 100) / 100 + '＋出差 ' + trip + '＋假單 ' + lv + '＝' + sum + ' 小時），還差 ' + Math.round((8 - sum) * 100) / 100 + ' 小時，要有已核准的假單或補休單。請同仁在 LINE「加班請假」補申請；超過 7 天請店長在考勤管理「代開申請」，送總監層級審核。');
+      if (sum < 7.995) return fail('BAD_INPUT', '這天還不能核定：正職上班日要滿 8 小時（上班 ' + Math.round((wk - trip) * 100) / 100 + '＋出差 ' + trip + '＋假單 ' + lv + '＝' + sum + ' 小時），還差 ' + Math.round((8 - sum) * 100) / 100 + ' 小時，要有已核准的假單或補休單。請同仁在 LINE「加班請假」補申請；超過 4 天（11/28 以前 11 月的日子不限）請店長在考勤管理「代開申請」，送總監層級審核。');
     }
     let hours, status;
     if (!periods.length) {
@@ -1013,10 +1013,10 @@ function dutyDo(d, action, b) {
     const emp = d.roster.find(r => r.emp_id === b.emp_id); if (!emp) return fail('NOT_FOUND', '名冊裡找不到這位同仁，請重新整理。');
     const reason = String(b.reason ?? '').trim().slice(0, 100);
     if (!reason) return fail('BAD_INPUT', '代開要寫原因');
-    // 2026-11-14：請假／加班／出差 4 天（11/28 以前 11 月的日子不給代開，同仁自己補），忘打卡 7 天（同 Requests.gs reqPastLimit_）
-    const dt = String(b.date || ''), isMiss = String(b.kind || 'miss') === 'miss';
-    const openT01 = !isMiss && taipeiDay(0) <= '2026-11-28' && dt >= '2026-11-01';
-    const lim = isMiss ? 7 : 4;
+    // 2026-11-14：請假／加班／出差／忘打卡都 4 天（11/28 以前 11 月的日子不給代開，同仁自己補；同 Requests.gs reqPastLimit_）
+    const dt = String(b.date || '');
+    const openT01 = taipeiDay(0) <= '2026-11-28' && dt >= '2026-11-01';
+    const lim = 4;
     if ((openT01 || !(dt < taipeiDay(-lim))) && !(emp.no_line && dt <= taipeiDay(0))) return fail('BAD_INPUT', `${lim} 天內請同仁自己在 LINE 申請；超過 ${lim} 天才能代開`);
     const r = { id: 'P' + (d.reqs.length + 1), created_at: new Date().toISOString(), emp_id: emp.emp_id, name: emp.name, kind: String(b.kind || 'miss'), date: b.date, leave_type: '', start: b.start || '', end: b.end || '', hours: null, miss_type: b.miss_type || '', reason, attach_id: '', status: 'pending', upper_kind: 'director', proxy_by: MGR };
     d.reqs.push(r);

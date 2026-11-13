@@ -6,7 +6,7 @@ import { comparePlan, THRESHOLD_MIN } from '../schedule/compare.js';
 
 export const OK_MAX_H = 8;           // 一鍵核定的班表時數上限（Eason 定案）
 export const DIFF_MIN = 30;          // 核定和打卡差達這個分鐘數，伺服器要原因（規則 4）
-export const PROXY_AFTER_DAYS = 7;   // 超過 7 天同仁自己補不了單，才給主管代開（同 approve.js）
+export const PROXY_AFTER_DAYS = 4;   // 超過 4 天同仁自己補不了單，才給主管代開（同 approve.js；2026-11-14 忘打卡由 7 改 4，11/28 以前 11 月的日子不限）
 export const REASONS = ['臨時調班', '主管同意', '打卡機問題'];   // 另有「其他」自己填
 export const MAX_DATES = 10;         // 一次最多往前找幾天，避免卡很久
 export const READ_BATCH_DAYS = 3;    // 自動找日期時，每批最多同時讀幾天
@@ -376,7 +376,7 @@ function classifyRaw(inp) {
 
   // ================= 沒有申請 =================
   if (date === today && !complete) return Object.assign(base, { status: 'blocked', tag: '今天還沒下班', note: '打完下班卡再核定', actions: [skip('先跳過，下班後再核')] });      // 主管自己選到今天：還沒打完卡不算缺卡
-  const old = date < C.addDaysStr(today, -PROXY_AFTER_DAYS);
+  const old = !(today <= '2026-11-28' && date >= '2026-11-01') && date < C.addDaysStr(today, -PROXY_AFTER_DAYS);
   if (!complete && pv.mode === 'plan' && date === C.addDaysStr(today, -1) && inp.nowMin != null && segs.length && segs.every((s) => s.in) && segs.some((s) => !s.out)) {
     const ps0 = emp.plan.segs, st0 = hm(ps0[0].start), en0 = hm(ps0[ps0.length - 1].end);      // 跨夜班昨天上班、現在還沒到下班時間：還在上班，不叫人補單
     if (st0 != null && en0 != null && en0 <= st0 && inp.nowMin < en0 + 60) {
@@ -390,9 +390,9 @@ function classifyRaw(inp) {
     const ps = pv.mode === 'plan' ? emp.plan.segs : null;
     const noLine = !!emp.no_line && date <= today;            // 沒綁 LINE（打卡端 mgr_day 帶）：7 天內也能代開（2026-11-10）
     const canProxy = old || noLine;
-    Object.assign(base, { status: 'blocked', tag, note: old ? '超過 7 天，同仁自己補不了單，可以由主管代開' : noLine ? '同仁沒綁 LINE，自己補不了單，可以由主管代開' : '請同仁到 LINE 補忘打卡單' });
+    Object.assign(base, { status: 'blocked', tag, note: old ? '超過 ' + PROXY_AFTER_DAYS + ' 天，同仁自己補不了單，可以由主管代開' : noLine ? '同仁沒綁 LINE，自己補不了單，可以由主管代開' : '請同仁到 LINE 補忘打卡單' });
     if (canProxy && proxy && !inp.person) {
-      base.note = (old ? '超過 7 天' : '同仁沒綁 LINE') + '；代開要用個人帳號登入（門市帳號不能代開）';
+      base.note = (old ? '超過 ' + PROXY_AFTER_DAYS + ' 天' : '同仁沒綁 LINE') + '；代開要用個人帳號登入（門市帳號不能代開）';
       base.actions = [fullAct, skip('先跳過')];
     } else if (canProxy && proxy) {
       base.actions = [{ id: 'proxy', label: '主管代開忘打卡單', primary: true, missType: proxy, defStart: ps ? ps[0].start : '', defEnd: ps ? ps[ps.length - 1].end : '' }, skip('先跳過')];
