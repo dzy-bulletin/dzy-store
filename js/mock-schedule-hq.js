@@ -201,12 +201,12 @@ export function hqAction(action, me, b, db, hol, pa, seedStores) {
   const today = todayTaipei();
   const monthArg = () => (typeof b.month === 'string' && MONTH_RE.test(b.month) ? b.month : null);
   // 總部自填：畫面送 period（T01…，2026-11-03 起四週一期）
-  if (action.startsWith('self') && (typeof b.period !== 'string' || !PERIOD_RE.test(b.period) || parseLabel(b.period) < 1)) return fail('BAD_INPUT', '期別格式不對');
+  if (action.startsWith('self') && action !== 'selfKind' && (typeof b.period !== 'string' || !PERIOD_RE.test(b.period) || parseLabel(b.period) < 1)) return fail('BAD_INPUT', '期別格式不對');
   const month = action.startsWith('self') ? b.period : monthArg();
   // 央廚：畫面送 period（T01…，2026-10-27 起），舊的 month 照樣收（同伺服器 spanArg）
   const hasPeriod = action.startsWith('fixed') && b.period !== undefined;
   if (hasPeriod && (typeof b.period !== 'string' || !PERIOD_RE.test(b.period) || parseLabel(b.period) < 1)) return fail('BAD_INPUT', '期別格式不對（要是 T01 以後）');
-  if (!month && !hasPeriod && action !== 'fixedShift' && action !== 'fixedDefaultStation') return fail('BAD_INPUT', '月份格式不對（要是 YYYY-MM）');      // fixedShift、fixedDefaultStation 不分月
+  if (!month && !hasPeriod && action !== 'fixedShift' && action !== 'fixedDefaultStation' && action !== 'fixedKind' && action !== 'selfKind') return fail('BAD_INPUT', '月份格式不對（要是 YYYY-MM）');      // fixedShift、fixedDefaultStation 不分月
   const span = hasPeriod ? periodDates(b.period) : month ? monthDates(month) : [];
   const spanUnit = hasPeriod ? '這一期' : '這個月', inSpan = (d) => span.length && d >= span[0] && d <= span[span.length - 1];
   const shiftList = () => Object.values(st.shifts).filter((s) => s.active).map((s) => ({ id: s.id, name: s.name, start: s.start, end: s.end, break_min: s.break_min }));
@@ -227,7 +227,7 @@ export function hqAction(action, me, b, db, hol, pa, seedStores) {
       return ok({ month: hasPeriod ? null : month, period: hasPeriod ? b.period : null, from: dates[0], to: dates[dates.length - 1], curPeriod: label(Math.max(1, periodNo(today) || 0)),
         mode: 'fixed', canEdit: !!pa.scheduleAdmin, version: st.fixedVersion, mode_from: st.modeFrom, shifts: shiftList(),
         holidays: Object.fromEntries(Object.entries(Object.assign({}, (hol.gov && hol.gov.off) || {}, hol.days)).filter(([k]) => inSpan(k))),
-        staff: st.staff.map((s) => ({ emp_id: s.emp_id, name: s.name, fixed_shift: s.fixed_shift || null, default_station: s.default_station || null })), cells, results: res,
+        staff: st.staff.map((s) => ({ emp_id: s.emp_id, name: s.name, fixed_shift: s.fixed_shift || null, default_station: s.default_station || null, emp_kind: s.emp_kind || null })), cells, results: res,
         stations: Object.values(st.stations).sort((a, x) => a.sort - x.sort || (a.id < x.id ? -1 : 1)), stationNeed: stationNeedFor(st, dates) });
     }
     const e0 = edit(); if (e0) return e0;
@@ -297,6 +297,13 @@ export function hqAction(action, me, b, db, hol, pa, seedStores) {
       if (r.generated > 0) { st.fixedVersion++; publishDates(st, span); }
       return ok({ generated: r.generated, kept: r.kept });
     }
+    if (action === 'fixedKind') {      // 同 server：正職／計時（2026-11-13）
+      const emp = st.staff.find((s) => s.emp_id === b.emp_id);
+      if (!emp) return fail('BAD_INPUT', '找不到這位同仁');
+      if (b.kind !== 'ft' && b.kind !== 'pt' && b.kind !== '' && b.kind != null) return fail('BAD_INPUT', '正職／計時只能選正職、計時或清空');
+      emp.emp_kind = b.kind || null;
+      return ok({ ok: true, emp_id: emp.emp_id, emp_kind: emp.emp_kind });
+    }
     if (action === 'fixedShift') {
       const emp = st.staff.find((s) => s.emp_id === b.emp_id);
       if (!emp) return fail('BAD_INPUT', '找不到這位同仁');
@@ -342,6 +349,14 @@ export function hqAction(action, me, b, db, hol, pa, seedStores) {
     if (n === cur + 1 && today < open) return fail('BAD_INPUT', `下一期（${month}）的班表 ${+open.slice(5, 7)}/${+open.slice(8, 10)} 起才能填`);
     return null;
   };
+  if (action === 'selfKind') {      // 同 server：只有人資主管、管理員（示範模式＝看全部部屬的人）
+    if (!pa.approveAll) return fail('FORBIDDEN', '只有人資主管、管理員可以設定正職或計時');
+    const emp = st.staff.find((s) => s.emp_id === b.emp_id);
+    if (!emp) return fail('BAD_INPUT', '找不到這位同仁');
+    if (b.kind !== 'ft' && b.kind !== 'pt' && b.kind !== '' && b.kind != null) return fail('BAD_INPUT', '正職／計時只能選正職、計時或清空');
+    emp.emp_kind = b.kind || null;
+    return ok({ ok: true, emp_id: emp.emp_id, emp_kind: emp.emp_kind });
+  }
   if (action === 'selfLoad') {      // 班別同 server selfLoad：多帶 color、sort（班別卡修改時原樣送回）
     if (!mine.length && !canView && !pa.shiftAdmin) return fail('FORBIDDEN', '你沒有這家店的排班權限');      // 同 server：總部總監沒有員編也能讀班別清單
     const ids = new Set(mine);
@@ -355,9 +370,9 @@ export function hqAction(action, me, b, db, hol, pa, seedStores) {
       const out = {};
       for (const d of dates) if (base[d]) out[d] = toCell(base[d]);
       cells[s.emp_id] = out;
-      staff.push({ emp_id: s.emp_id, name: s.name, version: r.version, filled: dates.filter((d) => base[d] && employed(s, d)).length, days: dates.filter((d) => employed(s, d)).length, hire_date: s.hire_date || null, leave_date: s.leave_date || null });
+      staff.push({ emp_id: s.emp_id, name: s.name, version: r.version, filled: dates.filter((d) => base[d] && employed(s, d)).length, days: dates.filter((d) => employed(s, d)).length, hire_date: s.hire_date || null, leave_date: s.leave_date || null, emp_kind: s.emp_kind || null });
     }
-    return ok({ period: month, from: dates[0], to: dates[dates.length - 1], curPeriod: label(Math.max(1, periodNo(today) || 0)), mode: 'self', me: mine, canView, shifts: Object.values(st.shifts).filter((s) => s.active).map((s) => ({ id: s.id, name: s.name, start: s.start, end: s.end, break_min: s.break_min, color: s.color || '', sort: s.sort || 0, ...(s.segs ? { segs: s.segs } : {}) })), allShifts: Object.values(st.shifts).map((s) => ({ id: s.id, name: s.name, start: s.start, end: s.end, break_min: s.break_min, color: s.color || '', sort: s.sort || 0, active: !!s.active, ...(s.segs ? { segs: s.segs } : {}) })), holidays: Object.fromEntries(Object.entries(Object.assign({}, (hol.gov && hol.gov.off) || {}, hol.days)).filter(([k]) => k >= dates[0] && k <= dates[dates.length - 1])),
+    return ok({ period: month, from: dates[0], to: dates[dates.length - 1], curPeriod: label(Math.max(1, periodNo(today) || 0)), mode: 'self', me: mine, canView, canSetKind: !!pa.approveAll, shifts: Object.values(st.shifts).filter((s) => s.active).map((s) => ({ id: s.id, name: s.name, start: s.start, end: s.end, break_min: s.break_min, color: s.color || '', sort: s.sort || 0, ...(s.segs ? { segs: s.segs } : {}) })), allShifts: Object.values(st.shifts).map((s) => ({ id: s.id, name: s.name, start: s.start, end: s.end, break_min: s.break_min, color: s.color || '', sort: s.sort || 0, active: !!s.active, ...(s.segs ? { segs: s.segs } : {}) })), holidays: Object.fromEntries(Object.entries(Object.assign({}, (hol.gov && hol.gov.off) || {}, hol.days)).filter(([k]) => k >= dates[0] && k <= dates[dates.length - 1])),
       staff, cells, results: results(st, rows.map((s) => s.emp_id), month, hol), mode_from: st.modeFrom,
       extShifts: Object.values(st.__ext || {}).map((x) => ({ id: x.id, name: x.name, start: x.start, end: x.end, break_min: x.break_min, ...(x.segs ? { segs: x.segs } : {}) })),
       stores: mockStores(db).map((x) => ({ code: x.code, name: x.name, shifts: x.shifts.map((y) => ({ id: y.id, name: y.name, start: y.start, end: y.end, break_min: y.break_min, ...(y.segs ? { segs: y.segs } : {}) })), stations: x.stations })) });

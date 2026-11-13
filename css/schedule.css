@@ -269,3 +269,7 @@ button.hq-day{cursor:pointer}
 .sc-impnotes .bad { color: #b3362b; }
 .sc-impacts { gap: 8px; }
 @media (max-width: 520px) { .sc-impfix { grid-template-columns: minmax(0, 1fr); } .sc-impfix select { max-width: 100%; } }
+/* 正職／計時勾選（2026-11-13，央廚固定班別、總部部屬班表） */
+.sc-kinds { display: inline-flex; gap: 10px; align-items: center; white-space: nowrap; }
+.sc-kind { display: inline-flex; gap: 4px; align-items: center; font-size: 14px; cursor: pointer; }
+.sc-kind input { width: 18px; height: 18px; margin: 0; }

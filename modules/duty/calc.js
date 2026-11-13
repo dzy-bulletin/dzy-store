@@ -453,3 +453,20 @@ export function hasOpenSegExceptDup(segments, groups) {
   (groups || []).filter(g => g.type === 'in').forEach(g => g.cards.slice(0, -1).forEach(c => early.add(c.hm)));
   return (segments || []).some(s => s.in && !s.out && !early.has(s.in));
 }
+
+/** 正職上班日滿 8 小時（2026-11-13 Eason）：卡片合計列。emp.ft===true 且班表是上班日（W）才回 {work, trip, leave, sum, gap}，否則 null。
+ *  假單只算登記的（出差另計）；真正擋不擋看打卡端（看已核准的申請單、跨店相加），這裡只是先讓主管看到差多少。 */
+export const FT8_H = 8;
+export function ft8Summary(emp, workH, leaves) {
+  if (!emp || emp.ft !== true || !emp.plan || emp.plan.day_type !== 'W') return null;
+  const trip = tripHoursOfList(leaves || []);
+  const leave = round2((leaves || []).reduce((a, x) => a + (x && x.type && x.type !== '出差' ? Number(x.hours) || 0 : 0), 0));
+  const work = round2(Number(workH) || 0), sum = round2(work + trip + leave);
+  return { work, trip, leave, sum, gap: sum >= FT8_H - 0.005 ? 0 : round2(FT8_H - sum) };
+}
+export function ft8Text(s) {
+  if (!s) return '';
+  return '正職上班日：上班 ' + s.work + '＋出差 ' + s.trip + '＋假單 ' + s.leave + '＝' + s.sum + '／' + FT8_H + ' 小時' + (s.gap ? '，還差 ' + s.gap + ' 小時，要有已核准的假單或補休單' : '');
+}
+/** 代開假單預填時數：還差的時數往上取到半小時（LINE 申請最小 0.5 小時） */
+export const ft8Round = (gap) => Math.max(0.5, Math.ceil((Number(gap) || 0) * 2 - 1e-9) / 2);

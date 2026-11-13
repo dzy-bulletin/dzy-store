@@ -308,6 +308,7 @@ select{min-height:44px}
 .du-rq-l2{font-size:13px;color:#5a504a;margin:4px 0 8px;line-height:1.6;white-space:pre-line;overflow-wrap:anywhere}
 .du-rq-warn{background:#fff6e0;color:#a15a00;border-radius:8px;padding:7px 9px;font-size:12.5px;line-height:1.6;margin:0 0 8px;white-space:pre-line}   /* 申請提醒（2026-11-06，不擋） */
 .du-total-cont{flex-basis:100%;font-size:12.5px;font-weight:800;color:#a15a00;background:#fff6e0;border-left:3px solid #e0a020;padding:3px 8px}   /* 連續 4 小時沒休 30 分（2026-11-06） */
+.du-ft8{flex-basis:100%;font-size:12.5px;font-weight:700;color:#256c45;background:#e8f5ee;border-left:3px solid #2f8a57;padding:3px 8px}.du-ft8.short{color:#a12a1f;background:#fdecea;border-left-color:#c0392b}   /* 正職上班日滿 8 小時（2026-11-13） */
 .du-rq-evid{background:#f7f2ef;border-radius:8px;padding:7px 9px;font-size:12.5px;color:#5a463f;line-height:1.6;margin:0 0 8px;white-space:pre-line;overflow-wrap:anywhere}
 .du-rq-reason{width:100%;margin:0 0 8px;min-height:44px;font-size:16px}
 .du-rq-acts{display:flex;gap:8px;flex-wrap:wrap}

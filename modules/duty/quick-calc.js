@@ -456,6 +456,15 @@ export function classify(inp) {
   if (bad && (res.status === 'ok' || res.status === 'abnormal')) {
     return Object.assign(res, { status: 'abnormal', tag: '時數要核對', note: '算出來的時段或時數不合理', chk: '', hours: null, payload: null, actions: [{ id: 'full', label: '到完整頁核對', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
   }
+  // 正職上班日滿 8 小時（2026-11-13 Eason）：任何一顆按鈕送出的上班＋出差＋假單不滿 8 小時 → 只能到完整頁（要補假單或跨店相加）
+  if (res.status === 'ok' || res.status === 'abnormal') {
+    const gaps = sends.map((x) => C.ft8Summary(inp.emp, C.sumPeriods((x.periods || []).map((p) => ({ start: p.start, end: p.end }))).total, x.leaves)).filter((f) => f && f.gap);
+    if (gaps.length) {
+      const g = gaps[0];
+      return Object.assign(res, { status: 'abnormal', tag: '正職未滿 8 小時', note: '上班 ' + g.work + '＋出差 ' + g.trip + '＋假單 ' + g.leave + '＝' + g.sum + ' 小時，還差 ' + g.gap + ' 小時，要有已核准的假單或補休單', chk: '', hours: null, payload: null,
+        actions: [{ id: 'full', label: '到完整頁核對', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
+    }
+  }
   return res;
 }
 

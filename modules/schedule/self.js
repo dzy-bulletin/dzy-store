@@ -5,6 +5,7 @@ import { timeText, shiftCode } from './hours.js';
 import { call, calHtml, resultsHtml, issueMap, cellOptions, cellOfValue, valueOfCell, secondHtml, isExt, md, defaultSelfPeriod, SELF_OPEN, WD } from './hq.js';
 import { weekday, periodOf, periodNo, periodStart, periodEnd, periodDates, shiftPeriod, parseLabel, diffDays, todayTaipei } from './period.js';
 import { canEdit } from './state.js';
+import { kindBox, bindKind } from './fixed.js';
 
 export const H = { key: null, period: null, data: null, loading: null, who: null, emp: null, sel: null, shEdit: null, msg: '', err: '' };
 export function resetSelf(key) { Object.assign(H, { key, period: null, data: null, loading: null, who: null, emp: null, sel: null, shEdit: null, msg: '', err: '' }); }
@@ -236,13 +237,17 @@ function drawApprove(ctx) {
 
   const who = subs.find((s) => s.emp_id === H.who);
   if (who) {
-    el.insertAdjacentHTML('beforeend', `<div class="card" id="hqDetail"><h2>${esc(who.name)}　已填 ${who.filled}／${who.days} 天</h2>
+    // 正職／計時（2026-11-13 Eason A）：只有人資主管、管理員能改；沒勾＝正職（上班日要滿 8 小時才能核定）
+    const kindRow = D.canSetKind ? `<p class="mt" id="hqKind">${kindBox(who, true, 'hq')} <small class="hint">沒勾＝正職</small></p>`
+      : `<p class="hint mt" id="hqKind">${who.emp_kind === 'pt' ? '計時' : '正職'}</p>`;
+    el.insertAdjacentHTML('beforeend', `<div class="card" id="hqDetail"><h2>${esc(who.name)}　已填 ${who.filled}／${who.days} 天</h2>${kindRow}
       ${resultsHtml(D.results, who.emp_id).replace('class="card sc-sum" id="hqSum"', 'class="sc-sum" id="hqSum"')}
       <div class="hq-calcard mt">${calHtml(periodDates(H.period), D.cells[who.emp_id] || {}, shiftMap, D.holidays, { editable: false, issue: issueMap(D.results, who.emp_id) })}</div></div>`);
   }
   bindMonth(ctx, el);
   el.querySelectorAll('button.hq-emp').forEach((b) => { b.onclick = () => { H.who = b.dataset.emp; say(''); ctx.rerender(); }; });
   bindShiftCard(ctx, el, D);
+  bindKind(el, 'hq', 'selfKind', ctx, { reload, say });
 }
 
 // 總部出差＋門市班（2026-11-07 Eason）：每一班旁邊一個「出差」勾選（只有總部的班能勾）與門市工作站選單（選了門市的班才出現，列那家門市的站）

@@ -134,6 +134,22 @@ function drawFixed(ctx) {
 }
 
 // ---------------------------------------------------------------- 固定班別
+/** 正職／計時勾選（2026-11-13 Eason：正職上班日滿 8 小時）。兩個框擇一；再點已勾的那個＝清掉（未設）。總部 self.js 也用。 */
+export function kindBox(st, canEdit, pre) {
+  const box = (v, label) => `<label class="sc-kind"><input type="checkbox" class="${pre}-kind" data-emp="${esc(st.emp_id)}" value="${v}" ${st.emp_kind === v ? 'checked' : ''} ${canEdit ? '' : 'disabled'} aria-label="${esc(st.name)} ${label}">${label}</label>`;
+  return `<span class="sc-kinds">${box('ft', '正職')}${box('pt', '計時')}</span>`;
+}
+export function bindKind(el, pre, action, ctx, cb2) {
+  el.querySelectorAll('input.' + pre + '-kind').forEach((cb) => {
+    cb.onchange = async () => {
+      const kind = cb.checked ? cb.value : '';
+      el.querySelectorAll(`input.${pre}-kind[data-emp="${CSS.escape(cb.dataset.emp)}"]`).forEach((x) => { x.disabled = true; if (x !== cb) x.checked = false; });
+      try { await call(action, { emp_id: cb.dataset.emp, kind }); await cb2.reload(); cb2.say(kind === 'ft' ? '已設為正職：上班日要滿 8 小時才能核定' : kind === 'pt' ? '已設為計時' : '已清掉正職／計時'); }
+      catch (e) { cb2.say(e.message, true); }
+      ctx.rerender();
+    };
+  });
+}
 export function renderFixedStaff(ctx) {
   return shell(ctx, () => { if (ctx.el.isConnected) drawFixedStaff(ctx); });
 }
@@ -146,10 +162,12 @@ function drawFixedStaff(ctx) {
     stList.filter((x) => x.active || x.id === st.default_station).map((x) => `<option value="${esc(x.id)}" ${st.default_station === x.id ? 'selected' : ''}>${esc(x.name)}${x.active ? '' : '（已停用）'}</option>`).join('')}</select>`;
   const rows = D.staff.map((st) => `<div class="sc-drow fx-row"><span class="sc-dn">${esc(st.name)}<small class="sc-al">${esc(st.emp_id)}</small></span>
       <span class="sc-dv"><select class="fx-shift" data-emp="${esc(st.emp_id)}" aria-label="${esc(st.name)} 平日上哪個班" ${D.canEdit ? '' : 'disabled'}>
-        <option value="">未設定（平日不排班）</option>${D.shifts.map((s) => `<option value="${esc(s.id)}" ${st.fixed_shift === s.id ? 'selected' : ''}>${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('')}</select>${showSt ? ' ' + stSel(st) : ''}</span></div>`).join('');
+        <option value="">未設定（平日不排班）</option>${D.shifts.map((s) => `<option value="${esc(s.id)}" ${st.fixed_shift === s.id ? 'selected' : ''}>${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('')}</select>${showSt ? ' ' + stSel(st) : ''} ${kindBox(st, D.canEdit, 'fx')}</span></div>`).join('');
   const lack = D.staff.filter((st) => !st.fixed_shift).length;
-  const warn = lack ? `<p class="hint mt err" id="fxLack">${lack} 位同仁還沒設固定班別，他們的平日班表是空白的</p>` : '';
-  el.innerHTML = head(D, '固定班別', `${warn}<p class="hint mt">每個人平日上的班。設定或更改後，系統會自動重產他從明天起的平日班表（手改的格子與請假不會被蓋掉），並送到 LINE。</p>`, false)
+  const noKind = D.staff.filter((st) => !st.emp_kind).length;
+  const warn = (lack ? `<p class="hint mt err" id="fxLack">${lack} 位同仁還沒設固定班別，他們的平日班表是空白的</p>` : '')
+    + (noKind ? `<p class="hint mt err" id="fxNoKind">${noKind} 位同仁還沒勾正職或計時，考勤核定不會檢查他們上班日有沒有滿 8 小時</p>` : '');
+  el.innerHTML = head(D, '固定班別', `${warn}<p class="hint mt">每個人平日上的班。設定或更改後，系統會自動重產他從明天起的平日班表（手改的格子與請假不會被蓋掉），並送到 LINE。</p><p class="hint">勾「正職」的同仁，上班日核定＋出差＋請假要滿 8 小時才能核定。</p>`, false)
     + `<div class="card"><div class="sc-dlist" id="fxStaff">${rows || '<p class="hint" style="margin:0">還沒有同仁。</p>'}</div>${D.canEdit ? '' : '<p class="hint mt">只有廠長可以設定固定班別。</p>'}</div>`;
   el.querySelectorAll('select.fx-station').forEach((sel) => {
     sel.onchange = async () => {
@@ -159,6 +177,7 @@ function drawFixedStaff(ctx) {
       ctx.rerender();
     };
   });
+  bindKind(el, 'fx', 'fixedKind', ctx, { reload, say });
   el.querySelectorAll('select.fx-shift').forEach((sel) => {
     sel.onchange = async () => {
       sel.disabled = true;

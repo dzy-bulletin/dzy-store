@@ -809,7 +809,7 @@ function dutyDo(d, action, b) {
       const f = fakeOf(r.emp_id) || { shift: ['', ''], segs: [], ref: null };
       const out = { emp_id: r.emp_id, name: r.name, segments: f.segs.map(x => ({ ...x })), reference: f.ref, attempts: f.attempts || 0,
         ...leaveOut(d.leave[date + r.emp_id]), shift_in: f.shift[0], shift_out: f.shift[1],
-        plan: (d.plans && d.plans[r.emp_id]) || null };
+        plan: (d.plans && d.plans[r.emp_id]) || null, ...(Array.isArray(d.ftEmps) ? { ft: d.ftEmps.includes(r.emp_id) } : {}) };      // ft：正職（2026-11-13，e2e 設 d.ftEmps 才有）
       if (r.no_line) out.no_line = true;                // 打卡端 mgr_day 帶的「沒綁 LINE」（2026-11-10）
       const a = d.approved[date + r.emp_id]; if (a) out.approved = { ...a };
       if (f.dup) {                                      // 重複打卡（2026-11-06）：打卡後端回 dup_groups；認定後打卡段改成合併後的那份（f.dup_segs／dup_ref）
@@ -853,6 +853,14 @@ function dutyDo(d, action, b) {
       if (openSeg && !covered) return fail('BAD_INPUT', '這天還不能核定：缺加班單、假單或忘打卡單' + (emp.no_line ? '。這位同仁沒綁 LINE，請店長在考勤管理「代開申請」，送總監層級審核。' : ''));
     }
     const trip = leaves.reduce((a, x) => a + (x.type === '出差' && x.hours !== '' ? x.hours : 0), 0);
+    // 正職上班日滿 8 小時（打卡端 reqFt8_，2026-11-13）：e2e 設 d.ftEmps 才打開；班表 W＋上班＋出差＋已核准假單（看申請單）< 8 就擋
+    const pl0 = d.plans && d.plans[emp.emp_id];
+    if (Array.isArray(d.ftEmps) && d.ftEmps.includes(emp.emp_id) && pl0 && pl0.day_type === 'W') {
+      let wk = trip; periods.forEach(p => { const [a, c] = [p.start, p.end].map(t => +t.slice(0, 2) * 60 + +t.slice(3)); wk += ((c <= a ? c + 1440 : c) - a) / 60; });
+      const lv = d.reqs.filter(r => r.emp_id === emp.emp_id && r.date === date && r.status === 'approved' && r.kind === 'leave').reduce((a, r) => a + (Number(r.hours) || 0), 0);
+      const sum = Math.round((wk + lv) * 100) / 100;
+      if (sum < 7.995) return fail('BAD_INPUT', '這天還不能核定：正職上班日要滿 8 小時（上班 ' + Math.round((wk - trip) * 100) / 100 + '＋出差 ' + trip + '＋假單 ' + lv + '＝' + sum + ' 小時），還差 ' + Math.round((8 - sum) * 100) / 100 + ' 小時，要有已核准的假單或補休單。請同仁在 LINE「加班請假」補申請；超過 7 天請店長在考勤管理「代開申請」，送總監層級審核。');
+    }
     let hours, status;
     if (!periods.length) {
       if (!leaves.length) return fail('BAD_INPUT', '上班時段格式不對，或沒有填任何時段也沒選假別。');

@@ -464,6 +464,8 @@ function buildCard(emp, date) {
       const cw = C.contBreakWarn(rows);             // 連續 4 小時沒休 30 分（2026-11-06）：黃字、不擋
       if (cw) totalBox.append(h('div', 'du-total-cont', C.contBreakText(cw)));
     } else totalBox.classList.remove('over');
+    const f8 = C.ft8Summary(emp, total, leaveList());   // 正職上班日滿 8 小時（2026-11-13）：整天請假沒有時段也要顯示
+    if (f8) { totalBox.hidden = false; totalBox.append(h('div', 'du-ft8' + (f8.gap ? ' short' : ''), C.ft8Text(f8))); }
     breakToggle.hidden = true;                      // 一顆鈕在「併成一段」與「插入休息」之間切換，兩個方向都回得去
     if (C.hasBreak(br)) {
       if (rows.length === 2 && C.gapIsBreak(br, rows[0].end, rows[1].start)) { breakToggle.hidden = false; breakToggle.dataset.mode = 'merge'; breakToggle.textContent = '今天沒休息 → 併成一段'; }
@@ -499,7 +501,7 @@ function buildCard(emp, date) {
   const say = (cls, text) => { result.className = 'du-result ' + cls; result.hidden = false; result.textContent = text; };
   // 主管代開加班／忘打卡單（2026-11-06 核定綁定申請單）：核定被擋「缺單」、而且那天超過 7 天（同仁自己補不了）才出現；送總監層級審
   let proxyBox = null;
-  const proxyForm = (d, noLine) => {
+  const proxyForm = (d, noLine, why0) => {
     if (proxyBox) proxyBox.remove();
     proxyBox = h('div', 'du-proxy');
     const kind = h('select', 'du-proxy-kind'); [['ot', '加班單'], ['miss', '忘打卡單'], ['leave', '假單'], ['trip', '出差單']].forEach(([v, t]) => kind.append(h('option', null, t, { value: v })));
@@ -521,6 +523,13 @@ function buildCard(emp, date) {
       la.hidden = a.hidden = !(ot || miss) || (miss && m === 'out');
       lb.hidden = b.hidden = !(ot || miss) || (miss && m === 'in');
     };
+    // 被擋的原因是正職上班日不滿 8 小時（2026-11-13）：先選好假單、補休、還差的時數（往上取到半小時）
+    const gapM = /正職上班日要滿 8 小時[^。]*?還差 ([\d.]+) 小時/.exec(String(why0 || ''));
+    if (gapM) {
+      kind.value = 'leave';
+      if ([...lt.options].some(o => o.value === '補休')) lt.value = '補休';
+      hr.value = String(C.ft8Round(Number(gapM[1])));
+    }
     kind.onchange = mt.onchange = sync; sync();
     go.onclick = async () => {
       const k = kind.value;
@@ -614,7 +623,7 @@ function buildCard(emp, date) {
       say('bad', '✕ 核定失敗：' + e.message);
       if (/^核定和打卡差/.test(e.message) && !readOnly) { diffBox.hidden = false; diffIn.focus(); }
       const noLine = /沒綁 LINE/.test(e.message);                // 打卡端判斷的：沒綁 LINE 的同仁 7 天內也能代開（2026-11-09）
-      if (/^這天還不能核定/.test(e.message) && (noLine || approveDate < C.addDaysStr(C.taipeiToday(), -7)) && !readOnly) proxyForm(approveDate, noLine);
+      if (/^這天還不能核定/.test(e.message) && (noLine || approveDate < C.addDaysStr(C.taipeiToday(), -7)) && !readOnly) proxyForm(approveDate, noLine, e.message);
     }
     finally { submit.disabled = false; submit.textContent = '重新送出核定'; }
   };
@@ -730,9 +739,12 @@ function buildCard(emp, date) {
         if (!tag) { tag = h('span', 'du-fromreq', '來自加班申請'); periodRows.parentNode.insertBefore(tag, periodRows); }
       }
       const lvFill = C.reqLeaveLines(list);
+      const noTimeLv = list.filter(r => (r.kind === 'leave' || r.kind === 'trip') && !r.start).reduce((a, r) => a + (Number(r.hours) || 0), 0);      // 沒填時段的假單＋出差合計（兩張半天＝整天）
       list.forEach(r => {
         if (r.kind === 'leave') {
-          if (!r.start) { periodRows.textContent = ''; periodRows.append(periodRow(null, refresh)); }
+          // 沒填時段的假單：整天（8 小時以上）才清掉上班時段；部分時數（例：補休 0.5 小時）保留班表時段，
+          // 否則正職會變成「上班 0＋假單 0.5」被滿 8 小時擋下（2026-11-13，正職上班日滿 8 小時）
+          if (!r.start && !(noTimeLv > 0 && noTimeLv < C.FT8_H)) { periodRows.textContent = ''; periodRows.append(periodRow(null, refresh)); }
         } else if (r.kind === 'trip') {
           // 整天出差（申請沒填時段、那天也沒打卡）：預設班別清掉，否則班別 8 小時＋出差 8 小時＝16 小時（2026-10-10 Codex 審查，manager.html 同步）
           if (!r.start && !(emp.segments || []).length) { periodRows.textContent = ''; periodRows.append(periodRow(null, refresh)); }
