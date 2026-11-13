@@ -129,7 +129,9 @@ export function parseSheet(aoa, dates, staffNames) {
     if (best.every(([c]) => WD.includes(norm(row[c])) || !norm(row[c])) && any) continue;
     out.push({ r, name, cells });
   }
-  return { ok: true, header, dateCols: best, nameCol, rows: out, outside };
+  // 表頭只寫幾號（29、30、1…）沒寫月份：認不出是哪個月的班表，照這一期的日期對，預覽提醒店長確認（2026-11-13 排班挑錯低）
+  const dayOnly = best.every(([c]) => { const v = (rows[header] || [])[c]; return typeof v === 'number' ? v >= 1 && v <= 31 : /^\d{1,2}日?$/.test(norm(v).replace(/[(（].*$/, '').replace(/星期.*$|週.$|周.$/, '')); });
+  return { ok: true, header, dateCols: best, nameCol, rows: out, outside, dayOnly };
 }
 
 /** 從整本活頁簿挑最像班表的工作表（讀得到最多同仁的那張）；sheets＝[{name, aoa}] */
@@ -174,12 +176,25 @@ export function readToken(tok, shifts) {
   for (const [c, l] of LEAVES) if (t === c || t === l || t === l.replace(/假$/, '') || t === c + '假') return 'L:' + c;
   const one = (x) => { const m = shiftsMatching(x, shifts); return m.length === 1 ? m[0].id : null; };
   const ot = /^(?:休加|休息日加班|加班)(.+)$/.exec(t) || /^(.+?)[(（]?(?:休加|休息日加班)[)）]?$/.exec(t);
-  if (ot) { const id = one(ot[1]); return id ? 'O:' + id : null; }
+  if (ot) {
+    const id = one(ot[1]); if (id) return 'O:' + id;
+    // 休息日加班兩班（範本寫「休加A+C」，2026-11-13 排班挑錯低：原本讀不懂）
+    const ps = ot[1].split(/[+＋&、,，/]/).filter(Boolean);
+    if (ps.length === 2) { const a = one(ps[0]), b = one(ps[1]); if (a && b && a !== b) return 'O:' + a + '+' + b; }
+    return null;
+  }
   const single = one(t);
   if (single) return 'S:' + single;
   const parts = t.split(/[+＋&、,，/]/).filter(Boolean);
   if (parts.length === 2) { const a = one(parts[0]), b = one(parts[1]); if (a && b && a !== b) return 'S:' + a + '+' + b; }
   return null;
+}
+
+/** 「10-19」這種時間寫法被 Excel 自動轉成日期，讀進來是日期序號：轉回「月-日」（10/19 → 10-19）。其他值原樣回傳 */
+export function excelDateBack(v) {
+  if (typeof v !== 'number' || !(v > 30000 && v < 80000) || !Number.isInteger(v)) return v;
+  const y = serialYmd(v);
+  return `${+y.slice(5, 7)}-${+y.slice(8, 10)}`;
 }
 
 /** 值 → 送給 saveDays 的格子內容（不含 emp_id、date）；CLEAR 回 { clear:true }，SKIP／KEEP 回 null */
@@ -188,7 +203,7 @@ export function cellOfValue(v) {
   if (v === 'CLEAR') return { clear: true };
   if (v === 'R' || v === 'H') return { day_type: v };
   if (v.startsWith('L:')) return { day_type: 'L', leave: v.slice(2) };
-  if (v.startsWith('O:')) return { day_type: 'H', shift_id: v.slice(2) };
+  if (v.startsWith('O:')) { const [a, b] = v.slice(2).split('+'); return Object.assign({ day_type: 'H', shift_id: a }, b ? { shift2_id: b } : {}); }
   if (v.startsWith('S:')) { const [a, b] = v.slice(2).split('+'); return Object.assign({ day_type: 'W', shift_id: a }, b ? { shift2_id: b } : {}); }
   return null;
 }
@@ -237,21 +252,33 @@ export function buildPlan(D, parsed, picks) {
   // 名字比對：完全相同 → 唯一；不然看 Excel 那格有沒有「含」某位同仁的名字（「E11 林秀縈」「林秀縈(正職)」）；兩個以上算對不上。
   // 「含」要是獨立的一段：名字前後緊貼著同一類的字（中文貼中文、數字貼數字、英文貼英文）就不算——
   // 名冊有「王明」、Excel 寫「王明華」是另一個人，原本會直接當成王明寫進去（2026-11-10 挑錯 #10）
+  // 班表上有兩位同名同仁（Eason 2026-11-13 紅燈 s2 選 A）：Excel 要寫「工號＋姓名」（E11 林秀縈）才對得到；只寫名字回 AMB（不匯入、說明原因）
+  const AMB = { amb: true };
   const autoEmp = (name) => {
     const t = norm(name);
-    if (byNorm[t]) return byNorm[t].length === 1 ? byNorm[t][0].emp_id : null;
-    const hit = staff.filter((st) => norm(st.name) && standsAlone(name, norm(st.name)));
-    return hit.length === 1 ? hit[0].emp_id : null;
+    const cands = byNorm[t] || staff.filter((st) => norm(st.name) && standsAlone(name, norm(st.name)));
+    if (cands.length === 1) return cands[0].emp_id;
+    if (cands.length > 1) {
+      const byId = cands.filter((st) => standsAlone(name, norm(st.emp_id)));
+      if (byId.length === 1) return byId[0].emp_id;
+      if (cands.every((st) => norm(st.name) === norm(cands[0].name))) return AMB;
+    }
+    return null;
   };
   const supported = new Set();
   for (const x of D.support || []) if (x.kind === 'store' && x.emp) for (const d of Object.keys(x.days || {})) supported.add(x.emp + '|' + d);
-  const unknownTokens = {}, unknownNames = [], rejects = [], keeps = [], dupNames = [], rows = [], writes = [];
+  const unknownTokens = {}, unknownNames = [], rejects = [], keeps = [], dupNames = [], ambNames = [], rows = [], writes = [];
   // 檔案裡有哪幾天：沒列到的日期不動（同「檔案沒列到的同仁不動」）。原本缺的日期被當成空白格＝清空，只給兩週的檔案會把另外兩週清掉（2026-11-10 挑錯 #9）
   const haveDates = new Set(parsed.dateCols ? parsed.dateCols.map((x) => x[1]) : parsed.rows.flatMap((r) => Object.keys(r.cells || {})));
   const missingDates = dates.filter((d) => !haveDates.has(d));
   const used = new Set();
+  // 同一位同仁出現兩列：兩列都不匯入（原本只收第一列，第一列空白會把整期清掉；Eason 2026-11-13 紅燈 s1 選 A）
+  const empOfRow = (pr) => { const a = autoEmp(pr.name); return a === AMB ? null : (Object.prototype.hasOwnProperty.call(P.names, pr.name) ? P.names[pr.name] : a); };
+  const rowsPer = {};
+  for (const pr of parsed.rows) { const e = empOfRow(pr); if (e && e !== 'SKIP') rowsPer[e] = (rowsPer[e] || 0) + 1; }
   const counts = { write: 0, change: 0, same: 0, skip: 0 };
   for (const pr of parsed.rows) {
+    if (autoEmp(pr.name) === AMB) { if (!ambNames.includes(pr.name)) ambNames.push(pr.name); counts.skip += dates.filter((d) => norm(pr.cells[d])).length; continue; }
     let emp = Object.prototype.hasOwnProperty.call(P.names, pr.name) ? P.names[pr.name] : autoEmp(pr.name);
     const known = emp && emp !== 'SKIP' ? staff.find((s) => s.emp_id === emp) : null;
     if (!known) {
@@ -260,14 +287,16 @@ export function buildPlan(D, parsed, picks) {
       counts.skip += filled;
       continue;
     }
-    if (used.has(known.emp_id)) { dupNames.push(pr.name); counts.skip += dates.filter((d) => norm(pr.cells[d])).length; continue; }
+    if (rowsPer[known.emp_id] > 1) { if (!used.has(known.emp_id)) dupNames.push(known.name); used.add(known.emp_id); counts.skip += dates.filter((d) => norm(pr.cells[d])).length; continue; }
     used.add(known.emp_id);
     const row = { emp_id: known.emp_id, name: known.name, xlsName: pr.name, cells: {} };
     for (const d of dates) {
-      const raw = pr.cells[d], tok = norm(raw);
+      const raw = pr.cells[d], tok = norm(excelDateBack(raw));
       const old = (D.days[known.emp_id] || {})[d] || null;
       const oldText = tokenOfCell(old, shiftMap).replace('+', '＋');
       let v = Object.prototype.hasOwnProperty.call(P.tokens, tok) && tok ? P.tokens[tok] : readToken(tok, D.shifts || []);
+      // 範本原樣傳回：寫法跟現在的格子一樣（例：已停用的班別代號）就不動（2026-11-13 排班挑錯低）
+      if (v === null && old && tok && tok === norm(tokenOfCell(old, shiftMap))) v = 'KEEP';
       const put = (status, extra) => { row.cells[d] = Object.assign({ status, tok: String(raw === undefined ? '' : raw), oldText }, extra); };
       if (!haveDates.has(d)) { counts.same++; put('same', { text: oldText }); continue; }
       if (v === null) {
@@ -303,7 +332,7 @@ export function buildPlan(D, parsed, picks) {
     rows.push(row);
   }
   const missing = staff.filter((st) => !used.has(st.emp_id)).map((st) => st.name);
-  return { rows, writes, counts, unknownTokens: Object.values(unknownTokens), unknownNames, missing, missingDates, rejects, keeps, dupNames, outside: parsed.outside || 0 };
+  return { rows, writes, counts, unknownTokens: Object.values(unknownTokens), unknownNames, missing, missingDates, rejects, keeps, dupNames, ambNames, outside: parsed.outside || 0, dayOnly: !!parsed.dayOnly };
 }
 
 /** 下載範本的表格（二維陣列）：姓名＋這一期每天；第二列星期；照班表順序列出每位在職同仁現在的班 */

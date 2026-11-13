@@ -87,9 +87,11 @@ function buildBatchBar(card, title) {
       try {
         const r = await call('mgr_req_decide_batch', { ids: gEls.map(el => el.__req.id), decision: 'approve', store: store || undefined });
         const done = Array.isArray(r.done) ? r.done.map(String) : [], skipped = Array.isArray(r.skipped) ? r.skipped : [];
+        const warns = Array.isArray(r.warn_items) ? r.warn_items : [];      // 那天已核定、要重新核定的幾筆（2026-11-13 a2）
         gEls.forEach(el => {
           const it = el.__req, tag = (it.storeName ? it.storeName + ' ' : '');
-          if (done.indexOf(String(it.id)) >= 0) { nDone++; el.__markDone('✓ 已核准：' + tag + it.name + ' ' + it.summary); delete S.dayCache[it.date]; return; }
+          const wn = warns.filter(x => String(x.id) === String(it.id))[0];
+          if (done.indexOf(String(it.id)) >= 0) { nDone++; el.__markDone('✓ 已核准：' + tag + it.name + ' ' + it.summary + (wn ? '\n⚠ ' + (wn.message || '那天已經核定過，請重新核定一次') : '')); delete S.dayCache[it.date]; return; }
           const sk = skipped.filter(x => String(x.id) === String(it.id))[0];
           if (sk) { nSkip++; el.__markDone('— 略過：' + tag + it.name + ' ' + it.summary + '（' + sk.reason + '）'); }
         });
@@ -190,8 +192,9 @@ function buildItem(it, card, title) {
     } else if (!await confirmBox('核准 ' + it.name + '：' + it.summary + '？\n核准後，那天的核定會先幫你填好，你核定那天時確認送出才算數。', '核准')) return;
     ok.disabled = no.disabled = true; say('', '送出中…');
     try {
-      await call('mgr_req_decide', body);
-      el.__markDone((decision === 'approve' ? '✓ 已核准：' : '✕ 已退回：') + it.name + ' ' + it.summary);
+      const r = await call('mgr_req_decide', body);
+      // 那天已經核定過（Eason 2026-11-13 紅燈 a2 選 A）：照常核准，提醒重新核定一次，假別才會寫進薪資
+      el.__markDone((decision === 'approve' ? '✓ 已核准：' : '✕ 已退回：') + it.name + ' ' + it.summary + (r && r.warn ? '\n⚠ ' + (r.message || '那天已經核定過，請重新核定一次') : ''));
       refreshTitle(card, title); syncBatch(card);
       if (decision === 'approve') delete S.dayCache[it.date];     // 那天的核定頁要重抓才看得到預填
     } catch (e) { ok.disabled = no.disabled = false; say('bad', '✕ ' + (e.message || '沒有成功，請再試一次')); }

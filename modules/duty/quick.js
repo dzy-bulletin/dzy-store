@@ -361,10 +361,10 @@ export function renderQuick(ctx) {
     const k = hid(it);
     st.busy = true; st.reqMsg[k] = ''; render();
     try {
-      await call('mgr_req_decide', { id: it.id, decision, store: it.store || undefined, reason: decision === 'reject' ? reason : undefined });
+      const r = await call('mgr_req_decide', { id: it.id, decision, store: it.store || undefined, reason: decision === 'reject' ? reason : undefined });
       delete S.dayCache[it.date];
       st.handled.add(k);
-      st.extra.push(it.name + (decision === 'approve' ? ' 核准' : ' 退回') + ' ' + C.REQ_KIND_LABEL[it.kind] + '單');
+      st.extra.push(it.name + (decision === 'approve' ? ' 核准' : ' 退回') + ' ' + C.REQ_KIND_LABEL[it.kind] + '單' + (r && r.warn ? '（⚠ ' + (r.message || '那天已經核定過，請重新核定一次') + '）' : ''));      // 2026-11-13 a2
     } catch (e) {
       st.reqMsg[k] = '沒有成功：' + ((e && e.message) || '請再試一次');
       if (uncertain(e)) {                                     // 逾時：先重讀，單子已不在待審＝其實處理成功

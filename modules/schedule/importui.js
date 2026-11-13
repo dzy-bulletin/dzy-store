@@ -89,8 +89,10 @@ function draw(D) {
   // Excel 寫的名字跟班表上不一樣、但自動對到的：列出來讓店長看一眼（2026-11-10 挑錯 #10）
   const renamed = pl.rows.filter((r) => r.xlsName !== undefined && norm(r.xlsName) !== norm(r.name));
   if (renamed.length) notes.push(`<li id="impNameMap">名字寫法不同，已對到：${renamed.map((r) => `「${esc(r.xlsName)}」→ ${esc(r.name)}`).join('、')}</li>`);
-  if (pl.dupNames.length) notes.push(`<li class="bad">同一位同仁出現兩列（${pl.dupNames.map(esc).join('、')}），只匯入第一列</li>`);
+  if (pl.ambNames && pl.ambNames.length) notes.push(`<li class="bad" id="impAmb">班表上有同名的同仁（${pl.ambNames.map(esc).join('、')}），只寫名字分不出是誰，這幾列不匯入；請在 Excel 寫工號＋姓名（例：E11 ${esc(pl.ambNames[0])}）</li>`);
+  if (pl.dupNames.length) notes.push(`<li class="bad">同一位同仁出現兩列（${pl.dupNames.map(esc).join('、')}），兩列都不匯入，請在檔案刪掉一列再匯入</li>`);
   if (pl.keeps.length) notes.push(`<li>支援別家門市的班不會被匯入改掉（${pl.keeps.length} 格）</li>`);
+  if (pl.dayOnly) notes.push(`<li class="warn" id="impDayOnly">檔案的日期只寫幾號、沒寫月份，已照這一期（${md(D.dates[0])}–${md(D.dates[D.dates.length - 1])}）對日期，請確認是這一期的班表</li>`);
   if (pl.outside) notes.push(`<li>檔案裡有 ${pl.outside} 天不在這一期，已略過</li>`);
   for (const r of pl.rejects) notes.push(`<li class="bad">${esc(r.name)} ${md(r.date)}：${esc(r.reason)} → 這格不會匯入</li>`);
   box.innerHTML = `${head}${chips}${table}

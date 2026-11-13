@@ -221,7 +221,7 @@ export function hqAction(action, me, b, db, hol, pa, seedStores) {
     if (action === 'fixedLoad') {
       const dates = span;
       const cells = {};
-      for (const s of st.staff) { cells[s.emp_id] = {}; for (const d of dates) { const c = (st.days[s.emp_id] || {})[d]; if (c) cells[s.emp_id][d] = Object.assign(toCell(c), { src: c.source }, c.shift_id && c.station_id ? { w: c.station_id } : {}); } }
+      for (const s of st.staff) { cells[s.emp_id] = {}; for (const d of dates) { const c = (st.days[s.emp_id] || {})[d]; if (c && employed(s, d)) cells[s.emp_id][d] = Object.assign(toCell(c), { src: c.source }, c.shift_id && c.station_id ? { w: c.station_id } : {}); } }
       const res = fixedResults();
       for (const s of st.staff) if (!s.fixed_shift) res.push({ level: 'warn', code: 'X1', emp_id: s.emp_id, date: null, msg: `${s.name} 還沒設固定班別，平日不會自動排班` });
       return ok({ month: hasPeriod ? null : month, period: hasPeriod ? b.period : null, from: dates[0], to: dates[dates.length - 1], curPeriod: label(Math.max(1, periodNo(today) || 0)),
