@@ -557,6 +557,9 @@ function buildCard(emp, date) {
   if (readOnly) diffIn.disabled = true;
   body.append(diffBox, actions, result);
   const say = (cls, text) => { result.className = 'du-result ' + cls; result.hidden = false; result.textContent = text; };
+  /* 超過幾天同仁自己補不了單、才給代開（同打卡端 Requests.gs reqPastLimit_，2026-11-14 Eason）：
+     請假／加班／出差 4 天；11/28 以前 11 月的日子同仁都能自己補，這段期間照忘打卡的 7 天才出現代開（打卡端會再判，沒到期限回「請同仁自己申請」）。 */
+  const proxyAfterDays = () => (C.taipeiToday() <= '2026-11-28' ? 7 : 4);
   // 主管代開加班／忘打卡單（2026-11-06 核定綁定申請單）：核定被擋「缺單」、而且那天超過 7 天（同仁自己補不了）才出現；送總監層級審
   let proxyBox = null;
   const proxyForm = (d, noLine, why0) => {
@@ -607,7 +610,7 @@ function buildCard(emp, date) {
         proxyBox.remove(); proxyBox = null;
       } catch (e) { say('bad', '✕ 代開失敗：' + e.message); go.disabled = false; go.textContent = '送出代開（送總監層級審核）'; }
     };
-    proxyBox.append(h('div', 'du-proxy-lead', (noLine ? '這位同仁沒綁 LINE，自己補不了單。' : '這天已超過 7 天，同仁自己補不了單。') + '可以替同仁代開，代開的單要由總監層級（品牌總監／廚藝總監；總部是人資主管）核准。'),
+    proxyBox.append(h('div', 'du-proxy-lead', (noLine ? '這位同仁沒綁 LINE，自己補不了單。' : '這天已超過 ' + proxyAfterDays() + ' 天，同仁自己補不了單。') + '可以替同仁代開，代開的單要由總監層級（品牌總監／廚藝總監；總部是人資主管）核准。'),
       h('div', 'du-proxy-row', null), why, go);
     proxyBox.children[1].append(kind, mt, lt, hr, pl, la, a, lb, b);
     result.after(proxyBox);
@@ -681,7 +684,7 @@ function buildCard(emp, date) {
       say('bad', '✕ 核定失敗：' + e.message);
       if (/^核定和打卡差/.test(e.message) && !readOnly) { diffBox.hidden = false; diffIn.focus(); }
       const noLine = /沒綁 LINE/.test(e.message);                // 打卡端判斷的：沒綁 LINE 的同仁 7 天內也能代開（2026-11-09）
-      if (/^這天還不能核定/.test(e.message) && (noLine || approveDate < C.addDaysStr(C.taipeiToday(), -7)) && !readOnly) proxyForm(approveDate, noLine, e.message);
+      if (/^這天還不能核定/.test(e.message) && (noLine || approveDate < C.addDaysStr(C.taipeiToday(), -proxyAfterDays())) && !readOnly) proxyForm(approveDate, noLine, e.message);
     }
     finally { submit.disabled = false; submit.textContent = '重新送出核定'; }
   };
