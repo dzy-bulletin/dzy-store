@@ -200,6 +200,8 @@ export function renderQuick(ctx) {
   }
   // 送出前先檢查（2026-11-14 考勤管理好上手第 1 項）：「沒問題」那群先用打卡系統的只檢查跑一次，會被擋的移到異常區、寫出原因；
   // 檢查中一鍵核定先停用（最多幾秒）；讀不到就照舊（按了才知道）
+  // 只檢查回的錯誤代碼 → 白話；null＝格式類錯誤，不當成「要補齊」（照原本分類）
+  const CHECK_CODE = { bad_periods: null, bad_items: null, bad_item: null, invalid_emp_id: '名冊找不到這位同仁', future_date: '還沒到的日子不能核定', home_review: '這位同仁由所屬部門核定', unauthorized: '沒有權限核定這位同仁' };
   async function checkOk(tok) {
     // 打卡＋單＝核定時數（2026-11-14 Eason 定案，docs/punch-plus-req/）：「沒問題」與「有異常」的人都先照原則算好時段（core-calc.js）再只檢查——
     //   會過：異常的人移到「核定通過」一起一鍵核定；沒問題的人照算好的時段送。不會過：寫出要補齊的單（會被擋的人移到異常區）。
@@ -210,7 +212,10 @@ export function renderQuick(ctx) {
     list.forEach((p) => {
       const emp = empOf(p.key); if (!emp) return;
       const core = corePeriods({ segs: emp.segments, plan: emp.plan, reqs: st.appr[p.key] || [], brk: brk(emp.store) });
-      const it = Object.assign({ emp_id: emp.emp_id }, mainAction(p).payload || p.payload || {}, core ? { periods: core.periods } : {});
+      const base = mainAction(p).payload || p.payload;
+      // 算不出時段（沒班又沒打卡，例：排休那天只有假單）也沒有原本要送的內容：不送檢查，照原本分類（要自己核對）（2026-11-14 許芷瑄排休喪假被顯示成 bad_periods）
+      if (!core && !(base && ((base.periods || []).length || (base.leaves || []).length))) return;
+      const it = Object.assign({ emp_id: emp.emp_id }, base || {}, core ? { periods: core.periods } : {});
       delete it.store; delete it.date;
       const k = emp.store || ''; if (!by.has(k)) by.set(k, []); by.get(k).push([p, it, core]);
     });
@@ -224,7 +229,8 @@ export function renderQuick(ctx) {
         const pay = Object.assign({}, it); delete pay.emp_id;
         if (r.ok) { Object.assign(U(p.key), { pass: { payload: pay, hours: r.approved_hours, notes: core ? core.notes : [] } }); return; }
         const probs = Array.isArray(r.probs) ? r.probs : [];
-        const text = probs.length ? probs.map((x) => x.text).join('；') : String(r.message || r.error || '打卡系統不接受').replace(/^這天還不能核定：/, '');
+        if (!probs.length && !r.message && CHECK_CODE[r.error] === null) return;      // 格式類錯誤（不是缺單）：不標，照原本分類
+        const text = probs.length ? probs.map((x) => x.text).join('；') : String(r.message || CHECK_CODE[r.error] || '打卡系統不接受，請到完整頁核對').replace(/^這天還不能核定：/, '');
         if (p.status === 'ok') Object.assign(U(p.key), { failed: '未符合：' + text, failedDiff: false, pre: true });
         else Object.assign(U(p.key), { need: text });
       });
