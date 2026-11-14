@@ -401,18 +401,47 @@ export function dupLeaveType(list) {
 export const reqKey = r => (r.kind === 'trip' ? '出差' : r.kind === 'leave' ? String(r.leave_type) : 'miss');
 // 回 { fillables, multi, older(r) }：multi＝同一鍵兩張、或假別種數超過 4 → 不自動填，逐張給主管選／作廢；
 // older(r)＝同一鍵（忘打卡還要同 miss_type）有較晚送出的另一張 → 這張可能是舊單
+// 分段請假（2026-11-15 Eason：張羽成 11/4 補休 23:15–23:30＋15:00–16:30 被當成重複）：同一種假（或出差）的幾張單，
+// 每張都有填起訖時段、時段兩兩不重疊、時數加總不超過 8 小時＝同一天分段請，不是舊單——合併成一列自動填（reqLeaveLines 同類加總）。
+// 沒填時段、時段重疊、加總超過 8 小時、忘打卡單：照舊不自動填，逐張給主管選。
+const hmMin = t => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || '')); return m ? +m[1] * 60 + +m[2] : null; };
+export function splitLeaveGroup(list) {
+  if (!list || list.length < 2 || list.some(r => r.kind !== 'leave' && r.kind !== 'trip')) return false;
+  const iv = [];
+  for (const r of list) {
+    const a = hmMin(r.start), b = hmMin(r.end);
+    if (a == null || b == null || b === a) return false;
+    iv.push(b > a ? [a, b] : [a, b + 1440]);
+  }
+  iv.sort((x, y) => x[0] - y[0]);
+  for (let i = 1; i < iv.length; i++) if (iv[i][0] < iv[i - 1][1]) return false;
+  const sum = list.reduce((t, r) => t + (Number(r.hours) || 0), 0);
+  return sum > 0 && sum <= 8 + 1e-9;
+}
 export function reqPlan(reqs) {
   const fillables = (reqs || []).filter(r => r.kind !== 'ot');
   const keys = fillables.map(reqKey);
-  const multi = keys.some((k, i) => keys.indexOf(k) !== i) || keys.filter(k => k !== 'miss').length > MAX_LEAVE_LINES;
-  const older = r => r.kind !== 'ot' && fillables.some(q => q !== r && reqKey(q) === reqKey(r)
+  const groupOf = k => fillables.filter(r => reqKey(r) === k);
+  const split = new Set(keys.filter((k, i) => keys.indexOf(k) !== i && k !== 'miss' && splitLeaveGroup(groupOf(k))));
+  const dup = keys.some((k, i) => keys.indexOf(k) !== i && !split.has(k));
+  const multi = dup || new Set(keys.filter(k => k !== 'miss')).size > MAX_LEAVE_LINES;
+  const older = r => r.kind !== 'ot' && !split.has(reqKey(r)) && fillables.some(q => q !== r && reqKey(q) === reqKey(r)
     && (r.kind !== 'miss' || q.miss_type === r.miss_type) && !!r.created_at && !!q.created_at && String(q.created_at) > String(r.created_at));      // 缺送出時間就不判舊單（2026-10-29 Fable 審查第 7 條）
-  return { fillables, multi, older };
+  return { fillables, multi, older, split };
 }
 // 申請預填的假別列：請假→{假別,時數}、出差→{出差,時數}
-export const reqLeaveLines = list => (list || []).filter(r => r.kind === 'leave' || r.kind === 'trip')
-  .map(r => ({ type: r.kind === 'trip' ? '出差' : (r.leave_type || ''), hours: (r.hours === 0 || r.hours) ? r.hours : '' }))
-  .filter(x => x.type);
+// 同一種假別多張（分段請假）合併成一列、時數加總（2026-11-15）；任何一張沒填時數＝這列時數空白（請主管填）
+export const reqLeaveLines = list => {
+  const out = [];
+  (list || []).filter(r => r.kind === 'leave' || r.kind === 'trip').forEach(r => {
+    const type = r.kind === 'trip' ? '出差' : (r.leave_type || ''), hours = (r.hours === 0 || r.hours) ? r.hours : '';
+    if (!type) return;
+    const x = out.find(y => y.type === type);
+    if (!x) { out.push({ type, hours }); return; }
+    x.hours = x.hours === '' || hours === '' ? '' : Math.round((Number(x.hours) + Number(hours)) * 100) / 100;
+  });
+  return out;
+};
 
 // 重複打卡（2026-11-06 Eason）：打卡後端 mgr_day 每人帶 dup_groups:[{type, cards:[{ts, hm}]}]＝同一天、同一型、相鄰、60 分鐘內的成功卡；
 // 已核定的 approved.dup_ignore＝被店長認定重複的那幾張 ts。店長選「以哪張為準」＝留那張、其他張送 dup_ignore；不選＝照系統原判定（算忘刷）。
