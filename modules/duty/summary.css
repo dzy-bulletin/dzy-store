@@ -41,6 +41,20 @@
 .sm-st{font-weight:700}
 .sm-st.pending{color:#8a6100}.sm-st.rejected,.sm-st.voided,.sm-st.cancelled{color:var(--muted)}.sm-st.finalized{color:var(--ok)}
 /* 手機（≤760px）：一筆一卡，標籤在左、內容在右，不能橫向捲動 */
+/* 本月補休帳總表（2026-11-14） */
+.sm-comp{margin-bottom:12px}
+.sm-comp-t{font-weight:900;font-size:15px;margin-bottom:4px}
+.sm-comp-note{margin-bottom:8px}
+.sm-comp-store{font-weight:900;font-size:13.5px;margin:10px 0 4px;color:var(--muted)}
+.sm-comp-tb{width:100%;border-collapse:collapse;font-size:14px}
+.sm-comp-tb th{text-align:left;font-size:12.5px;color:var(--muted);font-weight:700;border-bottom:1px solid var(--line);padding:6px 8px}
+.sm-comp-tb td{border-bottom:1px solid var(--line);padding:8px;overflow-wrap:anywhere}
+.sm-comp-tb .num{text-align:right;white-space:nowrap}
+.sm-comp-tb th:not(:first-child){text-align:right}
+.sm-comp-tb .bal{font-weight:900}
+.sm-comp-tb tr.neg .bal{color:var(--bad)}
+.sm-comp-tb tr.neg td:first-child{border-left:3px solid var(--bad)}
+@media print{.sm-comp{display:none}}
 @media (max-width:760px){
   .sm-tbl thead{display:none}
   .sm-tbl,.sm-tbl tbody,.sm-tbl tr,.sm-tbl td{display:block;width:100%}

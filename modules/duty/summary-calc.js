@@ -163,3 +163,29 @@ export const ymLabel = ym => +ym.slice(0, 4) + ' 年 ' + +ym.slice(5, 7) + ' 月
 
 // Excel 公式注入防護：文字開頭是 = + - @ 前面補單引號
 export const xlsSafe = v => (typeof v === 'string' && /^[=+\-@]/.test(v) ? "'" + v : v);
+
+// ---- 本月補休帳總表（2026-11-14 Eason：門市主管查正職同仁當月的加班、補休時數）----
+// 資料：payroll_leave_options {ym}（薪資系統 payCompMonthBook：已核准加班 − 補休（含審核中的補休單）＝剩／欠；只有正職 allowed）＋ mgr_roster（姓名、在職）。
+// stores：[{ code, name, opts, roster }]（單一門市一筆）。回 [{ code, name, rows:[{emp_id, name, ot_h, used_h, balance_h, active}] }]；
+// 這家店沒有補休帳（薪資沒開補休）＝ rows 為 null。名冊沒有的人照樣列（顯示員編）；離職的人只在本月有加班或補休才列。排序：欠的在前、再照姓名。
+export function compBankRows(stores) {
+  return (stores || []).map(st => {
+    const q = (st.opts && st.opts.quotas) || {};
+    const ros = new Map((Array.isArray(st.roster) ? st.roster : []).map(r => [String(r.emp_id), r]));
+    let any = false;
+    const rows = [];
+    for (const [emp, byCode] of Object.entries(q)) {
+      const c = Object.values(byCode || {}).find(v => v && v.comp);
+      if (!c) continue;
+      any = true;
+      if (!c.allowed) continue;                                        // 計時同仁沒有補休
+      const r = ros.get(String(emp)), active = r ? String(r.active).toLowerCase() !== 'false' && r.active !== false : !ros.size;      // 名冊讀不到：分不出在不在職，一律當在職
+      const ot = r2(Number(c.ot_h) || 0), used = r2(Number(c.used_h) || 0), bal = r2(c.balance_h != null ? Number(c.balance_h) || 0 : ot - used);
+      if (!active && !ot && !used) continue;
+      const nm = r && r.name ? String(r.name) : (st.names && st.names.get(String(emp))) || String(emp);
+      rows.push({ emp_id: String(emp), name: nm, ot_h: ot, used_h: used, balance_h: bal, active });
+    }
+    rows.sort((a, b) => (a.balance_h < 0) !== (b.balance_h < 0) ? (a.balance_h < 0 ? -1 : 1) : a.name.localeCompare(b.name, 'zh-Hant'));
+    return { code: st.code || '', name: st.name || '', rows: any ? rows : null };
+  });
+}

@@ -3,7 +3,7 @@
 // 資料：mgr_req_month {ym}（全部門市走 callAll）；換月份才重讀，其他篩選只在前端。對帳與合計的規則在 summary-calc.js（純函式）。
 import { S, call, callAll, h, tipText } from './state.js';
 import { taipeiToday, tsLabel, shortDate } from './calc.js';
-import { buildRows, filterRows, totals, empKey, defaultYm, ymAdd, ymLabel, xlsSafe, KIND_LABEL, KIND_ORDER, SLIP_TITLE, MERGED, OT_NOTE } from './summary-calc.js';
+import { buildRows, filterRows, totals, empKey, defaultYm, ymAdd, ymLabel, xlsSafe, KIND_LABEL, KIND_ORDER, SLIP_TITLE, MERGED, OT_NOTE, compBankRows } from './summary-calc.js';
 
 // 樣式另放 summary.css（畫面、手機卡片、列印），第一次進來才掛上（同耗損登記 loss.css 的掛法）
 export function css() {
@@ -49,14 +49,16 @@ export function renderSummary(ctx) {
   st.defName = ctx.session && ctx.session.name || '';
   const el = ctx.el;
   el.innerHTML = '';
-  const bar = h('div', 'card sm-bar'), out = h('div', 'sm-out', null, { id: 'smOut' });
-  el.append(bar, out);
+  const bar = h('div', 'card sm-bar'), comp = h('div', 'card sm-comp', null, { id: 'smComp' }), out = h('div', 'sm-out', null, { id: 'smOut' });
+  el.append(bar, comp, out);
+  compLoad(comp);
   drawBar(bar, out);
   if (st.data || st.err) drawOut(out); else load(out);
 }
 
 function load(out) {
   const st = SM, tok = ++st.tok, ck = st.ck;
+  { const c = document.getElementById('smComp'); if (c) compLoad(c); }      // 換月份：補休帳一起換
   out.innerHTML = '';
   out.append(h('div', 'card du-center', '載入中…'));
   (S.all ? callAll('mgr_req_month', { ym: st.ym }) : call('mgr_req_month', { ym: st.ym })).then(r => {
@@ -67,7 +69,8 @@ function load(out) {
     if (st.f.stores) st.f.stores = st.f.stores.filter(c => st.storeList.some(x => x.code === c));
     if (st.f.emp && !st.rows.some(r => empKey(r) === st.f.emp)) st.f.emp = '';
     st.picked = new Set([...st.picked].filter(k => st.rows.some(r => r.key === k)));
-    if (out.isConnected) { const bar = out.previousElementSibling; if (bar) drawBar(bar, out); drawOut(out); }
+    if (out.isConnected) { const bar = out.parentNode && out.parentNode.querySelector('.sm-bar'); if (bar) drawBar(bar, out); drawOut(out); }
+    { const c = document.getElementById('smComp'); if (c && st.comp && st.comp.stores) compDraw(c); }      // 補休帳：用申請單姓名補名冊沒有的人
   }, e => {
     if (!SM || SM.ck !== ck || tok !== st.tok) return;
     st.err = e; st.data = null; st.rows = [];
@@ -188,6 +191,66 @@ function drawOut(out) {
   out.append(acts, msg);
   if (!rows.length) { out.append(h('div', 'card du-center sm-empty', st.rows.length ? '目前的篩選沒有符合的資料。' : ymLabel(st.ym) + '沒有申請單或核定結果。')); return; }
   out.append(table(rows, out));
+}
+
+// ---- 本月補休帳總表（2026-11-14 Eason）：每位正職本月已核准加班、補休、剩／欠；數字是薪資系統的補休帳（同申請審核那句「本月補休帳」）----
+function compLoad(box) {
+  const st = SM, ym = st.ym, ck = st.ck;
+  if (st.comp && st.comp.ym === ym && (st.comp.groups || st.comp.err)) return compDraw(box);
+  const tok = (st.compTok = (st.compTok || 0) + 1);
+  st.comp = { ym };
+  box.innerHTML = ''; box.append(h('div', 'sm-comp-t', ymLabel(ym) + '補休帳（正職）'), h('div', 'sm-muted', '載入中…'));
+  const get = S.all
+    // 全部門市：員工名冊是整店功能、不走全部門市（2026-10-19 定）；姓名用核定工時的當天名單（mgr_day，在職同仁），沒有的再用申請單上的姓名
+    ? Promise.all([callAll('payroll_leave_options', { ym }), callAll('mgr_day', { date: taipeiToday() }).catch(() => null)]).then(([lo, dy]) => {
+      const okSt = (lo && Array.isArray(lo.stores) ? lo.stores : []).filter(x => x && x.ok);
+      const roster = (dy && Array.isArray(dy.employees) ? dy.employees : []).map(e => ({ emp_id: e.emp_id, name: e.name, active: true, store: e.store }));
+      return { failed: (lo && lo.failed) || [], stores: okSt.map(x => ({ code: x.store, name: x.storeName, opts: (lo.by_store || {})[x.store] || null, roster: roster.filter(r => r.store === x.store) })) };
+    })
+    : Promise.all([call('payroll_leave_options', { ym }), call('mgr_roster').catch(() => null)]).then(([lo, ro]) => ({ failed: [], stores: [{ code: '', name: '', opts: lo, roster: ro && ro.roster }] }));
+  get.then(r => {
+    if (!SM || SM.ck !== ck || st.compTok !== tok) return;
+    if (r.stores.some(x => x.opts && x.opts.ym && x.opts.ym !== ym)) { st.comp = { ym, err: { updating: true } }; return compDraw(box); }      // 伺服器還沒更新：只給得出本月
+    st.comp = { ym, stores: r.stores, failed: r.failed };
+    compDraw(box);
+  }, e => {
+    if (!SM || SM.ck !== ck || st.compTok !== tok) return;
+    st.comp = { ym, err: e }; compDraw(box);
+  });
+}
+function compDraw(box) {
+  const st = SM, c = st.comp || {};
+  if (!box.isConnected) return;
+  box.innerHTML = '';
+  box.append(h('div', 'sm-comp-t', ymLabel(c.ym || st.ym) + '補休帳（正職）'));
+  if (c.err) {
+    if (c.err.updating || notReady(c.err)) { box.append(h('div', 'sm-muted', '系統還在更新，暫時只看得到本月，請稍後再試')); return; }
+    const b = h('button', 'btn sm ghost', '重新載入', { type: 'button', id: 'smCompRetry' });
+    b.onclick = () => { st.comp = null; compLoad(box); };
+    const f = h('div', 'du-fail'); f.append(h('span', 'du-fail-msg', '補休帳讀不到：' + (c.err.message || '網路或伺服器忙碌')), b); box.append(f); return;
+  }
+  // 名冊沒有的人（離職、全部門市名單外）用這個月申請單上的姓名（申請單載入後重畫就補上）
+  const names = new Map((st.rows || []).filter(r => r.emp_id && r.name).map(r => [(r.store || '') + '|' + r.emp_id, r.name]));
+  const groups = compBankRows((c.stores || []).map(x => Object.assign({}, x, { names: new Map([...names].filter(([k]) => k.startsWith((S.all ? x.code : (st.rows[0] && st.rows[0].store) || '') + '|')).map(([k, v]) => [k.split('|')[1], v])) }))).filter(g => g.rows !== null);
+  if (!groups.length) { box.append(h('div', 'sm-muted', '這裡的門市沒有補休帳（薪資沒有開補休）。')); return; }
+  box.append(h('div', 'sm-muted sm-comp-note', '加班＝已核准的加班單；補休含審核中的補休單；剩／欠＝加班 − 補休，跟薪資的補休帳同一份。欠的要在月底前補上加班或改請別的假。'));
+  if ((c.failed || []).length) box.append(h('div', 'sm-failed', missText(c.failed)));
+  const multi = groups.length > 1 || S.all;
+  groups.forEach(g => {
+    if (multi) box.append(h('div', 'sm-comp-store', g.name || g.code));
+    if (!g.rows.length) { box.append(h('div', 'sm-muted', '本月沒有正職同仁的加班或補休。')); return; }
+    const tb = h('table', 'sm-comp-tb'), hd = h('tr');
+    ['同仁', '加班', '補休', '剩／欠'].forEach(x => hd.append(h('th', null, x)));
+    const thead = h('thead'); thead.append(hd); tb.append(thead);
+    const body = h('tbody');
+    g.rows.forEach(r => {
+      const tr = h('tr', r.balance_h < 0 ? 'neg' : null);
+      tr.append(h('td', null, r.name + (r.active ? '' : '（離職）')), h('td', 'num', H(r.ot_h) + ' 小時'), h('td', 'num', H(r.used_h) + ' 小時'),
+        h('td', 'num bal', r.balance_h < 0 ? '欠 ' + H(-r.balance_h) + ' 小時' : '剩 ' + H(r.balance_h) + ' 小時'));
+      body.append(tr);
+    });
+    tb.append(body); box.append(tb);
+  });
 }
 
 const missText = failed => '缺：' + failed.map(f => f.storeName || f.store).join('、') + '（讀不到）';
