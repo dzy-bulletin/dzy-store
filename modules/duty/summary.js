@@ -3,7 +3,7 @@
 // 資料：mgr_req_month {ym}（全部門市走 callAll）；換月份才重讀，其他篩選只在前端。對帳與合計的規則在 summary-calc.js（純函式）。
 import { S, call, callAll, h, tipText } from './state.js';
 import { taipeiToday, tsLabel, shortDate } from './calc.js';
-import { buildRows, filterRows, totals, empKey, defaultYm, ymAdd, ymLabel, xlsSafe, KIND_LABEL, KIND_ORDER, SLIP_TITLE, MERGED, OT_NOTE, compBankRows } from './summary-calc.js';
+import { buildRows, filterRows, totals, empKey, defaultYm, ymAdd, ymLabel, xlsSafe, KIND_LABEL, KIND_ORDER, SLIP_TITLE, MERGED, OT_NOTE, compBankRows, compSheet } from './summary-calc.js';
 
 // 樣式另放 summary.css（畫面、手機卡片、列印），第一次進來才掛上（同耗損登記 loss.css 的掛法）
 export function css() {
@@ -180,6 +180,7 @@ function drawOut(out) {
   const pl = h('button', 'btn', '列印一覽表', { type: 'button', id: 'smPrintList' });
   const picked = rows.filter(r => st.picked.has(r.key));
   const ps = h('button', 'btn ghost', '列印單張（' + (picked.length ? '已勾 ' + picked.length + ' 筆' : '全部 ' + rows.length + ' 筆') + '）', { type: 'button', id: 'smPrintSlip' });
+  const pc = h('button', 'btn ghost', '列印補休帳', { type: 'button', id: 'smPrintComp' });
   const xl = h('button', 'btn ghost', '匯出 Excel', { type: 'button', id: 'smXlsx' });
   pl.disabled = ps.disabled = xl.disabled = !rows.length && !failed.length;
   if (!rows.length) ps.disabled = true;
@@ -187,7 +188,13 @@ function drawOut(out) {
   pl.onclick = () => doPrint('list', listDoc(rows, failed));
   ps.onclick = () => doPrint('slip', slipDoc(picked.length ? picked : rows));
   xl.onclick = () => exportXlsx(rows, failed, xl, msg);
-  acts.append(pl, ps, xl);
+  pc.onclick = () => {      // 補休帳：用畫面上那份（SM.comp），還沒載入或讀不到就提示、不印
+    const v = compView();
+    if (v.status !== 'ok') { msg.className = 'sm-msg bad'; msg.textContent = '✕ ' + compMsg(v); return; }
+    msg.className = 'sm-msg'; msg.textContent = '';
+    doPrint('comp', compDoc(v));
+  };
+  acts.append(pl, ps, pc, xl);
   out.append(acts, msg);
   if (!rows.length) { out.append(h('div', 'card du-center sm-empty', st.rows.length ? '目前的篩選沒有符合的資料。' : ymLabel(st.ym) + '沒有申請單或核定結果。')); return; }
   out.append(table(rows, out));
@@ -218,25 +225,42 @@ function compLoad(box) {
     st.comp = { ym, err: e }; compDraw(box);
   });
 }
-function compDraw(box) {
-  const st = SM, c = st.comp || {};
-  if (!box.isConnected) return;
-  box.innerHTML = '';
-  box.append(h('div', 'sm-comp-t', ymLabel(c.ym || st.ym) + '補休帳（正職）'));
-  if (c.err) {
-    if (c.err.updating || notReady(c.err)) { box.append(h('div', 'sm-muted', '系統還在更新，暫時只看得到本月，請稍後再試')); return; }
-    const b = h('button', 'btn sm ghost', '重新載入', { type: 'button', id: 'smCompRetry' });
-    b.onclick = () => { st.comp = null; compLoad(box); };
-    const f = h('div', 'du-fail'); f.append(h('span', 'du-fail-msg', '補休帳讀不到：' + (c.err.message || '網路或伺服器忙碌')), b); box.append(f); return;
-  }
+// 補休帳目前的狀態（畫面、列印、Excel 共用同一份）：status＝loading／updating／err／none／ok
+function compView() {
+  const st = SM, c = (st && st.comp) || {}, ym = c.ym || (st && st.ym);
+  if (c.err) return { status: c.err.updating || notReady(c.err) ? 'updating' : 'err', ym, err: c.err };
+  if (!c.stores || c.ym !== st.ym) return { status: 'loading', ym };
   // 名冊沒有的人（離職、全部門市名單外）用這個月申請單上的姓名（申請單載入後重畫就補上）
   const names = new Map((st.rows || []).filter(r => r.emp_id && r.name).map(r => [(r.store || '') + '|' + r.emp_id, r.name]));
-  const groups = compBankRows((c.stores || []).map(x => Object.assign({}, x, { names: new Map([...names].filter(([k]) => k.startsWith((S.all ? x.code : (st.rows[0] && st.rows[0].store) || '') + '|')).map(([k, v]) => [k.split('|')[1], v])) }))).filter(g => g.rows !== null);
-  if (!groups.length) { box.append(h('div', 'sm-muted', '這裡的門市沒有補休帳（薪資沒有開補休）。')); return; }
-  box.append(h('div', 'sm-muted sm-comp-note', '加班＝已核准的加班單；補休含審核中的補休單；剩／欠＝加班 − 補休，跟薪資的補休帳同一份。欠的要在月底前補上加班或改請別的假。'));
-  if ((c.failed || []).length) box.append(h('div', 'sm-failed', missText(c.failed)));
-  const multi = groups.length > 1 || S.all;
-  groups.forEach(g => {
+  const groups = compBankRows(c.stores.map(x => Object.assign({}, x, { names: new Map([...names].filter(([k]) => k.startsWith((S.all ? x.code : (st.rows[0] && st.rows[0].store) || '') + '|')).map(([k, v]) => [k.split('|')[1], v])) }))).filter(g => g.rows !== null);
+  return { status: groups.length ? 'ok' : 'none', ym, groups, failed: c.failed || [] };
+}
+function compMsg(v) {
+  if (v.status === 'loading') return '補休帳還在載入，請等上面的補休帳出來再按';
+  if (v.status === 'updating') return '系統還在更新，補休帳暫時讀不到，請稍後再試';
+  if (v.status === 'err') return '補休帳讀不到（' + ((v.err && v.err.message) || '網路或伺服器忙碌') + '），請先在上面按重新載入';
+  if (v.status === 'none') return '這裡的門市沒有補休帳（薪資沒有開補休）';
+  return '';
+}
+const COMP_NOTE = '加班＝已核准的加班單；補休含審核中的補休單；剩／欠＝加班 − 補休，跟薪資的補休帳同一份。';
+const balText = r => (r.balance_h < 0 ? '欠 ' + H(-r.balance_h) + ' 小時' : '剩 ' + H(r.balance_h) + ' 小時');
+function compDraw(box) {
+  if (!box.isConnected) return;
+  const v = compView();
+  box.innerHTML = '';
+  box.append(h('div', 'sm-comp-t', ymLabel(v.ym) + '補休帳（正職）'));
+  if (v.status === 'loading') { box.append(h('div', 'sm-muted', '載入中…')); return; }
+  if (v.status === 'updating') { box.append(h('div', 'sm-muted', '系統還在更新，暫時只看得到本月，請稍後再試')); return; }
+  if (v.status === 'err') {
+    const b = h('button', 'btn sm ghost', '重新載入', { type: 'button', id: 'smCompRetry' });
+    b.onclick = () => { SM.comp = null; compLoad(box); };
+    const f = h('div', 'du-fail'); f.append(h('span', 'du-fail-msg', '補休帳讀不到：' + (v.err.message || '網路或伺服器忙碌')), b); box.append(f); return;
+  }
+  if (v.status === 'none') { box.append(h('div', 'sm-muted', '這裡的門市沒有補休帳（薪資沒有開補休）。')); return; }
+  box.append(h('div', 'sm-muted sm-comp-note', COMP_NOTE + '欠的要在月底前補上加班或改請別的假。'));
+  if (v.failed.length) box.append(h('div', 'sm-failed', missText(v.failed)));
+  const multi = v.groups.length > 1 || S.all;
+  v.groups.forEach(g => {
     if (multi) box.append(h('div', 'sm-comp-store', g.name || g.code));
     if (!g.rows.length) { box.append(h('div', 'sm-muted', '本月沒有正職同仁的加班或補休。')); return; }
     const tb = h('table', 'sm-comp-tb'), hd = h('tr');
@@ -245,8 +269,7 @@ function compDraw(box) {
     const body = h('tbody');
     g.rows.forEach(r => {
       const tr = h('tr', r.balance_h < 0 ? 'neg' : null);
-      tr.append(h('td', null, r.name + (r.active ? '' : '（離職）')), h('td', 'num', H(r.ot_h) + ' 小時'), h('td', 'num', H(r.used_h) + ' 小時'),
-        h('td', 'num bal', r.balance_h < 0 ? '欠 ' + H(-r.balance_h) + ' 小時' : '剩 ' + H(r.balance_h) + ' 小時'));
+      tr.append(h('td', null, r.name + (r.active ? '' : '（離職）')), h('td', 'num', H(r.ot_h) + ' 小時'), h('td', 'num', H(r.used_h) + ' 小時'), h('td', 'num bal', balText(r)));
       body.append(tr);
     });
     tb.append(body); box.append(tb);
@@ -306,7 +329,7 @@ function table(rows, out) {
 
 // ---- 列印（spec §5 A、B）：把列印內容放在 body 底下的 #smPrint，body 加 class 讓列印時只印它；@page 動態插入，印完（afterprint）全部移掉 ----
 function cleanupPrint() {
-  document.body.classList.remove('sm-print-list', 'sm-print-slip');
+  document.body.classList.remove('sm-print-list', 'sm-print-slip', 'sm-print-comp');
   const a = document.getElementById('smPrint'); if (a) a.remove();
   const b = document.getElementById('smPageStyle'); if (b) b.remove();
 }
@@ -317,7 +340,7 @@ function doPrint(mode, node) {
   stl.id = 'smPageStyle';
   stl.textContent = '@page{size:A4 ' + (mode === 'list' ? 'landscape' : 'portrait') + ';margin:10mm}';
   document.head.append(stl);
-  document.body.classList.add(mode === 'list' ? 'sm-print-list' : 'sm-print-slip');
+  document.body.classList.add('sm-print-' + mode);
   const done = () => { window.removeEventListener('afterprint', done); if (node.isConnected) cleanupPrint(); };
   window.addEventListener('afterprint', done);
   // 印不出來，或 afterprint 不會來（部分手機內嵌瀏覽器）：也要收掉列印內容，免得之後用瀏覽器自己的列印印到舊資料（2026-11-02 審查）
@@ -379,6 +402,38 @@ function signs(who) {
   who.forEach(x => { const b = h('div', 'sm-p-sign'); b.append(h('div', 'sm-p-sign-l', x + '簽名'), h('div', 'sm-p-sign-box')); w.append(b); });
   return w;
 }
+// 補休帳（2026-11-14 Eason）：A4 直式，一家門市一頁；同仁、加班、補休、剩／欠（欠的在前、粗體灰底「欠 N 小時」），下面店長、人資簽名
+function compDoc(v) {
+  const doc = h('div', 'sm-print sm-print-compdoc', null, { id: 'smPrint' });
+  v.groups.forEach(g => {
+    const s = h('section', 'sm-p-sec');
+    const hd = h('div', 'sm-p-head');
+    const nNeg = g.rows.filter(r => r.balance_h < 0).length;
+    hd.append(h('div', 'sm-p-title', '補休帳（正職）'));
+    hd.append(h('div', 'sm-p-meta', '門市：' + (g.name || storeNameOf() || g.code || '—') + '　' + ymLabel(v.ym) + '　共 ' + g.rows.length + ' 人' + (nNeg ? '，欠的 ' + nNeg + ' 人（列在最前面）' : '') + '　列印日期：' + printDate()));
+    if (v.failed.length) hd.append(h('div', 'sm-p-miss', missText(v.failed)));
+    s.append(hd);
+    const tbl = h('table', 'sm-p-tbl sm-p-comp'), cg = h('colgroup');
+    ['name', 'ot', 'used', 'bal'].forEach(k => cg.append(h('col', 'sm-pcc-' + k)));
+    tbl.append(cg);
+    const thr = h('tr'); ['同仁', '加班', '補休', '剩／欠'].forEach(x => thr.append(h('th', null, x)));
+    tbl.append(h('thead')); tbl.tHead.append(thr);
+    const tb = h('tbody');
+    if (!g.rows.length) { const tr = h('tr'); tr.append(h('td', 'sm-p-none', '本月沒有正職同仁的加班或補休', { colspan: '4' })); tb.append(tr); }
+    g.rows.forEach(r => {
+      const tr = h('tr', r.balance_h < 0 ? 'neg' : null);
+      tr.append(h('td', null, r.name + (r.emp_id && r.emp_id !== r.name ? '（' + r.emp_id + '）' : '') + (r.active ? '' : '（離職）')),
+        h('td', 'num', H(r.ot_h) + ' 小時'), h('td', 'num', H(r.used_h) + ' 小時'), h('td', 'num bal', balText(r)));
+      tb.append(tr);
+    });
+    tbl.append(tb); s.append(tbl);
+    const end = h('div', 'sm-p-end');
+    end.append(h('div', 'sm-p-note', COMP_NOTE + '欠的要在月底前補上加班或改請別的假。'), signs(['店長', '人資']));
+    s.append(end);
+    doc.append(s);
+  });
+  return doc;
+}
 function slipDoc(rows) {
   const doc = h('div', 'sm-print sm-print-slipdoc', null, { id: 'smPrint' });
   rows.forEach(r => {
@@ -439,6 +494,11 @@ async function exportXlsx(rows, failed, btn, msg) {
     if (secs.length > 1) secs.forEach(sec => block(sec.name || '—', sec.rows));
     block(secs.length > 1 ? '全部合計' : (secs[0] ? secs[0].name : storeNameOf()) || '合計', rows);
     X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(miss.concat(tot)), '合計');
+    // 補休帳（2026-11-14 Eason）：用畫面上那份；還沒載入或讀不到就在分頁裡寫明，不另外算
+    const cv = compView();
+    const cmiss = cv.status === 'ok' && cv.failed.length ? [[missText(cv.failed)]] : [];
+    const comp = cv.status === 'ok' ? cmiss.concat(compSheet(cv.groups, storeNameOf())) : [['讀不到補休帳。' + compMsg(cv) + '。']];
+    X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(comp), '補休帳');
     const buf = X.write(wb, { bookType: 'xlsx', type: 'array' });
     const one = S.all ? (secs.length === 1 && SM.f.stores && SM.f.stores.length === 1 ? secs[0].name : '全部') : storeNameOf() || '門市';
     const name = '申請單彙整_' + String(one).replace(/[\\/:*?"<>|]/g, '') + '_' + SM.ym + '.xlsx';

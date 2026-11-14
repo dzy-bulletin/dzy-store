@@ -70,8 +70,8 @@
 /* ── 列印：body 加 sm-print-list／sm-print-slip 時只印 #smPrint（summary.js doPrint；@page 由程式動態插入、印完移掉）── */
 @media screen{#smPrint{display:none}}
 @media print{
-  body.sm-print-list>:not(#smPrint),body.sm-print-slip>:not(#smPrint){display:none!important}
-  body.sm-print-list,body.sm-print-slip{background:#fff;color:#000}
+  body.sm-print-list>:not(#smPrint),body.sm-print-slip>:not(#smPrint),body.sm-print-comp>:not(#smPrint){display:none!important}
+  body.sm-print-list,body.sm-print-slip,body.sm-print-comp{background:#fff;color:#000}
   #smPrint{display:block}
 }
 .sm-print{font-family:var(--font);color:#000;background:#fff;font-size:9pt;line-height:1.35}
@@ -113,3 +113,13 @@
 .sm-slip .sm-p-signs{margin-top:18px}
 .sm-slip .sm-p-sign-box{height:24mm}
 .sm-s-foot{font-size:9pt;color:#555;margin-top:8px;text-align:right}
+/* 補休帳列印（2026-11-14）：A4 直式、一家一頁；欠的那列灰底、剩／欠粗體加框，黑白印也分得出 */
+.sm-p-comp .sm-pcc-name{width:40%}
+.sm-p-comp .sm-pcc-ot,.sm-p-comp .sm-pcc-used{width:18%}
+.sm-p-comp .sm-pcc-bal{width:24%}
+.sm-p-comp th,.sm-p-comp td{font-size:10.5pt;padding:4px 6px}
+.sm-p-comp th:not(:first-child),.sm-p-comp td.num{text-align:right}
+.sm-p-comp td.bal{font-weight:900}
+.sm-p-comp tr.neg td{background:#e6e6e6}
+.sm-p-comp tr.neg td.bal{outline:2px solid #000;outline-offset:-3px}
+.sm-p-note{font-size:9pt;margin-bottom:4px}

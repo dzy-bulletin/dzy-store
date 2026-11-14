@@ -189,3 +189,16 @@ export function compBankRows(stores) {
     return { code: st.code || '', name: st.name || '', rows: any ? rows : null };
   });
 }
+
+// 補休帳 Excel 分頁（2026-11-14 Eason）：groups＝compBankRows 的結果（rows 不是 null 的門市）；fallback＝單一門市的店名。
+// 數字欄放數字（不帶「小時」），剩／欠：正數＝剩、負數＝欠；文字欄照 xlsSafe（開頭 = + - @ 補單引號）。
+export function compSheet(groups, fallback) {
+  const out = [['門市', '同仁', '員編', '加班', '補休', '剩／欠']];
+  for (const g of groups || []) {
+    const st = g.name || fallback || g.code || '';
+    for (const r of g.rows || []) out.push([xlsSafe(st), xlsSafe(r.name + (r.active ? '' : '（離職）')), xlsSafe(r.emp_id), r.ot_h, r.used_h, r.balance_h]);
+  }
+  if (out.length === 1) out.push(['本月沒有正職同仁的加班或補休']);
+  out.push([], ['單位：小時。剩／欠＝加班 − 補休，負數＝欠；補休含審核中的補休單，跟薪資的補休帳同一份。']);
+  return out;
+}
