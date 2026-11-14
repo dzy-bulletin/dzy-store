@@ -8,6 +8,8 @@
 // 沒班表也沒加班單（例：排休卻來上班）：照打卡算，讓打卡端回「要有加班單」。沒打卡又有班表：照班表，讓打卡端回「要有忘打卡單」。
 
 const TOL = 15;
+/** 打卡超出班表＋已核准加班單合計達這麼多分鐘、又沒有加班單：不給一鍵核定，要補加班單或主管「自己調」確認（2026-11-14 Eason 選 B） */
+export const OVER_BLOCK_MIN = 30;
 const toMin = (hm) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || '')); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
 const toHm = (n) => { const x = ((n % 1440) + 1440) % 1440; return String(Math.floor(x / 60)).padStart(2, '0') + ':' + String(x % 60).padStart(2, '0'); };
 const span = (a, b) => (a == null || b == null ? null : (b <= a ? [a, b + 1440] : [a, b]));
@@ -38,7 +40,7 @@ function snapOut(t, bounds) { const b = bounds.find((x) => Math.abs(x - t) <= TO
  *   plan：班表（mgr_day 的 plan：{work, segs:[{start,end}]}）；null／work:false＝沒班或排休
  *   reqs：那天已核准的申請 [{kind:'ot'|'miss'|'leave'|'trip', start, end, miss_type}]
  *   brk：不打卡休息帶 {start, end}（沒有就空字串）
- * @returns {null | {periods:[{start,end}], hours, notes:[string], late:number}}
+ * @returns {null | {periods:[{start,end}], hours, notes:[string], late:number, over:[{start,end}], overMin:number}}（over＝打卡在班表＋加班單以外的時段）
  */
 export function corePeriods(o) {
   const plan = o.plan && o.plan.work && Array.isArray(o.plan.segs) ? o.plan.segs : [];
@@ -101,8 +103,12 @@ export function corePeriods(o) {
   if (S.length && extra > 0 && OT.length) notes.push('比班表多 ' + Math.round(extra / 6) / 10 + ' 小時（已核准加班單）');
   if (late > 0) notes.push('遲到 ' + late + ' 分（薪資照扣）');
 
+  // 打卡在班表＋已核准加班單以外的時段（不取整、照實際打卡）；沒班表也沒加班單時不算（打卡端會要加班單）
+  const outside = A.length ? minus(Wraw, A) : [];
+  const over = outside.map(([a, b]) => ({ start: toHm(a), end: toHm(b) }));
+  const overMin = total(outside);
   const periods = core.map(([a, b]) => ({ start: toHm(a), end: toHm(b) }));
-  return { periods, hours: Math.round(total(core) / 60 * 100) / 100, notes, late };
+  return { periods, hours: Math.round(total(core) / 60 * 100) / 100, notes, late, over, overMin };
 }
 
 export const _t = { toMin, toHm, merge, intersect, minus };

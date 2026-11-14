@@ -3,7 +3,7 @@
 import { confirmBox } from '../../js/ui.js';
 import { S, dutyManager, call, callAll, brk, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow, canVoidRow, supportTag, rememberOne, snapLabel, tipText, checkOnce, reqShown, refreshReqBadge } from './state.js';
 import { buildReqItem } from './request.js';
-import { corePeriods } from './core-calc.js';
+import { corePeriods, OVER_BLOCK_MIN } from './core-calc.js';
 import * as C from './calc.js';
 import { qrButton } from './qr.js';
 import { api } from '../../js/api.js';
@@ -676,6 +676,7 @@ function buildCard(emp, date) {
     if (p.rule === 'over_credit') return '沒有打卡的 ' + ((need && need.over_min) || '') + ' 分鐘：忘打卡單、假單或補休單';
     return p.text;
   };
+  const overText = m => (m >= 60 ? Math.floor(m / 60) + ' 小時' : '') + (m % 60 ? (m >= 60 ? ' ' : '') + (m % 60) + ' 分鐘' : '');
   const DOC_RULES = p => (p.rule === 'ot_hours' && /要有加班單/.test(p.text)) || p.rule === 'miss' || /^ft8/.test(p.rule) || p.rule === 'over_credit';
   card.__setCheck = res => {
     card.__check = res && typeof res === 'object' && typeof res.ok === 'boolean' && res.error !== 'unknown_action' ? res : null;
@@ -694,7 +695,26 @@ function buildCard(emp, date) {
     const pr = card.__prop;
     const ps = readRows().filter(r => r.start && r.end).map(r => r.start + '–' + r.end).join('、');
     verdict.hidden = false;
-    if (ck.ok) {
+    // 打卡超出班表合計達 30 分鐘、沒有加班單（2026-11-14 Eason 選 B）：不亮燈；補加班單，或主管按「自己調」確認同仁沒加班後照班表送出
+    const overBlock = ck.ok && pr && pr.overMin >= OVER_BLOCK_MIN;
+    if (overBlock) {
+      const noLine = false, canProxy = proxyOpen(date);
+      mini.className = 'du-mini bad'; mini.textContent = '未符合';
+      verdict.className = 'du-verdict gray du-verdict-over';
+      verdict.append(h('div', 'du-verdict-t', '未符合規定：打卡比班表多 ' + overText(pr.overMin) + '，沒有加班單'));
+      verdict.append(h('div', 'du-needk', '要補齊：'));
+      const ul = h('ul', 'du-needs'), li = h('li');
+      li.append(h('span', 'du-need-t', '☐ 加班單（多出的時段：' + pr.over.map(x => x.start + '–' + x.end).join('、') + '）'));
+      if (canProxy) { const b = h('button', 'btn sm ghost du-preproxy', '替他代開', { type: 'button' }); b.onclick = () => proxyForm(date, noLine, '打卡比班表多，沒有加班單'); li.append(b); }
+      ul.append(li); verdict.append(ul);
+      verdict.append(h('div', 'du-verdict-n', (canProxy ? '' : '有加班：請同仁在 LINE「加班請假」補申請，核准後這裡會自動重算。') + '沒有加班（例：提早到、晚打卡）：按「自己調」確認後照班表送出 ' + ck.approved_hours + ' 小時，多出的時段不算。'));
+      const acts = h('div', 'du-pre-acts');
+      const go = h('button', 'btn du-verdict-go', '核定通過（補齊後才能按）', { type: 'button' }); go.disabled = true;
+      const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '自己調', { type: 'button' });
+      adj.onclick = () => { setEdit(!editOpen); adj.textContent = editOpen ? '收起' : '自己調'; };
+      acts.append(go, adj); verdict.append(acts);
+      setEdit(editOpen);      // 送出鈕照常可按（主管自己調、看過才送；送出前照舊確認框）
+    } else if (ck.ok) {
       mini.className = 'du-mini ok'; mini.textContent = '核定通過';
       verdict.className = 'du-verdict ok';
       verdict.append(h('div', 'du-verdict-t', '✓ 核定通過：' + (ps || '整天請假') + '＝' + ck.approved_hours + ' 小時'));

@@ -6,7 +6,7 @@ import * as C from './calc.js';
 import * as Q from './quick-calc.js';
 import { qrButton } from './qr.js';
 import { canBg, watchJob, refreshJobs, rejectBar } from './bg.js';
-import { corePeriods } from './core-calc.js';
+import { corePeriods, OVER_BLOCK_MIN } from './core-calc.js';
 import { MOCK } from '../../js/config.js';
 
 // 總開關：改成 false、重新發布網站，手機也回到舊畫面（不必動別的）
@@ -229,6 +229,12 @@ export function renderQuick(ctx) {
         const r = rs.find((x) => x.emp_id === String(it.emp_id));
         if (!r) return;
         const pay = Object.assign({}, it); delete pay.emp_id;
+        // 打卡超出班表＋加班單合計達 30 分鐘（2026-11-14 Eason 選 B）：不放進核定通過，到完整頁補加班單或主管自己調確認
+        if (r.ok && core && core.overMin >= OVER_BLOCK_MIN) {
+          const t = '打卡比班表多 ' + core.overMin + ' 分鐘，沒有加班單（' + core.over.map((x) => x.start + '–' + x.end).join('、') + '）';
+          if (p.status === 'ok') Object.assign(U(p.key), { failed: '未符合：' + t, failedDiff: false, pre: true }); else Object.assign(U(p.key), { need: t });
+          return;
+        }
         if (r.ok) { Object.assign(U(p.key), { pass: { payload: pay, hours: r.approved_hours, notes: core ? core.notes : [] } }); return; }
         const probs = Array.isArray(r.probs) ? r.probs : [];
         if (!probs.length && !r.message && CHECK_CODE[r.error] === null) return;      // 格式類錯誤（不是缺單）：不標，照原本分類
