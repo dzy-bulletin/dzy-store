@@ -250,7 +250,7 @@ export function renderQuick(ctx) {
         if (st.date !== date || !emp.approved || emp.approved.queued !== res.job) return;
         if (it.state === 'done') { emp.approved = it.result && it.result.approved_hours !== undefined ? it.result : Object.assign({}, emp.approved, { status_text: '已送出', queued: null }); recompute(); render(); return; }
         emp.approved = null;
-        Object.assign(U(p.key), { failed: '被退回：' + (it.msg || '請重新核定'), failedDiff: false });
+        Object.assign(U(p.key), { failed: '被退回：' + (it.msg || '請重新核定'), failedDiff: /^核定和打卡差/.test(it.msg || '') });      // 要填原因：按鈕改「選原因」，跟前景一樣
         reconcile().catch(() => {}).then(() => { recompute(); render(); });      // 重讀這天：拿最新的資料（版本）才能重核
       });
     } else emp.approved = res;

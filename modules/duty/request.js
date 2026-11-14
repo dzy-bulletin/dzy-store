@@ -199,7 +199,8 @@ function buildItem(it, card, title) {
         say('', (decision === 'approve' ? '已核准' : '已退回') + '，正在背景送到打卡系統…');
         watchJob(r.job, (j) => {
           if (j.state === 'done') {
-            el.__markDone((decision === 'approve' ? '✓ 已核准：' : '✕ 已退回：') + it.name + ' ' + it.summary);
+            const r2 = j.result || {};      // 那天已經核定過的提醒（r.warn）背景送出也要給主管看
+            el.__markDone((decision === 'approve' ? '✓ 已核准：' : '✕ 已退回：') + it.name + ' ' + it.summary + (r2.warn ? '\n⚠ ' + (r2.message || '那天已經核定過，請重新核定一次') : ''));
             refreshTitle(card, title); syncBatch(card);
             if (decision === 'approve') delete S.dayCache[it.date];
           } else { ok.disabled = no.disabled = false; say('bad', '✕ 被退回：' + (j.msg || '打卡系統沒有接受，請重新整理再處理')); }

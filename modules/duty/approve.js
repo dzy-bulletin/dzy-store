@@ -625,6 +625,16 @@ function buildCard(emp, date) {
     result.after(proxyBox);
   };
 
+  // 打卡端擋下時給主管下一步：差 30 分鐘以上打開原因欄；「這天還不能核定」且可代開（沒綁 LINE 或超過 7 天）打開代開表單。前景失敗、背景被退回共用（2026-11-14）
+  // 回 true＝已打開可以直接處理的欄位（不用重新載入）
+  function failHelp(msg, approveDate) {
+    if (readOnly) return false;
+    if (/^核定和打卡差/.test(msg)) { diffBox.hidden = false; diffIn.focus(); return true; }
+    const noLine = /沒綁 LINE/.test(msg);                // 打卡端判斷的：沒綁 LINE 的同仁 7 天內也能代開（2026-11-09）
+    if (/^這天還不能核定/.test(msg) && (noLine || proxyOpen(approveDate))) { proxyForm(approveDate, noLine, msg); return true; }
+    return false;
+  }
+
   // 背景送出（考勤副本）：先標「已核定・送出中」，可以繼續核下一位；打卡系統接受了換成正式結果，退回就標紅、請重新載入這天
   function bgQueued(job, approveDate, lv) {
     if (lv.length || initLeaves.length) staleLeave();
@@ -647,9 +657,11 @@ function buildCard(emp, date) {
       badge.className = 'du-badge bad'; badge.hidden = false; badge.textContent = '被退回：' + (it.msg || '請重新核定');
       mini.className = 'du-mini bad'; mini.textContent = '被退回';
       say('bad', '✕ 被退回：' + (it.msg || '請重新核定'));
-      const rb = h('button', 'btn sm du-bgreload', '重新載入這天', { type: 'button' });
-      rb.onclick = () => card.dispatchEvent(new CustomEvent('duty-reload-day', { bubbles: true, detail: { date: approveDate, emp } }));
-      result.append(rb);
+      if (!failHelp(it.msg || '', approveDate)) {      // 規則擋下（要填原因、要代開單）照前景打開原因欄／代開表單；只有資料變了才要重新載入
+        const rb = h('button', 'btn sm du-bgreload', '重新載入這天', { type: 'button' });
+        rb.onclick = () => card.dispatchEvent(new CustomEvent('duty-reload-day', { bubbles: true, detail: { date: approveDate, emp } }));
+        result.append(rb);
+      }
     });
   }
 
@@ -721,9 +733,7 @@ function buildCard(emp, date) {
       card.dispatchEvent(new CustomEvent('emp-approved', { bubbles: true, detail: { emp_id: emp.emp_id, date: approveDate, store: emp.store } }));
     } catch (e) {
       say('bad', '✕ 核定失敗：' + e.message);
-      if (/^核定和打卡差/.test(e.message) && !readOnly) { diffBox.hidden = false; diffIn.focus(); }
-      const noLine = /沒綁 LINE/.test(e.message);                // 打卡端判斷的：沒綁 LINE 的同仁 7 天內也能代開（2026-11-09）
-      if (/^這天還不能核定/.test(e.message) && (noLine || proxyOpen(approveDate)) && !readOnly) proxyForm(approveDate, noLine, e.message);
+      failHelp(e.message, approveDate);
     }
     finally { submit.disabled = false; submit.textContent = '重新送出核定'; }
   };
