@@ -347,7 +347,10 @@ function buildCard(emp, date) {
     const ref = (emp.reference === null || emp.reference === undefined) ? '參考 —' : '參考 ' + emp.reference + ' 小時';   // 忘刷卡整天 reference=null，不可印成 "null"
     const dupIgn = (emp.approved && emp.approved.dup_ignore) || [];  // 已認定重複的卡：打卡段已由打卡後端拿掉，這裡註明是哪幾張（2026-11-06）
     const dupNote = dupIgn.length ? '（' + dupIgn.map(t => String(t).slice(11, 16)).sort().join('、') + ' 重複）' : '';
-    punchEl.textContent = '打卡：' + emp.segments.map(C.segmentText).join('、') + dupNote + '　' + ref;
+    const capSys = emp.cap_sys || [];                             // 單日滿 10 小時系統代打的下班卡（2026-11-14，打卡 Cap10.gs）
+    const capNote = capSys.length ? '（' + capSys.join('、') + ' 系統代打）' : '';
+    punchEl.textContent = '打卡：' + emp.segments.map(C.segmentText).join('、') + dupNote + capNote + '　' + ref;
+    if (capSys.length) nameEl.append(h('span', 'du-capsys', '滿 10 小時・系統代打下班', { title: '這天的下班卡是系統在滿 10 小時時代打的，請照同仁實際離開的時間核定' }));
   } else if (emp.attempts > 0) punchEl.textContent = '今天沒有入帳的打卡（有 ' + emp.attempts + ' 筆未入帳嘗試）';
   else punchEl.textContent = '今天沒有打卡紀錄';
   const mini = h('span', 'du-mini'), chev = h('span', 'du-chev', '▼');

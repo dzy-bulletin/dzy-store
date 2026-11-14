@@ -245,8 +245,14 @@ export function checkPeriod(ctx) {
       else if (c.shift2_id) { const both = cellShift(ctx.shifts, c); if (both && both.two && !breakOk(both)) add('V2', 'warn', e, d, `${who} ${md(d)}：${TWO_BREAK_MSG}`); }
     }
 
-    // 單日總工時（兩種制度都擋 DAY_MAX＝10 小時）
-    for (const d of dates) if (mins[d].work > DAY_MAX) add('F4', 'block', e, d, `${who} ${md(d)} 一天 ${hm(mins[d].work)}，超過 ${DAY_MAX / H} 小時`);
+    // 單日總工時（兩種制度都擋 DAY_MAX＝10 小時）；T02 起同一天別家店的班也加進來（ctx.elsewhereMin，2026-11-14 Eason：跨店合計）
+    for (const d of dates) {
+      const xs = (ctx.elsewhereMin && ctx.elsewhereMin[e] && ctx.elsewhereMin[e][d]) || null;
+      const total = mins[d].work + (xs && mins[d].work ? xs.min : 0);
+      if (total <= DAY_MAX) continue;
+      if (!xs || !mins[d].work) add('F4', 'block', e, d, `${who} ${md(d)} 一天 ${hm(mins[d].work)}，超過 ${DAY_MAX / H} 小時`);
+      else add('F4', 'block', e, d, `${who} ${md(d)} 本店 ${hm(mins[d].work)}＋${xs.where.map((w) => `${w.store} ${hm(w.min)}`).join('＋')}，一天 ${hm(total)}，超過 ${DAY_MAX / H} 小時`);
+    }
 
     // 連續上班（跨期接續；沒有前期資料就從本期起算並提醒）
     if (!hasPrior(ctx, e, start) && inPeriod[0] === start) noPrior.push(who);

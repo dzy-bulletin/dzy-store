@@ -447,6 +447,7 @@ nav.tabs a .badge{display:inline-block;margin-left:5px;min-width:18px;height:18p
 .du-ov-back{font-size:13px;margin-left:auto}
 .du-ro{display:inline-block;margin-left:8px;color:#6b7785;font-size:12px;font-weight:600;vertical-align:middle}
 .du-where{display:inline-block;margin-left:8px;padding:1px 8px;border-radius:999px;background:#eef3f8;color:#3b5a78;font-size:12px;font-weight:700;vertical-align:middle;white-space:nowrap}
+.du-capsys{display:inline-block;margin-left:8px;padding:1px 8px;border-radius:999px;background:#fdecea;color:#a3231c;font-size:12px;font-weight:700;vertical-align:middle;white-space:nowrap}      /* 單日滿 10 小時系統代打下班（2026-11-14） */
 .du-support{display:inline-block;margin-left:8px;padding:1px 8px;border-radius:999px;background:#fdf1e4;color:#8a4a12;font-size:12px;font-weight:700;vertical-align:middle;white-space:nowrap}      /* 支援（原單位）：別單位到這家店支援的同仁（2026-10-26） */
 .du-rq-who .du-support{margin-left:0;max-width:100%;white-space:normal}
 .du-chip .du-support{margin-left:4px;padding:0 6px;font-size:11px}
