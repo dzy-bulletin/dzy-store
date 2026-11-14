@@ -1049,8 +1049,11 @@ function dutyDo(d, action, b) {
     if (!r) return fail('NOT_FOUND', '找不到這筆申請');
     if (r.status !== 'approved') return fail('BAD_INPUT', r.status === 'voided' ? '這筆已經作廢了' : r.status === 'pending' ? '這筆還在審核中，請用退回' : '只有已核准的申請可以作廢');
     if (r.upper) return fail('FORBIDDEN', '這是值班主管本人的申請，要由上層主管在申請審核處理');
+    // 那天的核定一起打回待核定（Requests.gs reqRevokeFinal_，2026-11-14）：工時核定與假別紀錄都拿掉
+    const k = String(r.date) + r.emp_id, revoked = { approved: d.approved[k] ? 1 : 0, leave: leaveList(d.leave[k]).length };
+    delete d.approved[k]; delete d.leave[k];
     r.status = 'voided'; r.voided_at = new Date().toISOString(); r.voided_by = MGR; r.void_reason = reason;
-    return ok({ id: String(r.id), status: 'voided' });
+    return ok({ id: String(r.id), status: 'voided', date: String(r.date), revoked });
   }
   if (action === 'mgr_qr_token') {               // 店別代碼由伺服器依打卡對照填：示範店＝光復（'' → gk）
     const now = Date.now(), win = Math.floor(now / 30000);

@@ -818,13 +818,26 @@ function buildCard(emp, date) {
       if (row.querySelector('.du-voidreason')) return;
       const inp = h('input', 'du-voidreason', null, { type: 'text', maxlength: '100', placeholder: '作廢理由（必填，同仁在 LINE 看得到）', 'aria-label': '作廢理由' });
       const go = h('button', 'btn sm du-voidgo', '確定作廢', { type: 'button' });
-      const box2 = h('div', 'du-voidbox'); box2.append(inp, go); row.append(box2); inp.focus();
+      const box2 = h('div', 'du-voidbox');
+      if (emp.approved) box2.append(h('div', 'du-voidwarn', '這天已經核定過。作廢後，這天的核定會打回「待核定」，原本核定的工時、假別、出差、加班也會一起拿掉，請重新核定。'));      // 打卡端作廢連動打回核定（2026-11-14 Eason 1A）
+      box2.append(inp, go); row.append(box2); inp.focus();
       go.onclick = async () => {
         const why = inp.value.trim();
         if (!why) return setNote('✕ 作廢要寫理由');
         go.disabled = vb.disabled = true; setNote('作廢中…');
         try {
-          await call('mgr_req_void', { id: r.id, reason: why, date, store: emp.store });
+          const vr = await call('mgr_req_void', { id: r.id, reason: why, date, store: emp.store });
+          const rv = vr && vr.revoked, revokedN = rv ? (Number(rv.approved) || 0) + (Number(rv.leave) || 0) : 0;
+          if (revokedN) {                                  // 那天的核定被打回：這張卡片的內容與版本都是舊的，請主管重新載入再核定（照舊卡片送出會被「資料有變動」退回）
+            rbox.remove(); delete S.dayCache[date];
+            const done = h('div', 'du-reqbox warn du-voided', '已作廢：' + r.summary + '。這天的核定已打回「待核定」，請按「重新載入這天」看最新資料，照實際打卡重新核定。');
+            const rl = h('button', 'btn sm', '重新載入這天', { type: 'button' });
+            rl.onclick = () => card.dispatchEvent(new CustomEvent('duty-reload-day', { bubbles: true, detail: { date, emp } }));
+            done.append(' ', rl);
+            periodRows.parentNode.insertBefore(done, periodRows);
+            card.querySelectorAll('.du-submit').forEach(b => { b.disabled = true; b.title = '請先重新載入這天'; });
+            return;
+          }
           const rest = reqs.filter(q => q.id !== r.id);
           const wasFilled = (card.__lastFilled || []).includes(r.id);      // 作廢的這張剛才有填進畫面
           const clearedOt = !!(card.__otRows && card.__otRows.length);     // 自動接上的加班時段先拿掉，再依剩下的申請重建

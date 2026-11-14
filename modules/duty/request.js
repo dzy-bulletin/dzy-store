@@ -114,7 +114,7 @@ function buildMine(it) {
   const el = h('div', 'du-rq du-rq-self'); el.dataset.reqId = String(it.id); if (it.store) el.dataset.store = it.store;
   const l1 = h('div', 'du-rq-l1'), who = h('span', 'du-rq-who');
   const proxied = it.upper_kind === 'director' || !!it.proxy_by;      // 主管替本人代開的（2026-11-10）：本人不能審，標出來
-  who.append(h('span', 'du-rq-kind ' + (REQ_KIND_LABEL[it.kind] ? it.kind : ''), REQ_KIND_LABEL[it.kind] || it.kind), h('span', 'du-rq-name', it.name), ...(proxied ? [h('span', 'du-rq-kind upper', '主管代開')] : []), ...(it.storeName ? [h('span', 'du-where', '打卡地點：' + it.storeName, { 'data-where': it.store })] : []));
+  who.append(h('span', 'du-rq-kind ' + (REQ_KIND_LABEL[it.kind] ? it.kind : ''), REQ_KIND_LABEL[it.kind] || it.kind), h('span', 'du-rq-name', it.name), ...(proxied ? [h('span', 'du-rq-kind upper', proxyLabel(it))] : []), ...(it.storeName ? [h('span', 'du-where', '打卡地點：' + it.storeName, { 'data-where': it.store })] : []));
   l1.append(who, h('span', 'du-rq-date', shortDate(it.date)));
   el.append(l1, h('div', 'du-rq-l2', it.summary + (it.reason ? '\n原因：' + it.reason : '') + '\n送出：' + tsLabel(it.created_at)));
   const acts = h('div', 'du-rq-acts du-rq-acts-self');
@@ -126,7 +126,9 @@ function buildMine(it) {
 }
 // 打卡端 upper_kind（2026-10-29）：mgr＝值班主管本人；dept＝總部同仁在門市（申請照原身分）；home＝不算本店支援。舊打卡後端沒有這欄＝值班主管本人
 function upperIsDept(it) { return it.upper_kind === 'dept' || it.upper_kind === 'home'; }
-function upperLabel(it) { return it.upper_kind === 'director' ? '主管代開' : upperIsDept(it) ? '部門同仁' : '值班主管本人'; }
+function upperLabel(it) { return it.upper_kind === 'director' || it.proxy_by ? proxyLabel(it) : upperIsDept(it) ? '部門同仁' : '值班主管本人'; }
+// 代開標籤顯示代開人姓名（2026-11-14 Eason：不顯示職稱）：proxy_by 是「姓名（工號）」，只取姓名；舊資料沒有才退回「主管代開」
+function proxyLabel(it) { const n = String(it.proxy_by || '').replace(/（[^（）]*）\s*$/, '').trim(); return (n || '主管') + '代開'; }
 
 function buildItem(it, card, title) {
   const el = h('div', 'du-rq'); el.dataset.reqId = String(it.id); el.__req = it; if (it.store) el.dataset.store = it.store;

@@ -342,6 +342,7 @@ select{min-height:44px}
 .du-proofmark{margin-left:4px;font-size:13px}
 .du-reqproof{font-size:12px;color:var(--muted,#7a716a);margin-top:2px}
 .du-voidbox{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.du-voidwarn{flex-basis:100%;font-size:13.5px;color:var(--bad);background:#fdf0ee;border-radius:6px;padding:6px 10px}
 .du-voidreason{flex:1;min-width:180px;min-height:40px;font-size:16px;padding:6px 10px;border:1px solid var(--line);border-radius:8px}
 .du-reqnote{margin-top:6px;font-weight:700}
 /* 一天多種假別（2026-10-29） */
