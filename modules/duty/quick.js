@@ -1,7 +1,7 @@
 // 考勤管理「手機一頁核定」（核定工時分頁在手機寬度 ≤860px 的新畫面；規格 docs/duty-quick/requirements.md，2026-11-09 Eason 定案）。
 // 一頁完成：沒問題的人一鍵核定、有異常的人一人一張卡按一下完成、少打卡又沒單的人先擋住。舊畫面（approve.js）完整保留當退路。
 // 規則都在 quick-calc.js（純函式，有單元測試）；這裡只負責讀資料、畫畫面、依序呼叫既有的 mgr_approve／mgr_req_decide／mgr_req_proxy。
-import { S, call, h, failBar, failedStores, supportTag, loadLeave, staleLeave, leaveFor, canWriteRow, brk, dutyManager, dutyHours, viewNoHoursStore, snapLabel } from './state.js';
+import { S, call, callAll, h, failBar, failedStores, supportTag, loadLeave, staleLeave, leaveFor, canWriteRow, brk, dutyManager, dutyHours, viewNoHoursStore, snapLabel, checkOnce } from './state.js';
 import * as C from './calc.js';
 import * as Q from './quick-calc.js';
 import { qrButton } from './qr.js';
@@ -19,12 +19,14 @@ const skipPut = (m) => { try { sessionStorage.setItem(SKIP_KEY, JSON.stringify(m
 const skipSet = (k) => { const m = skipGet(); m[k] = 1; skipPut(m); };
 const skipDel = (keys) => { const m = skipGet(); keys.forEach((k) => delete m[k]); skipPut(m); };
 
-// 這個人、這個畫面能不能用一頁核定：手機寬度、單一門市、不是管理者代看、有核定工時的對象。全部門市與管理者各店總覽維持舊畫面。
+// 這個人、這個畫面能不能用一頁核定：不是管理者代看、有核定工時的對象。
+// 2026-11-14 考勤管理好上手第 3 項（Eason 全照推薦）：電腦也預設一頁核定、全部門市也能用（按門市分組）；系統管理員「各店總覽」維持舊畫面。
 export function quickAvailable(ctx) {
   const s = ctx && ctx.session;
-  return QUICK_ON && !!s && typeof window.matchMedia === 'function' && window.matchMedia('(max-width:860px)').matches
-    && !S.all && !S.admin && s.role !== 'admin' && dutyHours(s) && !viewNoHoursStore(s);
+  return QUICK_ON && !!s && !S.admin && s.role !== 'admin' && dutyHours(s) && !viewNoHoursStore(s);
 }
+// 全部門市：讀取改走合併讀（callAll），回來的列都帶 store
+const rd = (op, body) => (S.all ? callAll(op, body) : call(op, body));
 export const quickWanted = (ctx) => quickAvailable(ctx) && !S.dqFull && !e2eFull();
 
 const REQ_CLS = { leave: 'leave', ot: 'ot', trip: 'trip', miss: 'miss' };
@@ -57,10 +59,11 @@ export function renderQuick(ctx) {
     u = u || {};
     const p = Q.classify({ emp, date, today: todayNow(), nowMin: taipeiMin(), brk: brk(emp.store), LO: leaveFor(emp.store), canHours: canWriteRow('hours', emp.emp_id, emp.store),
       reqs: reqsFor(emp, date, approved), skipped: !!skipGet()[skipKey(date, key)], mismatch: u.mismatch || '', person: !!(ctx.session && ctx.session.person) });
-    if (p.status === 'ok' && u.failed) {                      // 一鍵核定沒成功的人：回到異常區
+    if (p.status === 'ok' && u.failed) {                      // 一鍵核定沒成功的人、送出前檢查說會被擋的人（u.pre）：回到異常區
       const main = Object.assign({}, p.actions[0] || { id: 'plan', hours: p.hours, payload: p.payload });
-      main.primary = true; main.askReason = !!u.failedDiff; main.label = '再核定一次 ' + C.round2(p.hours) + ' 小時' + (u.failedDiff ? '（選原因）' : '');
-      Object.assign(p, { status: 'abnormal', tag: '沒核定成功', note: u.failed, actions: [main, { id: 'full', label: '到完整頁核對', primary: false }] });
+      main.primary = true; main.askReason = !!u.failedDiff;
+      main.label = (u.pre ? (u.failedDiff ? '核定 ' : '仍要核定 ') : '再核定一次 ') + C.round2(p.hours) + ' 小時' + (u.failedDiff ? '（選原因）' : '');
+      Object.assign(p, { status: 'abnormal', tag: u.pre ? (u.failedDiff ? '要寫原因' : '送出會被擋') : '沒核定成功', note: u.failed, actions: [main, { id: 'full', label: '到完整頁核對', primary: false }] });
     }
     return p;
   }
@@ -68,6 +71,7 @@ export function renderQuick(ctx) {
   function peopleFor(date, day) { return day.emps.map((emp) => classifyAt(emp, date, day.appr, null)); }
   function recompute() { st.people = st.emps.map(classifyOne); }
   const secs = () => Q.sections(st.people);
+  const storeOf = (p) => { const e = empOf(p.key); return (e && e.store) || ''; };
 
   function apprFrom(rq) {
     const appr = {};
@@ -78,7 +82,7 @@ export function renderQuick(ctx) {
   }
   // 核准單回「已經處理過」（先前逾時其實成功了）：重讀這天的已核准與待審申請，卡片接到「核定 X 小時」
   async function readReqs(date) {                             // 確認用：有門市讀不到就丟錯，不拿殘缺的清單下結論
-    const [rq, pd] = await Promise.all([call('mgr_req_day', { date }), call('mgr_req_pending')]);
+    const [rq, pd] = await Promise.all([rd('mgr_req_day', { date }), rd('mgr_req_pending')]);
     if (((rq && rq.failed) || []).length || ((pd && pd.failed) || []).length) throw new Error('部分門市讀不到');
     return { appr: apprFrom(rq), pending: Array.isArray(pd && pd.items) ? pd.items : [] };
   }
@@ -94,7 +98,7 @@ export function renderQuick(ctx) {
   const uncertain = (e) => !!e && (['TIMEOUT', 'UPSTREAM', 'NETWORK'].includes(e.code) || !e.code || /逾時|太久|沒有回應|連線|網路/.test(e.message || ''));
   async function reconcile() {                                // 三份都讀到才一起換，中途失敗不留半套
     const date = st.date;
-    const [d, r] = await Promise.all([call('mgr_day', { date }), readReqs(date)]);
+    const [d, r] = await Promise.all([rd('mgr_day', { date }), readReqs(date)]);
     if (((d && d.failed) || []).length) throw new Error('部分門市讀不到');
     if (date !== st.date) return;
     if (Array.isArray(d && d.employees)) st.emps = d.employees;
@@ -102,7 +106,7 @@ export function renderQuick(ctx) {
   }
   async function readDay(date) {
     if (st.dayPre && st.dayPre.has(date)) { const p = st.dayPre.get(date); st.dayPre.delete(date); return p; }      // 副本先算出要看哪一天，已經先向打卡讀了
-    const [d, rq] = await Promise.all([call('mgr_day', { date }), call('mgr_req_day', { date })]);
+    const [d, rq] = await Promise.all([rd('mgr_day', { date }), rd('mgr_req_day', { date })]);
     return { emps: Array.isArray(d.employees) ? d.employees : [], appr: apprFrom(rq), failed: [].concat((d && d.failed) || [], (rq && rq.failed) || []) };
   }
   // Mac mini 記得的上次資料先顯示（2026-11-10 Eason）：灰色不能按，最新資料到了整份換掉。少任何一份就不顯示
@@ -114,7 +118,7 @@ export function renderQuick(ctx) {
     const wr = (it) => canWriteRow('hours', it.emp_id, it.store);
     const dates = st.manual ? [st.manual] : Q.candidateDates(((pend && pend.items) || []).filter(wr), todayNow(), pending.filter((it) => it.self !== true && wr(it)));
     for (const date of dates.slice(0, Q.MAX_DATES)) {
-      const [d, r] = await Promise.all([call('mgr_day', { date, peek: true }), call('mgr_req_day', { date, peek: true })]);
+      const [d, r] = await Promise.all([rd('mgr_day', { date, peek: true }), rd('mgr_req_day', { date, peek: true })]);
       if (stop() || !(d && d.snapshot_at) || !(r && r.snapshot_at) || !Array.isArray(d.employees)) return;
       st.pending = pending; st.date = date; st.emps = d.employees; st.appr = apprFrom(r); recompute();
       if (st.manual || secs().left > 0) {
@@ -129,15 +133,15 @@ export function renderQuick(ctx) {
   async function load() {
     if (st.busy) return;                                      // 寫入途中不換資料（含「重新載入」鈕）
     const tok = ++st.tok;
-    st.loading = true; st.error = null; st.ui = {}; st.peekAt = 0; st.peekSaved = null; render();
+    st.loading = true; st.error = null; st.ui = {}; st.peekAt = 0; st.peekSaved = null; st.checking = false; render();
     refreshJobs();
     let fresh = false;
     st.dayPre = new Map();
     const opt = { peek: true };
-    const round1 = Promise.all([st.manual ? null : call('mgr_pending_approvals', opt), call('mgr_req_pending', opt)]).catch(() => [null, null]);
+    const round1 = Promise.all([st.manual ? null : rd('mgr_pending_approvals', opt), rd('mgr_req_pending', opt)]).catch(() => [null, null]);
     peekFirst(tok, () => fresh, round1).catch(() => {});
     // 副本已經知道要看哪一天：同時向打卡確認那天的名單，不等申請清單回來才開始（2026-11-10）
-    const preRead = (date) => { if (!date || st.dayPre.has(date)) return; const p = (async () => { const [d, rq2] = await Promise.all([call('mgr_day', { date }), call('mgr_req_day', { date })]); return { emps: Array.isArray(d.employees) ? d.employees : [], appr: apprFrom(rq2), failed: [].concat((d && d.failed) || [], (rq2 && rq2.failed) || []) }; })(); p.catch(() => {}); st.dayPre.set(date, p); };
+    const preRead = (date) => { if (!date || st.dayPre.has(date)) return; const p = (async () => { const [d, rq2] = await Promise.all([rd('mgr_day', { date }), rd('mgr_req_day', { date })]); return { emps: Array.isArray(d.employees) ? d.employees : [], appr: apprFrom(rq2), failed: [].concat((d && d.failed) || [], (rq2 && rq2.failed) || []) }; })(); p.catch(() => {}); st.dayPre.set(date, p); };
     if (st.manual) preRead(st.manual);
     else round1.then(([p, r]) => {
       if (tok !== st.tok || !live() || !p || p.snapshot_kind !== 'replica' || !r || !r.snapshot_at) return;
@@ -147,8 +151,8 @@ export function renderQuick(ctx) {
     try {
       const leaveReady = loadLeave().catch(() => null);          // 不等額度才去抓名單；分類前（下面 readDay 那裡）才要到齊
       // 待核定的日子只用來決定先看哪一天：有副本就用副本；申請清單要最新，不用副本
-      const pendP = st.manual ? Promise.resolve(null) : round1.then(([p]) => (p && p.snapshot_kind === 'replica' ? p : call('mgr_pending_approvals')));
-      const [pend, rq] = await Promise.all([pendP, call('mgr_req_pending')]);
+      const pendP = st.manual ? Promise.resolve(null) : round1.then(([p]) => (p && p.snapshot_kind === 'replica' ? p : rd('mgr_pending_approvals')));
+      const [pend, rq] = await Promise.all([pendP, rd('mgr_req_pending')]);
       fresh = true;
       if (tok !== st.tok || !live()) return;
       st.pending = Array.isArray(rq && rq.items) ? rq.items : [];
@@ -176,12 +180,39 @@ export function renderQuick(ctx) {
       st.failed = failedAll.filter((f, i, a) => a.findIndex((x) => x.store === f.store) === i);      // 任一讀取有門市讀不到：不可一鍵、不可顯示完成
       st.peekAt = 0; st.peekSaved = null;
       st.loading = false; render();
+      checkOk(tok);
     } catch (e) {
       fresh = true;
       if (tok !== st.tok || !live()) return;
       if (st.peekSaved) Object.assign(st, st.peekSaved);      // 讀不到最新的：舊資料留著看，仍然不能按
       st.loading = false; st.error = e; render();
     }
+  }
+  // 送出前先檢查（2026-11-14 考勤管理好上手第 1 項）：「沒問題」那群先用打卡系統的只檢查跑一次，會被擋的移到異常區、寫出原因；
+  // 檢查中一鍵核定先停用（最多幾秒）；讀不到就照舊（按了才知道）
+  async function checkOk(tok) {
+    const date = st.date, list = secs().ok;
+    if (!date || !list.length) return;
+    const by = new Map();
+    list.forEach((p) => {
+      const emp = empOf(p.key); if (!emp) return;
+      const it = Object.assign({ emp_id: emp.emp_id }, mainAction(p).payload || p.payload);
+      delete it.store; delete it.date;
+      const k = emp.store || ''; if (!by.has(k)) by.set(k, []); by.get(k).push([p, it]);
+    });
+    st.checking = true; render();
+    await Promise.all([...by].map(async ([store, pairs]) => {
+      const rs = await checkOnce(date, store, pairs.map((x) => x[1]));
+      if (tok !== st.tok || st.date !== date || !rs) return;
+      pairs.forEach(([p, it]) => {
+        const r = rs.find((x) => x.emp_id === String(it.emp_id));
+        if (!r || r.ok !== false) return;
+        const msg = String(r.message || r.error || '打卡系統不接受');
+        Object.assign(U(p.key), { failed: msg.replace(/^這天還不能核定：/, ''), failedDiff: /^核定和打卡差/.test(msg), pre: true });
+      });
+    }));
+    if (tok !== st.tok || !live()) return;
+    st.checking = false; recompute(); render();
   }
   // 這天都處理完了 → 自動換下一天
   async function afterChange() {
@@ -258,9 +289,9 @@ export function renderQuick(ctx) {
     return res;
   }
   const mainAction = (p) => p.actions[0] && p.actions[0].id !== 'full' ? p.actions[0] : { id: 'plan', payload: p.payload };
-  async function approveAll() {
+  async function approveAll(store) {
     if (st.busy) return;
-    const list = secs().ok.slice();
+    const list = secs().ok.filter((p) => typeof store !== 'string' || storeOf(p) === store);
     if (!list.length) return;
     st.busy = true; st.toast = ''; st.failLine = ''; st.progress = '確認最新資料…'; render();
     if (!(await freshEnough(list))) { st.busy = false; st.progress = ''; return render(); }
@@ -512,7 +543,7 @@ export function renderQuick(ctx) {
     const stale = !!st.peekAt && (st.loading || !!st.error);      // 正在顯示上次資料
     const s = st.loading && !stale ? null : secs();
     const head = h('div', 'dq-head');
-    const hl = h('div'); hl.append(h('div', 'dq-store', (S.meta && S.meta.label) || (ctx.session && ctx.session.name) || ''), h('div', 'dq-title', st.date ? Q.dayLabel(st.date, todayNow()) : '考勤管理'));
+    const hl = h('div'); hl.append(h('div', 'dq-store', S.all ? '全部門市' : (S.meta && S.meta.label) || (ctx.session && ctx.session.name) || ''), h('div', 'dq-title', st.date ? Q.dayLabel(st.date, todayNow()) : '考勤管理'));
     head.append(hl, h('div', 'dq-left', st.date && s ? '還剩 ' + s.left + ' 人' : ''));
     root.append(head, navEl());
     root.append(rejectBar((date) => gotoDate(date)));      // 背景送出被打卡系統退回的（考勤副本，2026-11-14）
@@ -527,17 +558,30 @@ export function renderQuick(ctx) {
     if (st.failed.length) failedStores(root, st.failed, load);
     if (st.toast) root.append(h('div', 'dq-toast', st.toast, { role: 'status' }));
     if (st.failLine) root.append(h('div', 'dq-fails', st.failLine, { role: 'alert' }));
-    if (s.ok.length) {
-      const ok = h('div', 'dq-okbox');
-      const t = h('div', 'dq-oktop'); t.append(h('b', null, '沒問題 ' + s.ok.length + ' 人'), h('span', 'dq-sub', '打卡和班表差在 ' + 15 + ' 分鐘內'));
-      ok.append(t, h('div', 'dq-names', s.ok.map((p) => p.name).join('、')));
-      const okb = btn('dq-ok-all', st.progress || '一鍵核定 ' + s.ok.length + ' 人', approveAll);
-      if (st.failed.length) { okb.disabled = true; okb.textContent = '有門市讀不到，先重新載入'; }
-      ok.append(okb);
-      root.append(ok);
-    }
-    if (s.abnormal.length) { root.append(h('div', 'dq-sec', '有異常 ' + s.abnormal.length + ' 人，逐筆確認')); s.abnormal.forEach((p) => root.append(cardEl(p))); }
-    if (s.blocked.length) { root.append(h('div', 'dq-sec muted', '現在不能核定 ' + s.blocked.length + ' 人')); s.blocked.forEach((p) => root.append(cardEl(p))); }
+    // 全部門市：按門市分組，每家一個「一鍵核定」（第 3 項）；單一門市照舊
+    const groups = [];
+    if (S.all) {
+      const seen = new Map();
+      st.people.forEach((p) => { const k = storeOf(p); if (!seen.has(k)) { const e = empOf(p.key); seen.set(k, { store: k, name: (e && e.storeName) || k, people: [] }); groups.push(seen.get(k)); } seen.get(k).people.push(p); });
+    } else groups.push({ store: null, name: '', people: st.people });
+    groups.forEach((g) => {
+      const gs = S.all ? Q.sections(g.people) : s;
+      if (S.all && !(gs.ok.length || gs.abnormal.length || gs.blocked.length)) return;
+      if (S.all) root.append(h('div', 'dq-grp', g.name));
+      if (gs.ok.length) {
+        const ok = h('div', 'dq-okbox');
+        const t = h('div', 'dq-oktop'); t.append(h('b', null, '沒問題 ' + gs.ok.length + ' 人'), h('span', 'dq-sub', '打卡和班表差在 15 分鐘內'));
+        if (st.checking) t.append(h('span', 'dq-checking', '正在跟打卡系統檢查…'));
+        ok.append(t, h('div', 'dq-names', gs.ok.map((p) => p.name).join('、')));
+        const okb = btn('dq-ok-all', st.progress || '一鍵核定 ' + gs.ok.length + ' 人', () => approveAll(S.all ? g.store : undefined));
+        if (st.failed.length) { okb.disabled = true; okb.textContent = '有門市讀不到，先重新載入'; }
+        else if (st.checking && !st.progress) { okb.disabled = true; okb.title = '正在跟打卡系統檢查，幾秒後就可以按'; }      // 字不變，只先停用（檢查完會把會被擋的人移出去）
+        ok.append(okb);
+        root.append(ok);
+      }
+      if (gs.abnormal.length) { root.append(h('div', 'dq-sec', '有異常 ' + gs.abnormal.length + ' 人，逐筆確認')); gs.abnormal.forEach((p) => root.append(cardEl(p))); }
+      if (gs.blocked.length) { root.append(h('div', 'dq-sec muted', '現在不能核定 ' + gs.blocked.length + ' 人')); gs.blocked.forEach((p) => root.append(cardEl(p))); }
+    });
     const doneBits = s.done.map((p) => p.name + ' ' + C.round2(p.hours) + ' 小時').concat(s.skipped.map((p) => p.name + ' 先跳過'), st.extra);
     if (doneBits.length) root.append(h('div', 'dq-done', '已處理：' + doneBits.join('、')));
     if (s.skipped.length) root.append(btn('dq-unskip', '取消跳過 ' + s.skipped.length + ' 人，重新顯示', () => { skipDel(s.skipped.map((p) => skipKey(st.date, p.key))); recompute(); render(); }));

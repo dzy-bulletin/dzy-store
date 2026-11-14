@@ -1,7 +1,7 @@
 // 出勤核定：管理者的「各店總覽」與門市切換（2026-10-11 Eason：系統管理員看得到所有門市的出勤核定狀況、也能代核）。
 // 總覽每家店一列：本月沒核定幾天、待審申請幾筆、待核准手機幾支（跟首頁待辦同三支查詢）；點數字或「進入」就切到那家店的分頁。
 // 其他分頁上方有門市選單；選了之後每次呼叫都帶 asStore，伺服器照那家店的打卡對照轉送。
-import { S, call, setStore, h, failBar, multiStores, rememberOne } from './state.js';
+import { S, call, setStore, h, failBar, multiStores, rememberOne, tipText } from './state.js';
 import { ssoSwitch, setSession, toSession } from '../../js/auth.js';
 import { api } from '../../js/api.js';
 
@@ -24,7 +24,7 @@ export function renderOverview(ctx) {
   el.innerHTML = '';
   const card = h('div', 'card');
   card.append(h('h2', null, '各店出勤核定狀況'));
-  card.append(h('p', 'hint', '每家店本月還沒核定的天數、待審的加班請假申請、等核准的新手機。點數字或「進入」可以直接看那家店，也可以替該店核定。'));
+  { const t = h('p', 'hint'); t.append(tipText('各店本月沒核定、待審、等核准的件數', '點數字或「進入」可以直接看那家店，也可以替該店核定。')); card.append(t); }
   const box = h('div', 'du-ov'); card.append(box);
   const row = h('div', 'row mt');
   const reload = h('button', 'btn sm ghost', '重新整理', { type: 'button', id: 'duOvReload' });
@@ -99,7 +99,7 @@ export function storeBar(ctx) {
   if (!S.stores) loadStores().then(() => { if (sel.isConnected) ctx.rerender(); }, e => { if (sel.isConnected) { const f = h('div'); el.append(f); failBar(f, '門市清單', e, () => ctx.rerender()); } });
   if (!S.asStore) {
     const c = h('div', 'card');
-    c.append(h('p', 'hint', '先選一家門市，就能看那家店的核定工時、申請審核、裝置、名冊與公告，也可以直接替該店核定。'));
+    { const t = h('p', 'hint'); t.append(tipText('先選一家門市', '選了就能看那家店的核定工時、申請審核、裝置、名冊與公告，也可以直接替該店核定。')); c.append(t); }
     el.append(c);
     return null;
   }
@@ -133,7 +133,7 @@ export function personStoreBar(ctx) {
   };
   bar.append(sel);
   el.append(bar);
-  if (S.all) bar.append(h('div', 'du-hint', '合併顯示你可核定的 ' + list.length + ' 家門市，每位同仁標出打卡地點。打卡 QR、公告、員工名冊、裝置核准、新增同仁這些整店功能，請切到單一門市。'));
+  if (S.all) { const t = h('div', 'du-hint'); t.append(tipText('合併顯示 ' + list.length + ' 家門市', '每位同仁標出打卡地點。打卡 QR、公告、員工名冊、裝置核准、新增同仁這些整店功能，請切到單一門市。')); bar.append(t); }
   const body = h('div');
   el.append(body);
   return body;

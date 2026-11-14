@@ -113,10 +113,11 @@ export async function handle(method, path, body, token) {
   const pth = path.split('?')[0];
   if (needPerson(pth, token)) { if (!PMP) PMP = whileLeaving(import('./mock-person.js')); PM = await PMP; } else PM = null;       // 先載入再讀資料庫，避免載入期間別的請求改掉 db
   db = null; load(); body = body || {};
+  const before = JSON.stringify(db);      // 只在資料真的有改時才存（2026-11-14）：讀取請求晚到時不會把別處剛改的資料蓋回舊的
   if (PM && !db.personas) Object.assign(db, PM.seed());
   curActor = null;
   const r = await route(method, path.split('?')[0], path.includes('?') ? new URLSearchParams(path.split('?')[1]) : new URLSearchParams(), body, token);   // 自動排班假後端是 async（要讀假日表），等它做完才存
-  save();
+  if (JSON.stringify(db) !== before) save();
   return r;
 }
 
@@ -868,6 +869,14 @@ function dutyDo(d, action, b) {
     }
     return ok({ ym, today, items });
   }
+  if (action === 'mgr_approve_check') {      // 只檢查不寫入（2026-11-14）：一天多人，逐人照 mgr_approve 跑到寫入前（打卡端 reqMgrApproveCheck_）
+    window.__checkCalls = (window.__checkCalls || 0) + 1;      // e2e 數次數（不存進示範資料）
+    const results = (Array.isArray(b.items) ? b.items : []).slice(0, 40).map(it => {
+      const r = dutyDo(d, 'mgr_approve', Object.assign({}, it, { date: b.date, dry_run: true }));
+      return r.ok ? { emp_id: String(it.emp_id), ok: true, approved_hours: r.data.approved_hours, status_text: r.data.status_text } : { emp_id: String(it.emp_id), ok: false, error: r.error, message: r.message };
+    });
+    return ok({ date: b.date, results, denied: [] });
+  }
   if (action === 'mgr_approve') {
     // 一天多種假別（Code.gs handleMgrApprove，2026-10-26）：新前端送 leaves:[{type,hours}]；只送 leave_type 的舊呼叫端遇到「那天已有多種假別」擋 multi_leave_day
     const date = String(b.date || '');
@@ -912,7 +921,7 @@ function dutyDo(d, action, b) {
       const late = String(b.late_min ?? '').trim();
       status = late === '0' ? '主管認定不計遲到' : late !== '' && Number(late) > 0 ? '遲到' + Number(late) + '分(認定)' : '正常';
     }
-    if (window.__dutyFailEmp && window.__dutyFailEmp[b.emp_id]) { delete window.__dutyFailEmp[b.emp_id]; return fail('UPSTREAM', '打卡系統暫時沒有回應，請稍後再試'); }      // e2e：指定某人的核定失敗一次
+    if (b.dry_run !== true && window.__dutyFailEmp && window.__dutyFailEmp[b.emp_id]) { delete window.__dutyFailEmp[b.emp_id]; return fail('UPSTREAM', '打卡系統暫時沒有回應，請稍後再試'); }      // e2e：指定某人的核定失敗一次
     // 規則 4（核定和打卡差 30 分鐘以上要原因）：伺服器才有的規則，示範模式預設不擋；e2e 設 d.diffRule＝分鐘數才打開（手機一頁核定測「伺服器說要原因」用）
     if (d.diffRule && periods.length && !String(b.diff_reason ?? '').trim()) {
       const f = fakeOf(emp.emp_id);
@@ -923,6 +932,7 @@ function dutyDo(d, action, b) {
     }
     const dupIgn = Array.isArray(b.dup_ignore) ? b.dup_ignore.slice() : ((d.approved[date + emp.emp_id] || {}).dup_ignore || []);
     if (periods.length && dupIgn.length) status = (status === '正常' ? '' : status + '、') + '主管認定重複打卡（' + dupIgn.map(t => String(t).slice(11, 16)).sort().join('／') + '）';
+    if (b.dry_run === true) return ok({ dry_run: true, date, emp_id: emp.emp_id, name: emp.name, periods, approved_hours: hours, ...leaveOut(leaves), status_text: status });      // 只檢查（打卡端 mgr_approve_check）：檢查都過了就停，不寫
     (d.applog = d.applog || []).push(JSON.parse(JSON.stringify(b)));      // e2e：收到的核定內文原樣留著，驗「手機一頁核定送的和舊卡片一樣」
     const rec = { periods: periods.map(p => ({ ...p })), approved_hours: hours, status_text: status, manager_name: MGR, dup_ignore: periods.length ? dupIgn : [], ...(String(b.diff_reason ?? '').trim() ? { diff_reason: String(b.diff_reason).trim() } : {}) };
     d.approved[date + emp.emp_id] = rec; d.leave[date + emp.emp_id] = leaves;

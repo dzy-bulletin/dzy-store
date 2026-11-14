@@ -40,3 +40,10 @@ body.embed .du-mini.warn, body.embed .du-mini.bad, body.embed .du-badge.bad, bod
 /* 上方「系統管理者・總部　換店　操作手冊」：管理系統的次要字、紅色連結 */
 body.embed .embed-who, body.embed .embed-bar{color:var(--dzy-muted)}
 body.embed .embed-who a, body.embed .embed-bar a, body.embed .embed-bar button.linkish{color:var(--dzy-brand)}
+/* 送出前檢查（2026-11-14）：管理系統的 ok／warn／danger */
+body.embed .du-mini.ok{background:var(--dzy-ok-light);color:var(--dzy-ok)}
+body.embed .du-pre.bad{background:var(--dzy-danger-light);border-left-color:var(--dzy-danger)}
+body.embed .du-pre.bad b,body.embed .du-actions .btn.du-submit-warn{color:var(--dzy-danger)}
+body.embed .du-actions .btn.du-submit-warn{border-color:var(--dzy-danger)}
+body.embed .du-pre.warn{background:var(--dzy-warn-light);border-left-color:var(--dzy-warn)}
+body.embed .du-morebtn,body.embed .du-help[aria-expanded="true"]{color:var(--dzy-brand)}

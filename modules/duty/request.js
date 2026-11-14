@@ -130,7 +130,9 @@ function upperLabel(it) { return it.upper_kind === 'director' || it.proxy_by ? p
 // 代開標籤顯示代開人姓名（2026-11-14 Eason：不顯示職稱）：proxy_by 是「姓名（工號）」，只取姓名；舊資料沒有才退回「主管代開」
 function proxyLabel(it) { const n = String(it.proxy_by || '').replace(/（[^（）]*）\s*$/, '').trim(); return (n || '主管') + '代開'; }
 
-function buildItem(it, card, title) {
+// 核定工時卡片裡審申請（2026-11-14 考勤管理好上手第 2 項）：同一個元件，不放勾選（批次留在申請審核分頁），核准／退回完成後通知卡片
+export function buildReqItem(it, onDone) { return buildItem(it, null, null, onDone); }
+function buildItem(it, card, title, onDone) {
   const el = h('div', 'du-rq'); el.dataset.reqId = String(it.id); el.__req = it; if (it.store) el.dataset.store = it.store;
   const l1 = h('div', 'du-rq-l1'), who = h('span', 'du-rq-who');
   const isProxy = it.upper_kind === 'director' || !!it.proxy_by;      // 主管代開（2026-11-06）：只有總監層級能核，伺服器給 can_decide
@@ -138,7 +140,7 @@ function buildItem(it, card, title) {
   const upOn = it.upper === true && (it.kind !== 'miss' || isProxy);      // 忘刷單歸打卡店店長（2026-11-04），打卡端的「部門同仁／值班主管本人」標記不套用
   const pick = h('input', 'du-rq-pick', null, { type: 'checkbox', 'aria-label': '勾選 ' + it.name + ' ' + it.summary });
   pick.onchange = () => syncBatch(card);
-  if (canDecide) who.append(pick);
+  if (canDecide && card) who.append(pick);
   const sup = supportTag(it);      // 支援（原單位）
   who.append(h('span', 'du-rq-kind ' + (REQ_KIND_LABEL[it.kind] ? it.kind : ''), REQ_KIND_LABEL[it.kind] || it.kind), h('span', 'du-rq-name', it.name), ...(sup ? [sup] : []), ...(upOn && canDecide ? [h('span', 'du-rq-kind upper', upperLabel(it))] : []), ...(it.storeName ? [h('span', 'du-where', '打卡地點：' + it.storeName, { 'data-where': it.store })] : []));
   l1.append(who, h('span', 'du-rq-date', shortDate(it.date)));
@@ -203,16 +205,18 @@ function buildItem(it, card, title) {
           if (j.state === 'done') {
             const r2 = j.result || {};      // 那天已經核定過的提醒（r.warn）背景送出也要給主管看
             el.__markDone((decision === 'approve' ? '✓ 已核准：' : '✕ 已退回：') + it.name + ' ' + it.summary + (r2.warn ? '\n⚠ ' + (r2.message || '那天已經核定過，請重新核定一次') : ''));
-            refreshTitle(card, title); syncBatch(card);
+            if (card) { refreshTitle(card, title); syncBatch(card); }
             if (decision === 'approve') delete S.dayCache[it.date];
+            if (onDone) onDone(decision, r2);
           } else { ok.disabled = no.disabled = false; say('bad', '✕ 被退回：' + (j.msg || '打卡系統沒有接受，請重新整理再處理')); }
         });
         return;
       }
       // 那天已經核定過（Eason 2026-11-13 紅燈 a2 選 A）：照常核准，提醒重新核定一次，假別才會寫進薪資
       el.__markDone((decision === 'approve' ? '✓ 已核准：' : '✕ 已退回：') + it.name + ' ' + it.summary + (r && r.warn ? '\n⚠ ' + (r.message || '那天已經核定過，請重新核定一次') : ''));
-      refreshTitle(card, title); syncBatch(card);
+      if (card) { refreshTitle(card, title); syncBatch(card); }
       if (decision === 'approve') delete S.dayCache[it.date];     // 那天的核定頁要重抓才看得到預填
+      if (onDone) onDone(decision, r);
     } catch (e) { ok.disabled = no.disabled = false; say('bad', '✕ ' + (e.message || '沒有成功，請再試一次')); }
   }
   el.__markDone = text => { el.textContent = ''; el.classList.add('done'); el.append(h('div', 'du-rq-l2', text)); };   // 單筆與批次共用

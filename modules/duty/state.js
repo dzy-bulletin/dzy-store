@@ -61,13 +61,13 @@ export function setStore(code, name) {
 // 讀取類動作（其他動作都算寫入）：寫入後把「上次看到的名單」丟掉，下次一定等新資料（剛核定完不能先秀核定前的樣子）
 const READS = new Set(['all', 'hr_return_list', 'mgr_day', 'mgr_req_day', 'mgr_req_pending', 'mgr_pending_approvals', 'mgr_roster', 'mgr_pending_devices', 'mgr_notices',
   'mgr_line_binds', 'mgr_qr_token', 'payroll_leave_options', 'payroll_annual_left', 'line_hub_attach_get', 'admin_stores', 'mgr_req_month',
-  'mirror_jobs', 'mirror_ack']);      // 背景送出的進度、按知道了：不動考勤資料，不清上次看到的名單
+  'mirror_jobs', 'mirror_ack', 'mgr_approve_check']);      // mgr_approve_check：送出前只檢查，不寫入（2026-11-14）      // 背景送出的進度、按知道了：不動考勤資料，不清上次看到的名單
 export async function call(action, body) {
   if (!READS.has(action)) { S.recent = {}; S.reqPre = null; }
   try {
     const k = S.key, st = S.asStore;
     const r = await api('POST', '/m/duty/' + action, st ? Object.assign({}, body || {}, { asStore: st }) : (body || {}), undefined, { read: READS.has(action) });
-    if (r && r.meta && S.key === k && S.asStore === st) S.meta = r.meta;
+    if (r && r.meta && action !== 'mgr_approve_check' && S.key === k && S.asStore === st) S.meta = r.meta;      // 送出前檢查在背景跑、可能晚到：不拿它的休息帶蓋掉剛讀到的
     // 考勤副本（2026-11-14）：Mac mini 副本讀的資料標 __mirror；有 ver 的人核定時可以背景送（bg.js canBg）
     if (r && r.mirror_at) for (const f of ['employees', 'items']) if (Array.isArray(r[f])) for (const x of r[f]) if (x && typeof x === 'object') x.__mirror = true;
     if (r && Array.isArray(r.home_stores) && S.key === k) for (const x of r.home_stores) if (x.ok && x.meta) S.metaBy[x.store] = x.meta;   // 總部那組併進來的別家：休息帶各用各的   // 管理者已經換店／換登入：上一家店晚到的回應不寫進來（2026-10-12 Codex 審查）
@@ -111,6 +111,22 @@ export function h(tag, cls, text, attrs) {
   if (text != null) e.textContent = text;
   if (attrs) for (const k of Object.keys(attrs)) e.setAttribute(k, attrs[k]);
   return e;
+}
+
+// 送出前只檢查（2026-11-14 考勤管理好上手第 1 項）：打卡系統 mgr_approve_check，用送出核定同一套檢查跑到寫入前就停。
+// 回每人 {emp_id, ok, error, message, approved_hours}；讀不到（舊版打卡、連不上）回 null＝不標、照舊送出才知道。
+export function checkOnce(date, store, items) {
+  return call('mgr_approve_check', Object.assign({ date, items }, store ? { store } : {})).then(r => (r && Array.isArray(r.results) ? r.results : null), () => null);
+}
+
+// 情境提示（2026-11-14 考勤管理好上手第 5 項）：平常只顯示一句短的，旁邊「?」點了才展開完整說明（再點收起）
+export function tipText(short, long, cls) {
+  const w = h('span', 'du-tip' + (cls ? ' ' + cls : ''));
+  const more = h('span', 'du-tip-long', long); more.hidden = true;
+  const q = h('button', 'du-help', '?', { type: 'button', 'aria-label': '說明', 'aria-expanded': 'false' });
+  q.onclick = (e) => { e.stopPropagation(); more.hidden = !more.hidden; q.setAttribute('aria-expanded', more.hidden ? 'false' : 'true'); };
+  w.append(h('span', 'du-tip-short', short), q, more);
+  return w;
 }
 
 // 支援標示（2026-10-26）：伺服器在支援帳號那筆加 support_from（原單位名稱，可能是空字串）；舊版沒有＝不標

@@ -1,6 +1,6 @@
 // 核定紀錄（2026-11-04）：誰在什麼時候核了什麼——工時核定（含重核）、申請的送出／核准／退回／取消／作廢、裝置核准／拒絕。
 // 資料：mgr_req_month 的 log 欄位（和申請單彙整同一支，伺服器已依人過濾）；換月份才重讀，其他篩選只在前端。只讀。
-import { S, call, callAll, h } from './state.js';
+import { S, call, callAll, h, tipText } from './state.js';
 import { taipeiToday, tsLabel, shortDate } from './calc.js';
 import { defaultYm, ymAdd, ymLabel, xlsSafe } from './summary-calc.js';
 import { css, loadXlsx } from './summary.js';
@@ -64,7 +64,7 @@ function drawBar(bar, out) {
   const st = AL;
   bar.innerHTML = '';
   bar.append(h('h2', 'sm-h', '核定紀錄'));
-  bar.append(h('p', 'hint', '每一筆核定是誰、什麼時候做的：工時核定（含重核）、申請的送出、核准、退回、取消、作廢，以及裝置核准。只能看、匯出，不能在這裡改。申請單的紀錄看得到的範圍和「申請單彙整」一樣；裝置核准從 11/4 起才開始記。'));
+  { const t = h('p', 'hint'); t.append(tipText('誰、什麼時候核定或審了什麼（只能看、匯出）', '包含工時核定（含重核）、申請的送出、核准、退回、取消、作廢，以及裝置核准。申請單的紀錄看得到的範圍和「申請單彙整」一樣；裝置核准從 11/4 起才開始記。')); bar.append(t); }
   const g = h('div', 'sm-filters');
   const fm = h('div', 'fld sm-f'); fm.append(h('label', null, '月份', { for: 'alYm' }));
   const ym = h('select', null, null, { id: 'alYm' });

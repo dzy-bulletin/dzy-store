@@ -1,7 +1,7 @@
 // 申請單彙整（2026-11-02，docs/req-print/spec.md §4–§5）：一個月的請假、加班、出差、忘打卡申請＋核定結果，篩選、對帳、合計，
 // 印一覽表（A4 橫）、印單張（A4 直，一筆一頁）、匯出 Excel。只讀：這一頁不能核准、退回、作廢任何單據。
 // 資料：mgr_req_month {ym}（全部門市走 callAll）；換月份才重讀，其他篩選只在前端。對帳與合計的規則在 summary-calc.js（純函式）。
-import { S, call, callAll, h } from './state.js';
+import { S, call, callAll, h, tipText } from './state.js';
 import { taipeiToday, tsLabel, shortDate } from './calc.js';
 import { buildRows, filterRows, totals, empKey, defaultYm, ymAdd, ymLabel, xlsSafe, KIND_LABEL, KIND_ORDER, SLIP_TITLE, MERGED, OT_NOTE } from './summary-calc.js';
 
@@ -80,7 +80,7 @@ function drawBar(bar, out) {
   const st = SM;
   bar.innerHTML = '';
   bar.append(h('h2', 'sm-h', '申請單彙整'));
-  bar.append(h('p', 'hint', '一個月的請假、加班、出差、忘打卡申請，以及核定工時送出的核定結果（薪資讀的是核定結果）。只能看、印、匯出，不能在這裡核准或退回。'));
+  { const t = h('p', 'hint'); t.append(tipText('一個月的申請與核定結果（只能看、印、匯出）', '包含請假、加班、出差、忘打卡申請，以及核定工時送出的核定結果（薪資讀的是核定結果）。核准或退回請到「申請審核」。')); bar.append(t); }
   const g = h('div', 'sm-filters');
   // 月份：往前兩年到下個月（伺服器最遠收到下個月）
   const fm = h('div', 'fld sm-f'); fm.append(h('label', null, '月份', { for: 'smYm' }));
