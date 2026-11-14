@@ -72,6 +72,9 @@ export function corePeriods(o) {
   let W = merge(raw.filter((x) => x.in != null && x.out != null).map((x) => span(x.in, x.out)));
   if (!W.length) {
     if (!S.length) return null;                                  // 沒打卡也沒班：沒得算
+    // 沒打卡、有已核准整天的假單／出差單（沒填時段，時數合計蓋滿班表或滿 8 小時）＝整天請假：不照班表填時段（2026-11-15 游家輝事假 8 小時被要求補 4 張忘打卡單）
+    const noTime = reqs.filter((r) => (r.kind === 'leave' || r.kind === 'trip') && !r.start).reduce((a, r) => a + (Number(r.hours) || 0), 0);
+    if (noTime > 0 && (noTime >= total(S) / 60 - 0.01 || noTime >= 8)) return null;
     W = S.map((x) => x.slice());                                 // 沒打卡但有班：照班表（打卡端回要忘打卡單）
   }
   const Wraw = W.map((x) => x.slice());
