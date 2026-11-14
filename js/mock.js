@@ -873,7 +873,7 @@ function dutyDo(d, action, b) {
     window.__checkCalls = (window.__checkCalls || 0) + 1;      // e2e 數次數（不存進示範資料）
     const results = (Array.isArray(b.items) ? b.items : []).slice(0, 40).map(it => {
       const r = dutyDo(d, 'mgr_approve', Object.assign({}, it, { date: b.date, dry_run: true }));
-      return r.ok ? { emp_id: String(it.emp_id), ok: true, approved_hours: r.data.approved_hours, status_text: r.data.status_text } : { emp_id: String(it.emp_id), ok: false, error: r.error, message: r.message };
+      return r.ok ? { emp_id: String(it.emp_id), ok: true, approved_hours: r.data.approved_hours, status_text: r.data.status_text } : { emp_id: String(it.emp_id), ok: false, error: r.error, message: r.message, probs: r.probs, need: r.need, need_doc: r.need_doc };
     });
     return ok({ date: b.date, results, denied: [] });
   }
@@ -908,7 +908,8 @@ function dutyDo(d, action, b) {
       let wk = trip; periods.forEach(p => { const [a, c] = [p.start, p.end].map(t => +t.slice(0, 2) * 60 + +t.slice(3)); wk += ((c <= a ? c + 1440 : c) - a) / 60; });
       const lv = d.reqs.filter(r => r.emp_id === emp.emp_id && r.date === date && r.status === 'approved' && r.kind === 'leave').reduce((a, r) => a + (Number(r.hours) || 0), 0);
       const sum = Math.round((wk + lv) * 100) / 100;
-      if (sum < 7.995) return fail('BAD_INPUT', '這天還不能核定：正職上班日要滿 8 小時（上班 ' + Math.round((wk - trip) * 100) / 100 + '＋出差 ' + trip + '＋假單 ' + lv + '＝' + sum + ' 小時），還差 ' + Math.round((8 - sum) * 100) / 100 + ' 小時，要有已核准的假單或補休單。請同仁在 LINE「加班請假」補申請；超過 4 天（11/28 以前 11 月的日子不限）請店長在考勤管理「代開申請」，送總監層級審核。');
+      if (sum < 7.995) return Object.assign(fail('BAD_INPUT', '這天還不能核定：正職上班日要滿 8 小時（上班 ' + Math.round((wk - trip) * 100) / 100 + '＋出差 ' + trip + '＋假單 ' + lv + '＝' + sum + ' 小時），還差 ' + Math.round((8 - sum) * 100) / 100 + ' 小時，要有已核准的假單或補休單。請同仁在 LINE「加班請假」補申請；超過 4 天（11/28 以前 11 月的日子不限）請店長在考勤管理「代開申請」，送總監層級審核。'),
+        { probs: [{ rule: 'ft8', text: '正職上班日要滿 8 小時，還差 ' + Math.round((8 - sum) * 100) / 100 + ' 小時' }], need: { leave_hours: Math.round((8 - sum) * 100) / 100 }, need_doc: true });
     }
     let hours, status;
     if (!periods.length) {
@@ -923,11 +924,25 @@ function dutyDo(d, action, b) {
     }
     if (b.dry_run !== true && window.__dutyFailEmp && window.__dutyFailEmp[b.emp_id]) { delete window.__dutyFailEmp[b.emp_id]; return fail('UPSTREAM', '打卡系統暫時沒有回應，請稍後再試'); }      // e2e：指定某人的核定失敗一次
     // 規則 4（核定和打卡差 30 分鐘以上要原因）：伺服器才有的規則，示範模式預設不擋；e2e 設 d.diffRule＝分鐘數才打開（手機一頁核定測「伺服器說要原因」用）
-    if (d.diffRule && periods.length && !String(b.diff_reason ?? '').trim()) {
+    // 核定比打卡多（2026-11-14 打卡端 reqOverCreditMin_）：核定時段裡沒打卡涵蓋的分鐘，不算開頭遲到那段；早到晚走不算。e2e 設 d.diffRule＝分鐘數才打開
+    let coreOn = true; try { coreOn = localStorage.getItem('dzystore_core') !== '0'; } catch (e) {}      // e2e 舊測試（dzystore_core＝0）照舊規則：差太多要寫原因
+    if (!coreOn && d.diffRule && periods.length && !String(b.diff_reason ?? '').trim()) {
       const f = fakeOf(emp.emp_id);
       if (f && f.segs.length && f.segs.every(x => x.in && x.out)) {
         const raw = f.segs.reduce((a, x) => { const [i, o] = [x.in, x.out].map(t => +t.slice(0, 2) * 60 + +t.slice(3)); return a + (o <= i ? o + 1440 : o) - i; }, 0);
         if (Math.abs(hours * 60 - raw) >= (Number(d.diffRule) || 30)) return fail('BAD_INPUT', '核定和打卡差太多，要填原因才能送出');
+      }
+    }
+    if (coreOn && d.diffRule && periods.length) {
+      const f = fakeOf(emp.emp_id);
+      if (f && f.segs.length && f.segs.every(x => x.in && x.out)) {
+        const mm = t => +t.slice(0, 2) * 60 + +t.slice(3);
+        const P = periods.map(p => [mm(p.start), mm(p.end) <= mm(p.start) ? mm(p.end) + 1440 : mm(p.end)]).sort((x, y) => x[0] - y[0]);
+        const G = f.segs.map(x => [mm(x.in), mm(x.out) <= mm(x.in) ? mm(x.out) + 1440 : mm(x.out)]).sort((x, y) => x[0] - y[0]);
+        let over = P.reduce((a, p) => a + (p[1] - p[0]) - G.reduce((c, g) => c + Math.max(0, Math.min(p[1], g[1]) - Math.max(p[0], g[0])), 0), 0);
+        over -= Math.max(0, Math.min(G[0][0], P[0][1]) - P[0][0]);
+        if (over >= (Number(d.diffRule) || 30)) return Object.assign(fail('BAD_INPUT', '這天還不能核定：核定比打卡多 ' + over + ' 分鐘（沒有打卡的時間要有忘打卡單、假單或補休單）。請同仁在 LINE「加班請假」補申請。'),
+          { probs: [{ rule: 'over_credit', text: '核定比打卡多 ' + over + ' 分鐘（沒有打卡的時間要有忘打卡單、假單或補休單）' }], need: { over_min: over }, need_doc: true });
       }
     }
     const dupIgn = Array.isArray(b.dup_ignore) ? b.dup_ignore.slice() : ((d.approved[date + emp.emp_id] || {}).dup_ignore || []);

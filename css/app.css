@@ -655,3 +655,21 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
 @media (min-width:861px){.dq{max-width:720px;margin-left:auto;margin-right:auto}}
 .dq-grp{font-size:13px;font-weight:900;color:var(--muted);letter-spacing:.04em;padding:10px 2px 0;border-top:1px solid var(--line);margin-top:6px}
 .dq-checking{font-size:12.5px;color:var(--muted);flex-basis:100%}
+/* 打卡＋單＝核定時數（2026-11-14，docs/punch-plus-req/）：核定通過（亮燈）／未符合（灰底、列出要補的單）、已核准申請一行、提醒灰字 */
+.du-verdict{border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:7px;margin:4px 0 10px;overflow-wrap:anywhere}
+.du-verdict.ok{background:#e6f3ea;border:1px solid #bcd9c2}
+.du-verdict.gray{background:#f1efec;border:1px solid var(--line)}
+.du-verdict-t{font-size:15.5px;font-weight:700}
+.du-verdict.ok .du-verdict-t{color:var(--ok)}
+.du-verdict.gray .du-verdict-t{color:var(--bad)}
+.du-verdict-n{font-size:13px;color:var(--muted)}
+.du-needk{font-size:13px;font-weight:700}
+.du-needs{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.du-needs li{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;font-size:14px}
+.du-need-t{color:var(--bad);font-weight:700;flex:1 1 220px}
+.du-verdict-go{flex:1;min-height:44px}
+.du-verdict-go:disabled{background:#d9d4ce!important;border-color:#d9d4ce!important;color:#fff!important;cursor:not-allowed;opacity:1}
+.du-reqline{font:inherit;width:100%;display:flex;justify-content:space-between;gap:8px;align-items:center;background:#e6f3ea;border:0;border-radius:8px;padding:9px 12px;color:var(--ok);font-weight:700;cursor:pointer;margin:4px 0}
+.du-reqline-more{font-weight:400;color:var(--muted);font-size:13px}
+.du-total .du-total-cont,.du-total .du-ft8:not(.short){background:none;border:0;padding:0;color:var(--muted);font-size:12.5px;font-weight:400}
+.du-cok{color:var(--ok)}

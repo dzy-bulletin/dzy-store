@@ -6,6 +6,7 @@ import * as C from './calc.js';
 import * as Q from './quick-calc.js';
 import { qrButton } from './qr.js';
 import { canBg, watchJob, refreshJobs, rejectBar } from './bg.js';
+import { corePeriods } from './core-calc.js';
 import { MOCK } from '../../js/config.js';
 
 // 總開關：改成 false、重新發布網站，手機也回到舊畫面（不必動別的）
@@ -13,6 +14,8 @@ export const QUICK_ON = true;
 
 const SKIP_KEY = 'dzystore_dutyquick_skip';     // 「先跳過」只存在這個分頁（sessionStorage），不寫任何資料
 // 完整頁都只進去這一次，不記住（2026-11-09 Eason：切分頁不該跑回舊畫面）。這個值只有示範模式看：其他 e2e 用它預設停在舊畫面，正式網站不讀
+// e2e 舊測試（示範模式）照舊分組：localStorage dzystore_core＝'0' 時不套「打卡＋單」（2026-11-14；正式網站一律套）
+export const e2eNoCore = () => { if (!MOCK) return false; try { return localStorage.getItem('dzystore_core') === '0'; } catch (e) { return false; } };
 const e2eFull = () => { if (!MOCK) return false; try { return localStorage.getItem('dzystore_dutyview') === 'full'; } catch (e) { return false; } };
 const skipGet = () => { try { return JSON.parse(sessionStorage.getItem(SKIP_KEY) || '{}') || {}; } catch (e) { return {}; } };
 const skipPut = (m) => { try { sessionStorage.setItem(SKIP_KEY, JSON.stringify(m)); } catch (e) {} };
@@ -63,7 +66,14 @@ export function renderQuick(ctx) {
       const main = Object.assign({}, p.actions[0] || { id: 'plan', hours: p.hours, payload: p.payload });
       main.primary = true; main.askReason = !!u.failedDiff;
       main.label = (u.pre ? (u.failedDiff ? '核定 ' : '仍要核定 ') : '再核定一次 ') + C.round2(p.hours) + ' 小時' + (u.failedDiff ? '（選原因）' : '');
-      Object.assign(p, { status: 'abnormal', tag: u.pre ? (u.failedDiff ? '要寫原因' : '送出會被擋') : '沒核定成功', note: u.failed, actions: [main, { id: 'full', label: '到完整頁核對', primary: false }] });
+      Object.assign(p, { status: 'abnormal', tag: u.pre ? (u.failedDiff ? '要寫原因' : '未符合') : '沒核定成功', note: u.failed, actions: [main, { id: 'full', label: '到完整頁核對', primary: false }] });
+    }
+    // 打卡＋單＝核定時數（2026-11-14）：檢查會過＝照算好的時段核定；異常的人也移到「核定通過」；不會過＝寫出要補齊的單
+    if (u.pass && !u.failed && !e2eNoCore() && (p.status === 'ok' || p.status === 'abnormal')) {
+      const act = { id: 'plan', label: '核定 ' + C.round2(u.pass.hours) + ' 小時', primary: true, hours: u.pass.hours, payload: u.pass.payload };
+      Object.assign(p, { status: 'ok', hours: u.pass.hours, payload: u.pass.payload, tag: '核定通過', note: (u.pass.notes || []).join('；'), actions: [act, { id: 'full', label: '到完整頁核對', primary: false }] });
+    } else if (u.need && !e2eNoCore() && p.status === 'abnormal') {      // 不會過：寫出要補齊的單，不再給「選原因」（2026-11-14 不再靠寫原因放行）
+      Object.assign(p, { tag: '未符合', note: '要補齊：' + u.need, actions: [{ id: 'full', label: '到完整頁補單', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
     }
     return p;
   }
@@ -191,24 +201,32 @@ export function renderQuick(ctx) {
   // 送出前先檢查（2026-11-14 考勤管理好上手第 1 項）：「沒問題」那群先用打卡系統的只檢查跑一次，會被擋的移到異常區、寫出原因；
   // 檢查中一鍵核定先停用（最多幾秒）；讀不到就照舊（按了才知道）
   async function checkOk(tok) {
-    const date = st.date, list = secs().ok;
+    // 打卡＋單＝核定時數（2026-11-14 Eason 定案，docs/punch-plus-req/）：「沒問題」與「有異常」的人都先照原則算好時段（core-calc.js）再只檢查——
+    //   會過：異常的人移到「核定通過」一起一鍵核定；沒問題的人照算好的時段送。不會過：寫出要補齊的單（會被擋的人移到異常區）。
+    //   有待審申請要先核准的人不動（照原本「核准單，核定 X 小時」）。
+    const date = st.date, list = secs().ok.concat(secs().abnormal.filter((p) => !(p.actions || []).some((a) => a.decide)));
     if (!date || !list.length) return;
     const by = new Map();
     list.forEach((p) => {
       const emp = empOf(p.key); if (!emp) return;
-      const it = Object.assign({ emp_id: emp.emp_id }, mainAction(p).payload || p.payload);
+      const core = corePeriods({ segs: emp.segments, plan: emp.plan, reqs: st.appr[p.key] || [], brk: brk(emp.store) });
+      const it = Object.assign({ emp_id: emp.emp_id }, mainAction(p).payload || p.payload || {}, core ? { periods: core.periods } : {});
       delete it.store; delete it.date;
-      const k = emp.store || ''; if (!by.has(k)) by.set(k, []); by.get(k).push([p, it]);
+      const k = emp.store || ''; if (!by.has(k)) by.set(k, []); by.get(k).push([p, it, core]);
     });
     st.checking = true; render();
     await Promise.all([...by].map(async ([store, pairs]) => {
       const rs = await checkOnce(date, store, pairs.map((x) => x[1]));
       if (tok !== st.tok || st.date !== date || !rs) return;
-      pairs.forEach(([p, it]) => {
+      pairs.forEach(([p, it, core]) => {
         const r = rs.find((x) => x.emp_id === String(it.emp_id));
-        if (!r || r.ok !== false) return;
-        const msg = String(r.message || r.error || '打卡系統不接受');
-        Object.assign(U(p.key), { failed: msg.replace(/^這天還不能核定：/, ''), failedDiff: /^核定和打卡差/.test(msg), pre: true });
+        if (!r) return;
+        const pay = Object.assign({}, it); delete pay.emp_id;
+        if (r.ok) { Object.assign(U(p.key), { pass: { payload: pay, hours: r.approved_hours, notes: core ? core.notes : [] } }); return; }
+        const probs = Array.isArray(r.probs) ? r.probs : [];
+        const text = probs.length ? probs.map((x) => x.text).join('；') : String(r.message || r.error || '打卡系統不接受').replace(/^這天還不能核定：/, '');
+        if (p.status === 'ok') Object.assign(U(p.key), { failed: '未符合：' + text, failedDiff: false, pre: true });
+        else Object.assign(U(p.key), { need: text });
       });
     }));
     if (tok !== st.tok || !live()) return;
@@ -570,7 +588,7 @@ export function renderQuick(ctx) {
       if (S.all) root.append(h('div', 'dq-grp', g.name));
       if (gs.ok.length) {
         const ok = h('div', 'dq-okbox');
-        const t = h('div', 'dq-oktop'); t.append(h('b', null, '沒問題 ' + gs.ok.length + ' 人'), h('span', 'dq-sub', '打卡和班表差在 15 分鐘內'));
+        const t = h('div', 'dq-oktop'); t.append(h('b', null, (e2eNoCore() ? '沒問題 ' : '核定通過 ') + gs.ok.length + ' 人'), h('span', 'dq-sub', e2eNoCore() ? '打卡和班表差在 15 分鐘內' : '打卡＋單對得上、已先跟打卡系統檢查'));
         if (st.checking) t.append(h('span', 'dq-checking', '正在跟打卡系統檢查…'));
         ok.append(t, h('div', 'dq-names', gs.ok.map((p) => p.name).join('、')));
         const okb = btn('dq-ok-all', st.progress || '一鍵核定 ' + gs.ok.length + ' 人', () => approveAll(S.all ? g.store : undefined));

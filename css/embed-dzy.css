@@ -47,3 +47,7 @@ body.embed .du-pre.bad b,body.embed .du-actions .btn.du-submit-warn{color:var(--
 body.embed .du-actions .btn.du-submit-warn{border-color:var(--dzy-danger)}
 body.embed .du-pre.warn{background:var(--dzy-warn-light);border-left-color:var(--dzy-warn)}
 body.embed .du-morebtn,body.embed .du-help[aria-expanded="true"]{color:var(--dzy-brand)}
+body.embed .du-verdict.ok{background:var(--dzy-ok-light)}
+body.embed .du-verdict.ok .du-verdict-t,body.embed .du-reqline{color:var(--dzy-ok)}
+body.embed .du-reqline{background:var(--dzy-ok-light)}
+body.embed .du-verdict.gray .du-verdict-t,body.embed .du-need-t{color:var(--dzy-danger)}
