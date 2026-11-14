@@ -103,6 +103,18 @@ export function leavesMatchReqs(day) {
   if (!types.every(t => want[t] > 0 && Math.abs(want[t] - got[t]) < 0.01)) return false;
   return Math.abs(Number(day.approvedHours) - (sumPeriods(day.periods || []).total + tripHoursOfList(day.leaves))) < 0.01;
 }
+// 已核定過的日子，核定內容跟已核准的申請單一致嗎（2026-11-15 Eason：一致就綠框、不顯示「依申請重新填」）：
+// 假別（含出差）依種類加總後時數相同、加班單時段都在核定時段內；有忘打卡單（看不出補的卡對不對）或對不上＝false（照舊黃框）
+export function approvedMatchesReqs(approvedLeaves, approvedPeriods, reqs) {
+  const list = (reqs || []);
+  if (!list.length || list.some(r => r.kind === 'miss')) return false;
+  const sum = ls => (ls || []).reduce((m, x) => { m[x.type] = (m[x.type] || 0) + (x.hours === '' || x.hours == null ? NaN : Number(x.hours)); return m; }, {});
+  const have = sum(approvedLeaves), want = sum(reqLeaveLines(list));
+  const ks = new Set(Object.keys(have).concat(Object.keys(want)));
+  for (const k of ks) if (!(Math.abs((have[k] || 0) - (want[k] || 0)) < 0.01)) return false;
+  const ps = (approvedPeriods || []).filter(p => p && p.start && p.end);
+  return list.filter(r => r.kind === 'ot').every(o => !o.start || !o.end || ps.some(p => p.start <= o.start && p.end >= o.end));
+}
 // manager.html:955–959：假別＋時數的顯示後綴，如「・病假2.5h」
 export function leaveSuffix(type, hours) {
   if (!type) return '';

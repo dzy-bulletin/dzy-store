@@ -986,7 +986,10 @@ function buildCard(emp, date) {
     const otMissing = workOt.filter(o => !((emp.approved && emp.approved.periods) || []).some(p => p && p.start <= o.start && p.end >= o.end));
     if (offDay && offHint && otP.length) offHint.remove();      // 加班申請沒填時段＝帶不進來，提示留著（2026-10-29 Fable 審查）
     if (card.__rbox) card.__rbox.remove();      // 卡片裡核准後重套：換掉舊的那一框
-    const rbox = h('div', 'du-reqbox' + (emp.approved || multi ? ' warn' : ''));
+    // 已核定過、而且核定跟申請單一致（2026-11-15）：綠框寫「核定已跟申請單一致」、不給「依申請重新填」、一開始收起
+    const matched = !!emp.approved && !multi && C.approvedMatchesReqs(initLeaves, emp.approved.periods, reqs);
+    const rbox = h('div', 'du-reqbox' + ((emp.approved && !matched) || multi ? ' warn' : ''));
+    if (matched) rbox.append(h('div', 'du-reqmatch', '✓ 核定已跟申請單一致'));
     card.__rbox = rbox;
     if (multi) rbox.append(h('div', 'du-reqlead', '⚠ 這天有 ' + fillables.length + ' 張已核准的申請，其中有同一種的（多半一張是舊單），系統不自動填：請把舊的或重複的按「作廢」，剩下的會自動填好；或按「依這張填」只填那一張。'));
     const note = h('div', 'du-reqnote'); note.hidden = true;
@@ -1121,12 +1124,12 @@ function buildCard(emp, date) {
       if (readOnly) lockBody();
     }
     const fillable = otP.length > 0 || fillables.length > 0 || otMissing.length > 0;
-    if (!multi && fillable && emp.approved) {
+    if (!multi && fillable && emp.approved && !matched) {
       const b = h('button', 'du-reqfill', '這天已核定過，依申請重新填', { type: 'button' });
       if (readOnly) b.hidden = true;
       b.onclick = () => { fill(fillables); b.remove(); setNote('已依申請填好，確認後按送出核定。'); };
       rbox.insertBefore(b, note);
-    } else if (!multi && fillable) fill(fillables);
+    } else if (!multi && fillable && !emp.approved) fill(fillables);
     periodRows.parentNode.insertBefore(rbox, tag || periodRows);    // 順序：申請說明 → 來自申請 → 時段
     // 已核准的申請收成一行（2026-11-14）：點開才看每張與作廢鈕；有多張同類要主管選、或已核定過要重填的才一開始就打開
     if (card.__rline) card.__rline.remove();
@@ -1137,7 +1140,7 @@ function buildCard(emp, date) {
     rline.append(h('span', null, '✓ 已核准' + kinds + ' ' + reqs.length + ' 張' + (hrs ? '，共 ' + hrs + ' 小時' : '')), h('span', 'du-reqline-more', '明細、作廢 ▸'));
     const openR = on => { rbox.hidden = !on; rline.setAttribute('aria-expanded', on ? 'true' : 'false'); rline.lastChild.textContent = on ? '收起 ▴' : '明細、作廢 ▸'; };
     rline.onclick = () => openR(rbox.hidden);
-    openR(!!(multi || emp.approved || e2eNoCore()));      // 示範模式舊測試（dzystore_core＝0）照舊打開
+    openR(!!(multi || (emp.approved && !matched) || e2eNoCore()));      // 示範模式舊測試（dzystore_core＝0）照舊打開
     rbox.parentNode.insertBefore(rline, rbox);
     card.__rline = rline;
   };
