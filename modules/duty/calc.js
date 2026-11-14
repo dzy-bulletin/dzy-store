@@ -342,7 +342,7 @@ export function compBalanceNote(opts, it) {
 // ---- 核定工時的上下班時間跟班表連動（2026-10-29，docs/duty-shift-from-schedule/requirements.md）----
 // 伺服器在 mgr_day 每人加 plan：{work:true, segs:[{start,end}], shift_name, station} 上班／{work:false, day_type, leave} 休假／null 或沒有＝那天沒排班（退回個人預設 shift_in–shift_out）。
 const PLAN_OFF_TEXT = { R: '例假', H: '排休' };
-const PLAN_LEAVE_TEXT = { '國': '國定', '特': '排特休', '補': '排補休' };
+const PLAN_LEAVE_TEXT = { '國': '國定', '特': '排特休', '補': '排補休', '事': '排事假', '病': '排病假', '婚': '排婚假', '喪': '排喪假', '公': '排公假', '產': '排產假', '陪': '排陪產假', '生': '排生理假', '家': '排家庭照顧假' };      // 對照排班 rules.js LEAVES（2026-11-14：喪假原本顯示成「排休」）
 export function planOffText(plan) {
   if (!plan || plan.work) return '';
   if (plan.away) return '這天排在門市上班（門市那段在門市打卡、由店長核）';      // 總部同仁整天去門市（2026-11-07）

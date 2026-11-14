@@ -303,7 +303,9 @@ function classifyRaw(inp) {
     let periods = null, leaves = [], tag = '';
 
     if (r.kind === 'leave' || r.kind === 'trip') {
-      if (pv.mode !== 'plan') return full('排休或沒班表又有' + (r.kind === 'trip' ? '出差單' : '假單'), '這天不是上班日，要自己核對');
+      // 班表休假日＋沒打卡＋一張整天假單（有時數）：照假單核定，可一鍵（2026-11-14 Eason：許芷瑄排休那天請喪假 8 小時；班表沒有喪假可排，只能排休）
+      const offLeave = pv.mode === 'off' && !emp.plan.away && r.kind === 'leave' && !r.start && Number(r.hours) > 0;
+      if (pv.mode !== 'plan' && !offLeave) return full('排休或沒班表又有' + (r.kind === 'trip' ? '出差單' : '假單'), '這天不是上班日，要自己核對');
       if (r.kind === 'trip' && !(Number(r.hours) > 0)) return full('出差單沒有時數', '整天出差要填時數，到完整頁處理');
       if (r.start) return full('部分時段' + (r.kind === 'trip' ? '出差' : '請假'), '有填時段，要自己核對時數');
       if (segs.length || emp.attempts > 0) return full('有打卡又有' + (r.kind === 'trip' ? '出差單' : '假單'), '整天的單，當天卻有打卡');
