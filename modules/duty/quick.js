@@ -40,6 +40,8 @@ export function renderQuick(ctx) {
   const el = ctx.el;
   const root = h('div', 'dq');
   el.innerHTML = ''; el.append(root);
+  // 打卡 QR 只建一次、面板掛在 el（root 每次重畫會清空）：背景「先檢查」跑完重畫時，主管開給同仁掃的 QR 不會被關掉（2026-11-14）
+  const qrBtn = dutyManager(ctx.session) ? qrButton(el) : null;
   const live = () => el.isConnected;
   const todayNow = () => C.taipeiToday();      // 每次用都重算（頁面開過午夜也不會差一天）
   const skipKey = (date, key) => ((ctx.session && ctx.session.code) || '') + '|' + ((S.meta && S.meta.clockStore) || '') + '|' + date + '|' + key;      // 加店別：同一分頁換店，別家同員編的人不會被跳過
@@ -624,7 +626,7 @@ export function renderQuick(ctx) {
     if (st.showReq) { if (!others.length) root.append(h('div', 'dq-done', '目前沒有其他待審申請')); others.forEach((it) => root.append(otherReqEl(it))); }
 
     const foot = h('div', 'dq-foot');
-    if (dutyManager(ctx.session) && !S.all) foot.append(qrButton(root));
+    if (qrBtn && !S.all) foot.append(qrBtn);
     const fl = h('button', 'dq-fulllink', '完整頁（舊畫面，可依日期查看）', { type: 'button' });
     fl.disabled = st.busy;      // 核定進行中不離開，免得看不到失敗名單
     fl.onclick = () => { if (st.date) S.date = st.date; S.dqFull = true; ctx.rerender(); };
