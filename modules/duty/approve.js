@@ -684,7 +684,7 @@ function buildCard(emp, date) {
     submit.classList.remove('du-submit-warn'); submit.disabled = false;
     verdict.hidden = true; verdict.textContent = ''; verdict.className = 'du-verdict';
     if (!card.__pending) return;
-    if (submit.textContent === '仍要送出') submit.textContent = '送出核定';
+    if (submit.textContent === '仍要送出' || /^確認沒加班/.test(submit.textContent)) submit.textContent = '送出核定';
     const ck = card.__check;
     if (!ck) { setBadge(null, initLeaves); setEdit(true); card.dispatchEvent(new CustomEvent('emp-checked', { bubbles: true })); return; }
     if (e2eNoCore()) {      // 示範模式舊測試：只標右上角、照舊可以送出
@@ -709,11 +709,14 @@ function buildCard(emp, date) {
       ul.append(li); verdict.append(ul);
       verdict.append(h('div', 'du-verdict-n', (canProxy ? '' : '有加班：請同仁在 LINE「加班請假」補申請，核准後這裡會自動重算。') + '沒有加班（例：提早到、晚打卡）：按「自己調」確認後照班表送出 ' + ck.approved_hours + ' 小時，多出的時段不算。'));
       const acts = h('div', 'du-pre-acts');
-      const go = h('button', 'btn du-verdict-go', '核定通過（補齊後才能按）', { type: 'button' }); go.disabled = true;
+      // 只留一條路（2026-11-15 Eason：同一天兩顆核定鈕會混淆）：沒按「自己調」＝灰色「補齊後才能按」；按了「自己調」＝灰色收起，
+      // 下面送出鈕改成「確認沒加班，照班表核定 N 小時」（送出前照舊確認框）
       const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '自己調', { type: 'button' });
-      adj.onclick = () => { setEdit(!editOpen); adj.textContent = editOpen ? '收起' : '自己調'; };
-      acts.append(go, adj); verdict.append(acts);
-      setEdit(editOpen);      // 送出鈕照常可按（主管自己調、看過才送；送出前照舊確認框）
+      adj.onclick = () => { setEdit(!editOpen); card.__setCheck(card.__check); };
+      if (!editOpen) { const go = h('button', 'btn du-verdict-go', '核定通過（補齊後才能按）', { type: 'button' }); go.disabled = true; acts.append(go); }
+      acts.append(adj); verdict.append(acts);
+      setEdit(editOpen);
+      if (editOpen) submit.textContent = '確認沒加班，照班表核定 ' + ck.approved_hours + ' 小時';
     } else if (ck.ok) {
       mini.className = 'du-mini ok'; mini.textContent = '核定通過';
       verdict.className = 'du-verdict ok';
