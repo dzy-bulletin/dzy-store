@@ -323,8 +323,16 @@ export function renderQuick(ctx) {
   const mainAction = (p) => p.actions[0] && p.actions[0].id !== 'full' ? p.actions[0] : { id: 'plan', payload: p.payload };
   async function approveAll(store) {
     if (st.busy) return;
-    const list = secs().ok.filter((p) => typeof store !== 'string' || storeOf(p) === store);
-    if (!list.length) return;
+    const list0 = secs().ok.filter((p) => typeof store !== 'string' || storeOf(p) === store);
+    // 檢查還沒回來就按（2026-11-14）：打卡超出班表＋加班單 30 分鐘以上的人先在這裡擋下（這條打卡系統不會擋），移到異常區
+    const list = list0.filter((p) => {
+      if (U(p.key).pass || e2eNoCore()) return true;
+      const emp = empOf(p.key), core = emp && corePeriods({ segs: emp.segments, plan: emp.plan, reqs: st.appr[p.key] || [], brk: brk(emp.store) });
+      if (!core || core.overMin < OVER_BLOCK_MIN) return true;
+      Object.assign(U(p.key), { failed: '未符合：打卡比班表多 ' + core.overMin + ' 分鐘，沒有加班單（' + core.over.map((x) => x.start + '–' + x.end).join('、') + '）', failedDiff: false, pre: true });
+      return false;
+    });
+    if (!list.length) { recompute(); render(); return; }
     st.busy = true; st.toast = ''; st.failLine = ''; st.progress = '確認最新資料…'; render();
     if (!(await freshEnough(list))) { st.busy = false; st.progress = ''; return render(); }
     let okN = 0, halted = false; const bad = [];
@@ -603,11 +611,11 @@ export function renderQuick(ctx) {
       if (gs.ok.length) {
         const ok = h('div', 'dq-okbox');
         const t = h('div', 'dq-oktop'); t.append(h('b', null, (e2eNoCore() ? '沒問題 ' : '核定通過 ') + gs.ok.length + ' 人'), h('span', 'dq-sub', e2eNoCore() ? '打卡和班表差在 15 分鐘內' : '打卡＋單對得上、已先跟打卡系統檢查'));
-        if (st.checking) t.append(h('span', 'dq-checking', '正在跟打卡系統檢查…'));
+        if (st.checking) t.append(h('span', 'dq-checking', '正在跟打卡系統檢查…可以先按，沒過的會列出原因'));
         ok.append(t, h('div', 'dq-names', gs.ok.map((p) => p.name).join('、')));
         const okb = btn('dq-ok-all', st.progress || '一鍵核定 ' + gs.ok.length + ' 人', () => approveAll(S.all ? g.store : undefined));
         if (st.failed.length) { okb.disabled = true; okb.textContent = '有門市讀不到，先重新載入'; }
-        else if (st.checking && !st.progress) { okb.disabled = true; okb.title = '正在跟打卡系統檢查，幾秒後就可以按'; }      // 字不變，只先停用（檢查完會把會被擋的人移出去）
+        // 檢查中也可以先按（2026-11-14 Eason 選 C）：名單是照打卡＋單先算好的；送出時打卡系統照樣檢查，沒過的人列出原因、回到異常區
         ok.append(okb);
         root.append(ok);
       }
