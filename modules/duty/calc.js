@@ -246,7 +246,8 @@ export function reqQuotaBlock(opts, it) {
 // manager.html:659–673：期限規則（婚假 3 個月內、陪產假前後 15 日內…；與後端 payLeaveWindowCheck 同一套，改這裡兩邊都要改）。
 // 以事件日為基準：婚假＝結婚登記日、陪產假＝分娩日。事件日沒登記就不擋、只提示。
 export function windowCheck(def, events, empId, leaveDate) {
-  if (!def || def.window_days == null) return { ok: true };
+  // 空白、非數字、0 都當沒設期限（2026-11-14：薪資假別表期限格藏空格會讀成 0，沒期限的喪假也被要求登記事件日）
+  if (!def || def.window_days == null || String(def.window_days).trim() === '' || !(Number(def.window_days) > 0)) return { ok: true };
   const ev = ((events && events[empId]) || {})[def.code];
   if (!ev) return { ok: true, note: def.name + ' 有期限規定，但還沒登記事件日，系統無法檢查' };
   const from = addDaysStr(ev, -(Number(def.window_before) || 0));
