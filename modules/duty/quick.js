@@ -49,14 +49,27 @@ export function timelineEl(m, label) {
   const track = h('div', 'tl-track', null, { role: 'img', 'aria-label': label || '時間軸' });
   const W = m.to - m.from, pct = (t) => ((t - m.from) / W * 100).toFixed(2) + '%', wid = (a, b) => ((b - a) / W * 100).toFixed(2) + '%';
   const box = (cls, a, b, title) => { const d = h('div', cls, null, title ? { title } : null); d.style.left = pct(a); d.style.width = wid(a, b); track.append(d); return d; };
-  m.ticks.forEach((t) => { if (t > m.from && t < m.to) { const g = h('div', 'tl-grid'); g.style.left = pct(t); track.append(g); } });
-  m.plan.forEach((s) => box('tl-plan', s.a, s.b, '班表 ' + T.hhmm(s.a) + '–' + T.hhmm(s.b)));
+  const marks = m.planTicks && m.planTicks.length ? m.planTicks : m.ticks.filter((t) => t > m.from && t < m.to);
+  m.plan.forEach((s) => box('tl-plan', s.a, s.b, '班表 ' + T.hhmm(s.a) + '–' + T.hhmm(s.b)));      // 班表時段＝淺色實心底（2026-11-15 不用虛線）
+  marks.forEach((t) => { const g = h('div', 'tl-grid'); g.style.left = pct(t); track.append(g); });
   m.forms.forEach((f) => box('tl-form tl-f-' + f.kind + (f.pending ? ' pend' : ''), f.a, f.b, (f.pending ? '待審 ' : '') + f.label + ' ' + T.hhmm(f.a) + '–' + T.hhmm(f.b)));
   m.punch.forEach((s) => box('tl-punch', s.a, s.b, '打卡 ' + T.hhmm(s.a) + '–' + T.hhmm(s.b)));
   m.open.forEach((x) => { const t = x.a != null ? x.a : x.b; box('tl-dot', t, t, (x.side === 'out' ? '只有上班卡 ' : '只有下班卡 ') + T.hhmm(t)); });
   m.devs.forEach((d) => box('tl-dev tl-' + d.kind, d.a, d.b, TL_KIND[d.kind] + ' ' + T.hhmm(d.a) + '–' + T.hhmm(d.b)));
   const ax = h('div', 'tl-axis');
-  m.ticks.forEach((t) => { const hh = Math.floor(t / 60), x = h('span', null, String(hh > 24 ? hh - 24 : hh).padStart(2, '0')); x.style.left = pct(t); ax.append(x); });      // 24 點寫 24，跨夜之後寫隔天的鐘點
+  // 刻度：有班表標班表起訖（HH:MM），沒有班表標整點；兩個刻度太近就第二個往下一行，不疊字
+  const usePlan = !!(m.planTicks && m.planTicks.length);
+  let lastPct = -100, row = 0;
+  marks.forEach((t) => {
+    const x = (t - m.from) / W * 100;
+    row = x - lastPct < 11 ? 1 - row : 0; lastPct = x;
+    const hh = Math.floor(t / 60);
+    const lab = usePlan ? T.hhmm(t) : String(hh > 24 ? hh - 24 : hh).padStart(2, '0');
+    const sp = h('span', row ? 'tl-ax2' : null, lab); sp.style.left = x.toFixed(2) + '%';
+    if (x < 6) sp.classList.add('tl-axl'); else if (x > 94) sp.classList.add('tl-axr');
+    ax.append(sp);
+  });
+  if (marks.some((t, i) => i && (t - marks[i - 1]) / W * 100 < 11)) ax.classList.add('two');
   wrap.append(track, ax);
   return wrap;
 }
@@ -359,6 +372,9 @@ export function renderQuick(ctx) {
     const prev = btn('dq-navb', '‹ 前一天', () => gotoDate(C.addDaysStr(cur, -1)), { id: 'dqPrev' });
     const next = btn('dq-navb', '後一天 ›', () => gotoDate(C.addDaysStr(cur, 1)), { id: 'dqNext' });
     prev.disabled = off; next.disabled = off || cur >= todayNow();
+    // 手機窄螢幕只留箭頭（「前一天」「後一天」收進 dq-navt，CSS 窄的時候藏起來；讀螢幕照樣念得到）
+    prev.textContent = ''; prev.append(h('span', null, '‹'), h('span', 'dq-navt', ' 前一天')); prev.setAttribute('aria-label', '前一天');
+    next.textContent = ''; next.append(h('span', 'dq-navt', '後一天 '), h('span', null, '›')); next.setAttribute('aria-label', '後一天');
     nav.append(prev);
     const di = h('input', 'dq-date', null, { type: 'date', id: 'dqDate', 'aria-label': '選日期', max: todayNow() });
     di.value = cur; di.disabled = off; di.onchange = () => { if (di.value && di.value <= todayNow()) gotoDate(di.value); };
@@ -689,7 +705,8 @@ export function renderQuick(ctx) {
     const w = h('div', 'dq-tlw');
     w.append(timelineEl(m, p.name + ' ' + (p.planText || '') + ' ' + (p.punchText || '')));
     const t = h('div', 'dq-tltxt');
-    t.append(h('span', null, p.planText || (e.plan && e.plan.work === false ? '排休' : '沒有班表')), h('span', null, p.punchText || (e.segments && e.segments.length ? '打卡 ' + e.segments.map(C.segmentText).join('、') : '沒有打卡')));
+    const pt = p.punchText || (e.segments && e.segments.length ? e.segments.map(C.segmentText).join('、') : '');
+    t.append(h('span', null, p.planText ? '班表 ' + p.planText.replace(/^班表\s*/, '') : (e.plan && e.plan.work === false ? '班表 排休' : '沒有班表')), h('span', null, pt ? '打卡 ' + pt.replace(/^打卡\s*/, '') : '沒有打卡'));      // 兩行都標名稱（2026-11-15 Eason：主管才看得懂）
     w.append(t);
     return w;
   }
@@ -708,6 +725,16 @@ export function renderQuick(ctx) {
     c.append(row);
     if (fineShown(p.key)) { const f = fineEl(p); if (f) c.append(f); }
     return c;
+  }
+  // 時間軸顏色說明（2026-11-15 Eason：「班別的時段要有顏色說明，避免主管看不懂」）
+  function legendEl() {
+    const box = h('div', 'dq-legend', null, { id: 'dqLegend', 'aria-label': '時間軸顏色說明' });
+    [['tl-lg-plan', '班表時段（淺色底，下方標班表時間）'], ['tl-lg-punch', '實際打卡'], ['tl-short', '少做（遲到、早退、沒單的缺勤）'], ['tl-miss', '缺卡'],
+      ['tl-leave', '有假單的缺勤'], ['tl-leavepend', '假單待審'], ['tl-ot', '多做、沒有加班單'], ['tl-otok', '多做、有加班單'],
+      ['tl-lg-pend', '待審的單（紫框）'], ['tl-lg-ot', '加班單時段（橘框）']].forEach(([cls, t]) => {
+      const it = h('span', 'dq-lgi'); it.append(h('i', 'dq-sw ' + cls, null, { 'aria-hidden': 'true' }), h('span', null, t)); box.append(it);
+    });
+    return box;
   }
   function summaryEl(s) {
     const box = h('div', 'dq-sum');
@@ -793,8 +820,11 @@ export function renderQuick(ctx) {
     const seg = h('div', 'dq-mode', null, { role: 'group', 'aria-label': '顯示方式' });
     [['簡潔', false], ['詳細', true]].forEach(([t, d]) => { const b = btn('dq-modeb', t, () => { if (st.detail === d) return; st.detail = d; modePut(d); st.ui && Object.values(st.ui).forEach((u) => { u.fold = false; }); render(); }, { 'aria-pressed': String(st.detail === d), id: d ? 'dqModeDetail' : 'dqModeSimple' }); b.disabled = false; seg.append(b); });
     hr.append(seg, h('div', 'dq-left', st.date && s ? '還剩 ' + s.left + ' 人' : ''));
+    // 2026-11-15 Eason：不要黑底日期標題，前一天／日期／後一天放同一列：一條工具列＝這天（昨天…）＋日期切換＋還剩幾人＋簡潔／詳細；店名上方門市選單已經有，畫面上不再重複（留給讀螢幕的人）
+    hl.className = 'dq-hleft'; hl.querySelector('.dq-store').classList.add('dq-sr');
+    hl.append(navEl());
     head.append(hl, hr);
-    root.append(head, navEl());
+    root.append(head);
     root.append(rejectBar((date) => gotoDate(date)));      // 背景送出被打卡系統退回的（考勤副本，2026-11-14）
     root.append(retEl, pendEl);      // 人資退回、本月待核定提醒（舊畫面搬來，2026-11-15）
     if (st.loading && !stale) { root.append(h('div', 'card du-center', '載入中…', { id: 'dqLoading' })); return; }
@@ -807,6 +837,7 @@ export function renderQuick(ctx) {
 
     if (st.failed.length) failedStores(root, st.failed, load);
     if (st.date && s) root.append(summaryEl(s));
+    if (st.date && s && st.people.length) root.append(legendEl());
     if (st.mirrorAt) root.append(h('div', 'du-mirror-at', '資料更新於 ' + snapLabel(st.mirrorAt) + '・從 Mac mini 讀取', { id: 'dqMirrorAt' }));
     if (st.elsewhere.length) root.append(elsewhereCards(st.elsewhere));
     if (st.toast) root.append(h('div', 'dq-toast', st.toast, { role: 'status' }));

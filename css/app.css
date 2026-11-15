@@ -731,3 +731,38 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
 .du-notcount{display:flex;flex-direction:column;gap:6px;margin-top:6px}
 .du-nc-sel,.du-nc-other{font:inherit;min-height:40px}
 .tl-leavepend{background:repeating-linear-gradient(90deg,#6aa6dc 0 6px,#d7e7f6 6px 10px)}
+/* 嵌在管理系統（2026-11-15 Eason：「像內坎上去，要看起來是一體」）：核定工時新頁跟上方門市選單同寬、靠左；頁首改成管理系統的白底卡片 */
+body.embed .dq{max-width:none;margin:0}
+body.embed .dq-head{background:var(--dzy-card);color:var(--dzy-ink);border:1px solid var(--dzy-line);border-radius:var(--dzy-radius);box-shadow:var(--dzy-shadow)}
+body.embed .dq-store,body.embed .dq-left{color:var(--dzy-muted)}
+body.embed .dq-navb,body.embed .dq-date,body.embed .dq-toggle,body.embed .dq-sumt{border-color:var(--dzy-line);border-radius:var(--dzy-radius)}
+/* 時間軸顏色說明（2026-11-15） */
+.dq-legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px;color:var(--muted);background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 12px}
+.dq-lgi{display:inline-flex;align-items:center;gap:5px}
+.dq-sw{display:inline-block;width:20px;height:10px;border-radius:3px;flex:none}
+.dq-sw.tl-lg-plan{height:12px;border:1.5px dashed #a59b8f;background:transparent}
+.dq-sw.tl-lg-punch{background:#5b6478}
+.dq-sw.tl-lg-pend{height:12px;border:1.5px dashed #7a5bc7;background:transparent}
+.dq-sw.tl-lg-ot{height:12px;border:1.5px dashed #c99a1a;background:transparent}
+body.embed .dq-legend{border-color:var(--dzy-line);border-radius:var(--dzy-radius)}
+/* 一條工具列（2026-11-15 Eason：不要黑底標題、前後一天和日期同一列） */
+.dq-head{background:var(--card);color:var(--black);border:1px solid var(--line);border-bottom:1px solid var(--line);border-radius:12px;padding:8px 12px;flex-wrap:wrap;align-items:center}
+.dq-hleft{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:1;min-width:0}
+.dq-hleft .dq-title{font-size:16px;font-weight:900;white-space:nowrap}
+.dq-hleft .dq-nav{margin-top:0;flex:1;min-width:0;max-width:560px}
+.dq-head .dq-left{color:var(--muted)}
+.dq-head .dq-hright{flex-direction:row;align-items:center;gap:10px}
+.dq-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media (max-width:640px){.dq-hleft .dq-nav{flex-basis:100%;max-width:none}.dq-head .dq-hright{width:100%;justify-content:space-between}}
+@media (max-width:640px){.dq-head .dq-nav{flex-wrap:nowrap}.dq-head .dq-date{flex:1.4;flex-basis:auto;order:0;min-width:0;padding:0 4px}.dq-head .dq-navb{flex:1;min-width:0;padding:0 4px;white-space:nowrap}}
+@media (max-width:640px){.dq-head .dq-navb{flex:none;min-width:44px;padding:0 10px}.dq-head .dq-date{flex:1}}
+@media (max-width:420px){.dq-head .dq-navt{display:none}.dq-head .dq-navb{min-width:48px;font-size:18px}}
+/* 班表時段改淺色實心底、刻度標班表起訖（2026-11-15 Eason） */
+.tl-plan{border:0;border-radius:4px;top:0;bottom:0;background:#e5dccf}
+.tl-axis span{transform:translateX(-50%)}
+.tl-axis span:first-child,.tl-axis span:last-child{transform:translateX(-50%)}
+.tl-axis span.tl-axl{transform:none}
+.tl-axis span.tl-axr{transform:translateX(-100%)}
+.tl-axis.two{height:28px}
+.tl-axis span.tl-ax2{top:13px}
+.dq-sw.tl-lg-plan{border:0;background:#e5dccf}

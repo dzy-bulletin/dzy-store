@@ -1,7 +1,7 @@
 // 出勤核定：管理者的「各店總覽」與門市切換（2026-10-11 Eason：系統管理員看得到所有門市的出勤核定狀況、也能代核）。
 // 總覽每家店一列：本月沒核定幾天、待審申請幾筆、待核准手機幾支（跟首頁待辦同三支查詢）；點數字或「進入」就切到那家店的分頁。
 // 其他分頁上方有門市選單；選了之後每次呼叫都帶 asStore，伺服器照那家店的打卡對照轉送。
-import { S, call, setStore, h, failBar, multiStores, rememberOne, tipText, reqTodo } from './state.js';
+import { S, call, setStore, h, failBar, multiStores, rememberOne, pickedStore, tipText, reqTodo } from './state.js';
 import { ssoSwitch, setSession, toSession } from '../../js/auth.js';
 import { api } from '../../js/api.js';
 
@@ -111,6 +111,7 @@ export function storeBar(ctx) {
 
 // 個人登入、可核的人分布在兩家以上打卡店（2026-10-19）：上方門市選單，最上面「全部門市（N 家）」、預設選它。
 // 選單一門市＝回到原本的單店畫面（目前登入的店直接切；別家店走「換店」換新 token）。回傳放分頁內容的容器。
+const AUTO_TRIED = new Set();      // 這次開頁已經自動切過的店（切不過去就不再試，免得一直重試）
 export function personStoreBar(ctx) {
   const s = ctx.session, list = multiStores(s), el = ctx.el;
   el.innerHTML = '';
@@ -121,16 +122,28 @@ export function personStoreBar(ctx) {
   const opts = list.some(x => x.code === s.code) ? list : [{ code: s.code, name: s.name }, ...list];
   for (const st of opts) sel.append(h('option', null, st.name, { value: st.code }));
   sel.value = S.all ? 'ALL' : s.code;
-  sel.onchange = async () => {
-    if (sel.value === 'ALL') { rememberOne(''); return ctx.rerender(); }
-    if (sel.value === s.code) { rememberOne(s.token); return ctx.rerender(); }
+  // 換到別家店：換新登入、記住選擇，就地重畫（不重新載入：嵌在管理系統時重新載入會帶回預設的店）
+  const switchTo = async (code) => {
     sel.disabled = true;
     try {
-      const d = await ssoSwitch(sel.value);
-      setSession(toSession(d)); rememberOne(d.token);
-      location.reload();
+      const d = await ssoSwitch(code);
+      setSession(toSession(d)); rememberOne(code);
+      ctx.rerender();
     } catch (e) { sel.disabled = false; sel.value = S.all ? 'ALL' : s.code; bar.append(h('div', 'du-fail-msg', '換店失敗：' + ((e && e.message) || '請稍後再試'))); }
   };
+  sel.onchange = () => {
+    if (sel.value === 'ALL') { rememberOne(''); return ctx.rerender(); }
+    if (sel.value === s.code) { rememberOne(s.code); return ctx.rerender(); }
+    switchTo(sel.value);
+  };
+  // 上次選的是別家店、這次登入的是另一家（例：管理系統重新載入帶回預設的店）：自動切過去，每家店這次開頁只試一次
+  const want = !S.all ? pickedStore(s) : '';
+  if (want && want !== s.code && list.some(x => x.code === want) && !AUTO_TRIED.has(want)) {
+    AUTO_TRIED.add(want);
+    sel.value = want;
+    bar.append(h('div', 'du-hint', '切換到上次選的門市中…', { id: 'duStoreAuto' }));
+    switchTo(want);
+  }
   bar.append(sel);
   el.append(bar);
   if (S.all) { const t = h('div', 'du-hint'); t.append(tipText('合併顯示 ' + list.length + ' 家門市', '每位同仁標出打卡地點。打卡 QR、公告、員工名冊、裝置核准、新增同仁這些整店功能，請切到單一門市。')); bar.append(t); }

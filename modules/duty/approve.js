@@ -366,7 +366,7 @@ export function elsewhereCards(list) {
     const err = h('div', 'du-fail-msg');
     btn.onclick = async () => {
       btn.disabled = true; btn.textContent = '切換中…'; err.textContent = '';
-      try { const d = await ssoSwitch(x.store); setSession(toSession(d)); rememberOne(d.token); location.hash = '#/duty/approve'; location.reload(); }
+      try { const d = await ssoSwitch(x.store); setSession(toSession(d)); rememberOne(x.store); location.hash = '#/duty/approve'; location.reload(); }
       catch (e) { btn.disabled = false; btn.textContent = '前往' + x.storeName + '核定'; err.textContent = '換店失敗：' + ((e && e.message) || '請稍後再試'); }
     };
     card.append(nameEl, h('div', 'du-else-hint', '在' + x.storeName + '打卡，工時請到那邊核定'), btn, err);

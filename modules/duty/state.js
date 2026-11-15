@@ -16,14 +16,23 @@ export function reset(key) {
 }
 
 // ---- 全部門市（個人登入、可核的人分布在兩家以上打卡店；2026-10-19）----
-// session.attStores＝伺服器算好的那幾家店（少於兩家是空陣列）。預設進「全部門市」；選了單一門市之後記在 sessionStorage（綁當時的 token，換店會換 token，所以換店時要由換店的程式重記）。
-const ONE_KEY = 'dzystore_dutyone';
+// session.attStores＝伺服器算好的那幾家店（少於兩家是空陣列）。預設進「全部門市」；選了哪一家（或全部）記在這台裝置、綁這個人（person.sub）。
+// 2026-11-15 Eason：原本綁登入 token，嵌在管理系統每次重新載入都換新 token → 一直跳回全部門市。改記「這個人選了哪家店的代號」；
+// 下次打開若登入的不是那家，personStoreBar 會自動切過去（不重新載入頁面，免得管理系統又帶回預設的店）。
+const PICK_KEY = 'dzystore_dutypick';
 export const multiStores = s => (s && s.person && Array.isArray(s.attStores) && s.attStores.length >= 2 ? s.attStores : []);
+function pickOf(s) {
+  try { const v = JSON.parse(localStorage.getItem(PICK_KEY) || 'null'); return v && s && s.person && v.sub === s.person.sub && typeof v.code === 'string' ? v.code : null; } catch (e) { return null; }
+}
 export function allModeOf(s) {
   if (!multiStores(s).length) return false;
-  try { return sessionStorage.getItem(ONE_KEY) !== s.token; } catch (e) { return true; }
+  const c = pickOf(s);
+  return c === null || c === 'ALL';
 }
-export function rememberOne(token) { try { if (token) sessionStorage.setItem(ONE_KEY, token); else sessionStorage.removeItem(ONE_KEY); } catch (e) {} }
+// 選了單一門市（還沒切過去時，回那家店的代號；全部門市或沒選過回空字串）
+export function pickedStore(s) { const c = pickOf(s); return c && c !== 'ALL' ? c : ''; }
+// code＝選定的門市代號；空字串＝全部門市
+export function rememberOne(code) { const s = getSession(); try { localStorage.setItem(PICK_KEY, JSON.stringify({ sub: (s && s.person && s.person.sub) || '', code: code || 'ALL' })); } catch (e) {} }
 // 換模式就整包重來（不同模式的名單、快取、額度不混）
 export function setAll(on) { on = !!on; if (S.all !== on) { reset(S.key); S.all = on; } }
 // 合併各店的讀取：伺服器 /m/duty/all，op＝要讀的單店動作。回應的 failed＝讀不到的店、stores[].meta＝各店休息帶

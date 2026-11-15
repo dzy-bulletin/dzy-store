@@ -123,8 +123,10 @@ export function timelineModel(o) {
 
   // 請假卻有打卡（開工確認第 5 題）：只看已核准的「請假」單（出差本來就可能在店裡打卡，不算），假單時段裡打卡合計 30 分鐘以上
   const leaveOnly = leaveCover.filter((f) => f.kind === 'leave');
+  // 時間軸下方的刻度：有班表就標班表的起訖（2026-11-15 Eason：「班表時段直接取代固定的 08–24」），沒有班表才用整點
+  const planTicks = [...new Set(plan.flatMap((p) => [p.a, p.b]))].sort((x, y) => x - y);
   const leavePunch = punch.length > 0 && leaveOnly.some((f) => len(inter(punch, [f])) >= 30);
-  return { from, to, ticks, plan, punch, open, forms, devs, breaks, leaveAllDay: allDayLeave, leavePunch };
+  return { from, to, ticks, planTicks, plan, punch, open, forms, devs, breaks, leaveAllDay: allDayLeave, leavePunch };
 }
 
 // 異常排序（2026-11-15 開工確認）：缺卡 → 缺勤沒單 → 假單對不上／請假卻打卡 → 單待審 → 加班 → 遲到早退 → 其他。數字小的排前面
