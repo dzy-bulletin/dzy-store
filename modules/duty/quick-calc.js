@@ -193,6 +193,25 @@ export function overshoot(plan, segments) {
   if (s == null || e == null || fi == null || lo == null) return { early: 0, late: 0 };
   return { early: Math.max(0, -norm(fi - s)), late: Math.max(0, norm(lo - e)) };
 }
+/**
+ * 一般核定頁每人那行橘色提醒（approve.js）：comparePlan 的晚到／早退，再加早到、晚走、打卡段數和班表不同（中途離開）。
+ * 跟一頁核定 classify 同一個標準（overshoot、segCountOk、達 15 分鐘就算）。plan＝排班 dayPlan 的一筆（同 comparePlanOf 的形狀）。只提示、不擋（2026-11-15）
+ */
+export function planFlags(plan, segments, opts) {
+  const r = comparePlan(plan, segments, opts);
+  if (!r || !plan || !plan.start || !plan.end) return r;
+  const all = segsOf({ segments }), first = all.find((x) => x.in), open = all.some((x) => x.in && !x.out);
+  const done = all.filter((x) => x.in && x.out);
+  const s = hm(plan.start), e = hm(plan.end), fi = first ? hm(first.in) : null;
+  const flags = r.flags.slice(), has = (re) => flags.some((f) => re.test(f));
+  if (s != null && fi != null && !has(/晚到/)) { const early = -norm(fi - s); if (early >= THRESHOLD_MIN) flags.push('早到 ' + early + ' 分'); }
+  if (!open && done.length && e != null && !has(/早退/)) { const lo = hm(done[done.length - 1].out), late = lo == null ? 0 : norm(lo - e); if (late >= THRESHOLD_MIN) flags.push('晚走 ' + late + ' 分'); }
+  const ps = Array.isArray(plan.segs) && plan.segs.length >= 2 ? plan.segs.map((x) => ({ start: x[0], end: x[1] })) : [{ start: plan.start, end: plan.end }];
+  if (!open && done.length && done.length === all.length && !has(/沒打卡/) && !segCountOk({ work: true, segs: ps }, done, opts && opts.brk)) flags.push('打卡 ' + done.length + ' 段、班表 ' + ps.length + ' 段');
+  return { text: r.text, flags };
+}
+/** 一頁核定卡片的紅字：這張卡任何一顆按鈕會核定超過單日上限（照實核定、只提示；同一般核定頁 approve.js 的 du-total-over） */
+export const overText = (p) => (p && p.over ? '超過一天 ' + C.DAY_MAX_H + ' 小時上限（照實核定，會列進每日通知）' : '');
 
 // ---- 假別額度／期限（同 approve.js 送出前的硬擋；回字串＝擋下或要確認的原因，'' ＝可以）----
 export function leaveProblem(LO, empId, leaves, date) {
@@ -479,10 +498,11 @@ export function classify(inp) {
     const gaps = sends.map((x) => C.ft8Summary(inp.emp, C.sumPeriods((x.periods || []).map((p) => ({ start: p.start, end: p.end }))).total, x.leaves)).filter((f) => f && f.gap);
     if (gaps.length) {
       const g = gaps[0];
-      return Object.assign(res, { status: 'abnormal', tag: '正職未滿 8 小時', note: '上班 ' + g.work + '＋出差 ' + g.trip + '＋假單 ' + g.leave + '＝' + g.sum + ' 小時，還差 ' + g.gap + ' 小時，要有已核准的假單或補休單', chk: '', hours: null, payload: null,
+      return Object.assign(res, { over: false, status: 'abnormal', tag: '正職未滿 8 小時', note: '上班 ' + g.work + '＋出差 ' + g.trip + '＋假單 ' + g.leave + '＝' + g.sum + ' 小時，還差 ' + g.gap + ' 小時，要有已核准的假單或補休單', chk: '', hours: null, payload: null,
         actions: [{ id: 'full', label: '到完整頁核對', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
     }
   }
+  if ((res.status === 'ok' || res.status === 'abnormal') && hs.some((h) => C.overDay(h))) res.over = true;      // 超過單日 10 小時：照實核定、卡片標紅（需求 2；2026-11-15）
   return res;
 }
 

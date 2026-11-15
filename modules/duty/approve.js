@@ -7,7 +7,7 @@ import { corePeriods, OVER_BLOCK_MIN } from './core-calc.js';
 import * as C from './calc.js';
 import { qrButton } from './qr.js';
 import { api } from '../../js/api.js';
-import { comparePlan } from '../schedule/compare.js';
+import { planFlags } from './quick-calc.js';
 import { ssoSwitch, setSession, toSession } from '../../js/auth.js';
 import { quickWanted, quickAvailable, renderQuick, backBar, e2eNoCore } from './quick.js';
 import { canBg, watchJob, refreshJobs, rejectBar } from './bg.js';
@@ -203,7 +203,7 @@ export function renderApprove(ctx) {
       const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);   // 台北今天
       box.querySelectorAll('.du-card').forEach(card => {
         if (card.dataset.store) return;      // 總部併組進來的別家：dayPlan 只有本店班表，比對會誤標「沒排班卻有打卡」（班表已由 mgr_day 帶在姓名旁）
-        const r = comparePlan(res.plan[card.dataset.empId], card.__segments, { past: date <= today, brk: brk(card.dataset.store) });
+        const r = planFlags(res.plan[card.dataset.empId], card.__segments, { past: date <= today, brk: brk(card.dataset.store) });
         if (!r || !card.__showPlan) return;
         card.__showPlan(r);
       });
@@ -596,7 +596,7 @@ function buildCard(emp, date) {
     if (filled || th) {
       const val = h('span', 'du-total-val', String(C.round2(total + th)));
       totalBox.append(h('span', 'du-total-lb', '核定時數'), val, h('span', 'du-total-unit', th ? '小時（上班 ' + C.round2(total) + '＋出差 ' + th + '）' : '小時'));
-      const over = total + th > C.DAY_MAX_H;        // 照實核定、只標紅（光復每天 09:00 列進通知匣）
+      const over = C.overDay(total + th);        // 照實核定、只標紅（光復每天 09:00 列進通知匣）
       totalBox.classList.toggle('over', over);
       if (over) totalBox.append(h('div', 'du-total-over', '超過一天 ' + C.DAY_MAX_H + ' 小時上限（照實核定，會列進每日通知）'));
       const cw = C.contBreakWarn(rows);             // 連續 4 小時沒休 30 分（2026-11-06）：黃字、不擋
@@ -909,7 +909,7 @@ function buildCard(emp, date) {
       if (hasOpenSeg) warnings.push('・這天有打卡段還沒打下班卡，現在核定可能會核不到那一段，且之後補打卡不會自動重算——請同仁立即打卡避免忘刷卡。');
       let msg = '即將核定 ' + emp.name + '：\n' + segs.map(s => s.start + '–' + s.end).join('、')
         + (t2 ? '\n上班 ' + totalH + ' 小時＋出差 ' + t2 + ' 小時\n核定時數共 ' + C.round2(totalH + t2) + ' 小時' : '\n核定時數共 ' + totalH + ' 小時');
-      if (totalH + t2 > C.DAY_MAX_H) msg += '\n⚠ 超過一天 ' + C.DAY_MAX_H + ' 小時上限（照實核定，會列進每日通知）';
+      if (C.overDay(totalH + t2)) msg += '\n⚠ 超過一天 ' + C.DAY_MAX_H + ' 小時上限（照實核定，會列進每日通知）';
       const cw2 = C.contBreakWarn(periods);
       if (cw2) msg += '\n⚠ ' + C.contBreakText(cw2);
       const dupLine = C.dupConfirmLine(dupGroups, dupPicks);

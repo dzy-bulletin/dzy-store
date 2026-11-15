@@ -140,6 +140,18 @@ export function sumPeriods(rows) {
   return { total, filled };
 }
 export const round2 = n => Math.round(n * 100) / 100;
+/**
+ * 只看名單（session.dutyView／attStores[].view）下，這一列能不能寫。kind：'hours' 核定工時、'req' 申請審核。
+ * 伺服器的寫入永遠只看工時名單／申請名單（proxy/duty.js），店長、人資主管、管理員也一樣；v.all 只多放行「姓名對不到編號」的列。
+ * 沒有 v＝伺服器沒給只看資訊，維持原行為（都可寫，伺服器照舊擋）。（2026-11-15：原本 v.all 一律當可寫，店長名下只看的人畫面出現送出鈕、按了才 403）
+ */
+export function viewCanWrite(v, kind, empId) {
+  if (!v) return true;
+  const id = String(empId == null ? '' : empId), list = kind === 'req' ? v.req : v.hours;
+  if (!id) return !!v.all;
+  return Array.isArray(list) && list.indexOf(id) >= 0;
+}
+export const overDay = h => round2(h) > 10;   // 超過單日上限才標紅：先取到小數兩位再比，三段相加的浮點誤差不會把剛好 10 小時標紅（2026-11-15）
 export const DAY_MAX_H = 10;   // 單日上限（2026-11-01 Eason）：照實核定、超過標紅；與打卡 Rest.gs、排班 rules.js 同一個數字
 // 連續工作 4 小時要休息 30 分鐘（勞基法 §35；2026-11-06 Eason：核定頁黃字提醒、不擋）。與打卡 manager.html contBreakWarn 同一套：
 // 時段照開始排序，中間空檔不到 30 分鐘就當接著上；接起來超過 4 小時的第一塊 → {start, end, h}，沒有回 null。

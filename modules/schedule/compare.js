@@ -25,8 +25,13 @@ export function comparePlan(plan, segments, opts) {
   const s = toMin(plan.start);
   let e = toMin(plan.end);
   if (e !== null && s !== null && e <= s) e += 1440;
-  let firstIn = toMin((segs.find((x) => x.in) || {}).in);
+  const firstSeg = segs.find((x) => x.in) || {};
+  let firstIn = toMin(firstSeg.in);
   if (firstIn !== null && s !== null && e > 1440 && firstIn < s && firstIn < e - 1440) firstIn += 1440;   // 跨夜班凌晨才到：打卡時間換到隔天，才算得出晚到（2026-10-11 Codex 審查）
+  else if (firstIn !== null && s !== null && firstIn - s >= 720) {   // 凌晨開始的班、前一天晚上就到（例：班 00:00、23:50 打卡跨過午夜到下班）：是提早到，不是晚到 1430 分（2026-11-15）
+    const fo = toMin(firstSeg.out);
+    if (fo !== null && fo < firstIn && fo > s) firstIn -= 1440;
+  }
   const lastOutRaw = toMin((segs.slice().reverse().find((x) => x.out) || {}).out);
   if (firstIn !== null && s !== null && firstIn - s >= THRESHOLD_MIN) flags.push(`晚到 ${firstIn - s} 分`);
   const stillIn = segs.some((x) => x.in && !x.out);   // 還沒打下班卡＝當作還在、不算早退（同分段班 compareSegs；2026-10-29 光復：19:56 回來上班卻被拿 19:27 比成早退 243 分）
@@ -37,7 +42,8 @@ export function comparePlan(plan, segments, opts) {
   return { text, flags };
 }
 
-const CN = ['一', '二', '三'];
+const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];   // 分段班段名；超過十段用數字（2026-11-15：原本只到三，四段班標成「第undefined段」）
+const segName = (k) => '第' + (CN[k] || String(k + 1)) + '段';
 /** 分段班：每段各比一次上班、下班（Eason 2026-10-27 第 3 題）。打卡段跟班表哪一段重疊就算那一段的；
  *  一筆打卡跨過兩段（中間沒打下班卡）提醒「中間沒打卡離開」；中間空檔剛好是這家店的不打卡休息時段（brk，央廚 12–13、總部 14–15）就不提醒（2026-11-03 Eason）。 */
 function compareSegs(planSegs, punches, past, brk) {
@@ -56,7 +62,7 @@ function compareSegs(planSegs, punches, past, brk) {
   const flags = [];
   P.forEach(([a, b], k) => {
     const mine = I.filter(([i, o]) => (i === null ? o > a && o <= b + 240 : i < b && (o === null ? now : o) > a));
-    const name = '第' + CN[k] + '段';
+    const name = segName(k);
     if (!mine.length) { if (past) flags.push(name + '沒打卡'); return; }
     const ins = mine.map((x) => x[0]).filter((x) => x !== null), outs = mine.map((x) => x[1]).filter((x) => x !== null);
     if (ins.length) { const fi = Math.min(...ins); if (fi - a >= THRESHOLD_MIN) flags.push(`${name}晚到 ${fi - a} 分`); }
@@ -65,7 +71,7 @@ function compareSegs(planSegs, punches, past, brk) {
   for (let k = 0; k + 1 < P.length; k++) {
     const gapA = P[k][1], gapB = P[k + 1][0];
     if (brk && toMin(brk.start) !== null && gapA % 1440 === toMin(brk.start) && gapB % 1440 === toMin(brk.end)) continue;
-    if (I.some(([i, o]) => i !== null && o !== null && i < gapA && o > gapB)) flags.push(`第${CN[k]}段和第${CN[k + 1]}段中間沒打卡離開`);
+    if (I.some(([i, o]) => i !== null && o !== null && i < gapA && o > gapB)) flags.push(`${segName(k)}和${segName(k + 1)}中間沒打卡離開`);
   }
   return flags;
 }

@@ -485,6 +485,7 @@ export function renderQuick(ctx) {
     const grid = h('div', 'dq-grid');
     [line('班表', p.planText), line('打卡', p.punchText, 'dq-b'), line('申請', p.note), line('比對', p.chk, 'dq-chk')].forEach((x) => { if (x) grid.append(...x); });
     c.append(top, grid);
+    if (Q.overText(p)) c.append(h('div', 'du-total-over dq-over', Q.overText(p)));      // 超過單日 10 小時：紅字、不擋（2026-11-15）
     const pend = st.pending.filter((it) => it.date === st.date && Q.keyOf(it) === p.key && !st.handled.has(hid(it)) && it.attach_id && Q.reqDecidable(it, canWriteRow));      // 不能審的單（含自己的）伺服器不給看附件，同 request.js
     pend.forEach((it) => c.append(attachEl(it)));
     if (u.proxied) c.append(h('div', 'dq-info', '已代開：' + u.proxied + '。等總監層級在「申請審核」核准後，再回來核定。'));

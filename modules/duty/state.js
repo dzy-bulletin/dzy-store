@@ -2,6 +2,7 @@
 import { api } from '../../js/api.js';
 import { getSession } from '../../js/auth.js';
 import { reqDecidable } from './quick-calc.js';
+import { viewCanWrite } from './calc.js';
 
 const FLAG = 'dzystore_dutyok';
 // 管理者（2026-10-11 Eason：看得到所有門市、也能代核）：asStore＝正在看的門市代號，每次呼叫自動帶上；stores＝各店總覽讀到的門市清單。
@@ -195,9 +196,7 @@ export function viewOf(s, store) {
 }
 // kind：'hours'＝核定工時、'req'＝申請審核
 export function canWriteRow(kind, empId, store) {
-  const v = viewOf(getSession(), store);
-  if (!v || v.all) return true;
-  return (kind === 'req' ? v.req : v.hours).indexOf(String(empId)) >= 0;
+  return viewCanWrite(viewOf(getSession(), store), kind, empId);      // 規則在 calc.js（純函式，假後端 mock.js 共用）
 }
 // 考勤作廢 att.void（2026-11-13，docs/att-void-hr）：這個人在這家店能作廢他已核准的申請（dutyView.void）；每張單能不能作廢仍看伺服器的 void_ok
 export function canVoidRow(empId, store) {

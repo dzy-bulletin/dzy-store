@@ -1,7 +1,7 @@
 // 出勤核定：管理者的「各店總覽」與門市切換（2026-10-11 Eason：系統管理員看得到所有門市的出勤核定狀況、也能代核）。
 // 總覽每家店一列：本月沒核定幾天、待審申請幾筆、待核准手機幾支（跟首頁待辦同三支查詢）；點數字或「進入」就切到那家店的分頁。
 // 其他分頁上方有門市選單；選了之後每次呼叫都帶 asStore，伺服器照那家店的打卡對照轉送。
-import { S, call, setStore, h, failBar, multiStores, rememberOne, tipText } from './state.js';
+import { S, call, setStore, h, failBar, multiStores, rememberOne, tipText, reqTodo } from './state.js';
 import { ssoSwitch, setSession, toSession } from '../../js/auth.js';
 import { api } from '../../js/api.js';
 
@@ -11,9 +11,9 @@ function loadStores() {
   return call('admin_stores').then(r => { const list = Array.isArray(r && r.stores) ? r.stores : []; if (S.key === k) S.stores = list; return list; });
 }
 
-const COLS = [
+export const COLS = [
   { k: 'approve', label: '本月沒核定', unit: '天', action: 'mgr_pending_approvals', count: r => (Array.isArray(r && r.items) ? new Set(r.items.map(x => x && x.date)).size : null) },
-  { k: 'request', label: '待審申請', unit: '筆', action: 'mgr_req_pending', count: r => (Array.isArray(r && r.items) ? r.items.filter(it => !(it && (it.self === true || it.hours_only === true))).length : null) },
+  { k: 'request', label: '待審申請', unit: '筆', action: 'mgr_req_pending', count: r => (Array.isArray(r && r.items) ? reqTodo(r.items).length : null) },      // 跟進店後「申請審核」分頁的徽章同一個算法（只算按得下去的；本人自己送的 self、只給最小列的 hours_only 不算；2026-11-15：原本連代開審核中的也算，總覽 6 筆、進店 4 筆）
   { k: 'device', label: '待核准手機', unit: '支', action: 'mgr_pending_devices', count: r => (Array.isArray(r && r.pending) ? r.pending.length : null) },
 ];
 
