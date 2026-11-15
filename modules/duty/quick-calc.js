@@ -155,6 +155,21 @@ export function segLag(planSegs, segments) {
   });
   return r;
 }
+/**
+ * 打卡比班表晚到、早退達 15 分鐘的分鐘數與字樣（tags：['遲到 20 分', '早退 15 分']；沒有就空陣列）。
+ * 門檻不另外寫：用完整頁同一個 comparePlan（schedule/compare.js THRESHOLD_MIN），再用 lag／segLag 算一次、兩邊取大的。
+ * 有異常卡片的標籤、「核定通過」名單上的橘色提醒都用這一份（2026-11-15 考勤驗收 B2-2b-4）。
+ */
+export function lateEarlyOf(emp, br) {
+  const plan = comparePlanOf(emp && emp.plan), segs = segsOf(emp);
+  if (!plan || !segs.length) return { late: 0, early: 0, tags: [] };
+  const cp = comparePlan(plan, emp.segments, { past: true, brk: br });
+  const fl = parseFlags(cp ? cp.flags : []);
+  const n = emp.plan.segs.length;
+  const lg = n >= 2 && segs.length === n ? segLag(emp.plan.segs, segs) : lag(plan, segs);
+  const late = Math.max(fl.late, lg.late >= THRESHOLD_MIN ? lg.late : 0), early = Math.max(fl.early, lg.early >= THRESHOLD_MIN ? lg.early : 0);      // 達 15 分鐘就算（compare.js 2026-11-10 起同一個標準）
+  return { late, early, tags: [late ? '遲到 ' + late + ' 分' : '', early ? '早退 ' + early + ' 分' : ''].filter(Boolean) };
+}
 /** 申請時段裡有幾分鐘沒被打卡涵蓋（休息帶不算） */
 export function uncoveredMin(rs, re, segs, br) {
   const len = (((re - rs) % 1440) + 1440) % 1440;
@@ -428,11 +443,11 @@ function classifyRaw(inp) {
   const punchAct = (primary) => ({ id: 'punch', label: '照打卡 ' + fmtH(punchHours) + ' 小時', primary, hours: punchHours, payload: punchPayload, askReason: false });
 
   const lg = nPlanSegs >= 2 && segs.length === nPlanSegs ? segLag(emp.plan.segs, segs) : lag(comparePlanOf(emp.plan), segs);
-  const lateV = Math.max(fl.late, lg.late >= THRESHOLD_MIN ? lg.late : 0), earlyV = Math.max(fl.early, lg.early >= THRESHOLD_MIN ? lg.early : 0);      // 達 15 分鐘就算（compare.js 2026-11-10 起同一個標準；這裡另外用 lag／segLag 再算一次，兩邊取大的）
+  const le = lateEarlyOf(emp, br), lateV = le.late, earlyV = le.early;      // 達 15 分鐘就算（compare.js 2026-11-10 起同一個標準；另外用 lag／segLag 再算一次，兩邊取大的）
   if (lateV || earlyV) {
     if (planHours > OK_MAX_H) return full('班表超過 ' + OK_MAX_H + ' 小時', '有遲到早退，要自己核對');
     if (punchHours > OK_MAX_H) return full('打卡超過 ' + OK_MAX_H + ' 小時', '打卡 ' + fmtH(punchHours) + ' 小時，沒有加班單');
-    const tag = [lateV ? '遲到 ' + lateV + ' 分' : '', earlyV ? '早退 ' + earlyV + ' 分' : ''].filter(Boolean).join('、');
+    const tag = le.tags.join('、');
     // 核定一定照班表：打卡和核定時段比才標得出遲到早退分鐘，薪資與績效靠這個（改成打卡取整會變成沒遲到，2026-11-10 Eason）
     return Object.assign(base, { status: 'abnormal', tag, chk: '遲到早退的分鐘由薪資照扣', hours: planHours, payload: planPayload, actions: [planAct(true), fullAct] });
   }

@@ -582,6 +582,8 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
 .dq-oktop b{font-size:18px;font-weight:900;color:var(--ok)}
 .dq-sub{font-size:12.5px;color:var(--muted)}
 .dq-names{font-size:15px;overflow-wrap:anywhere}
+.dq-nm.warn{color:#b26a00;font-weight:700}
+.dq-warn{display:inline-block;margin-left:4px;padding:0 6px;border-radius:10px;background:#fff3e0;color:#b26a00;font-weight:700;font-size:11px}
 .dq-ok-all{font:inherit;height:58px;border:0;border-radius:12px;background:var(--red);color:#fff;font-size:18px;font-weight:900;cursor:pointer}
 .dq-ok-all:disabled{opacity:.65;cursor:default}
 .dq-sec{font-size:15px;font-weight:900;color:var(--red);padding:4px 2px 0}

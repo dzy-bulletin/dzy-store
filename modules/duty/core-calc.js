@@ -46,10 +46,9 @@ export function corePeriods(o) {
   const plan = o.plan && o.plan.work && Array.isArray(o.plan.segs) ? o.plan.segs : [];
   const S = merge(plan.map((x) => span(toMin(x.start), toMin(x.end))));
   const reqs = Array.isArray(o.reqs) ? o.reqs : [];
-  const OT = merge(reqs.filter((r) => r.kind === 'ot').map((r) => span(toMin(r.start), toMin(r.end))));
+  const otRaw = reqs.filter((r) => r.kind === 'ot').map((r) => span(toMin(r.start), toMin(r.end)));
   const brkS = toMin(o.brk && o.brk.start), brkE = toMin(o.brk && o.brk.end);
   const BRK = brkS != null && brkE != null && brkE > brkS ? [[brkS, brkE]] : [];
-  const bounds = [].concat(...S, ...OT, ...BRK);
   const notes = [];
 
   // 1. 打卡段（忘打卡單補上缺的那張；補的時間超出班表的部分不算，見下面交集）
@@ -78,6 +77,11 @@ export function corePeriods(o) {
     W = S.map((x) => x.slice());                                 // 沒打卡但有班：照班表（打卡端回要忘打卡單）
   }
   const Wraw = W.map((x) => x.slice());
+  // 跨夜班之後接續的加班單（例：班表 22:00–06:00、加班單 06:00–08:00）：單上只有時鐘時間，其實是隔天早上 → 換到跨日後的時間再比。
+  // 只搬「當天那個時間沒有打卡對到、加一天後落在這天班表或打卡的範圍內（差 15 分內算接得上）」的單；其他照舊（2026-11-15 考勤驗收 C6-6）
+  const dayEnd = Math.max(...Wraw.concat(S).map((x) => x[1]));
+  const OT = merge(otRaw.map((x) => (x && dayEnd > 1440 && x[1] <= 1440 && x[0] + 1440 <= dayEnd + TOL && !total(intersect([x], Wraw)) ? [x[0] + 1440, x[1] + 1440] : x)));
+  const bounds = [].concat(...S, ...OT, ...BRK);
   W = merge(W.map(([a, b]) => [snapIn(a, bounds), snapOut(b, bounds)]));
 
   // 2. 上限＝班表＋已核准加班單；都沒有（排休、沒排班又沒加班單）就照打卡（打卡端回要加班單）

@@ -77,6 +77,8 @@ export function renderQuick(ctx) {
     } else if (u.need && !e2eNoCore() && p.status === 'abnormal') {      // 不會過：寫出要補齊的單，不再給「選原因」（2026-11-14 不再靠寫原因放行）
       Object.assign(p, { tag: '未符合', note: '要補齊：' + u.need, actions: [{ id: 'full', label: '到完整頁補單', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
     }
+    // 列進「核定通過」的人：打卡比班表晚到、早退達 15 分鐘，名單上標橘色「遲到 N 分／早退 N 分」（只提醒不擋，同完整頁的橘色標籤；2026-11-15 考勤驗收 B2-2b-4）
+    if (p.status === 'ok') p.warn = Q.lateEarlyOf(emp, brk(emp.store)).tags;
     return p;
   }
   function classifyOne(emp) { return classifyAt(emp, st.date, st.appr, U(Q.keyOf(emp))); }
@@ -613,7 +615,14 @@ export function renderQuick(ctx) {
         const ok = h('div', 'dq-okbox');
         const t = h('div', 'dq-oktop'); t.append(h('b', null, (e2eNoCore() ? '沒問題 ' : '核定通過 ') + gs.ok.length + ' 人'), h('span', 'dq-sub', e2eNoCore() ? '打卡和班表差在 15 分鐘內' : '打卡＋單對得上、已先跟打卡系統檢查'));
         if (st.checking) t.append(h('span', 'dq-checking', '正在跟打卡系統檢查…可以先按，沒過的會列出原因'));
-        ok.append(t, h('div', 'dq-names', gs.ok.map((p) => p.name).join('、')));
+        const names = h('div', 'dq-names');
+        gs.ok.forEach((p, i) => {
+          if (i) names.append('、');
+          const w = p.warn || [], nm = h('span', 'dq-nm' + (w.length ? ' warn' : ''), p.name);
+          w.forEach((x) => nm.append(h('span', 'dq-warn', x)));
+          names.append(nm);
+        });
+        ok.append(t, names);
         const okb = btn('dq-ok-all', st.progress || '一鍵核定 ' + gs.ok.length + ' 人', () => approveAll(S.all ? g.store : undefined));
         if (st.failed.length) { okb.disabled = true; okb.textContent = '有門市讀不到，先重新載入'; }
         // 檢查中也可以先按（2026-11-14 Eason 選 C）：名單是照打卡＋單先算好的；送出時打卡系統照樣檢查，沒過的人列出原因、回到異常區
