@@ -278,6 +278,8 @@ function classifyRaw(inp) {
   const reqs = inp.reqs || [];
   const key = keyOf(emp);
   const base = { key, name: emp.name, empId: emp.emp_id, store: emp.store || '', date, status: '', tag: '', planText: '', punchText: '', note: '', chk: '', hours: null, payload: null, actions: [], skipped: !!skipped, reqId: null };
+  const pv = C.planPrefill(emp, emp.plan, brk);
+  base.planText = pv.mode === 'plan' ? pv.text.replace(/^班表 /, '') : (pv.text || '沒有班表');      // 已核定的人也要寫班表（2026-11-16：原本在已核定分支之後才算，已核定卡片時間軸有班表、文字卻寫「沒有班表」）
   if (emp.approved) {
     const otLate = canHours ? reqs.filter((r) => r.kind === 'ot' && !r.pending && r.start && r.end && !periodsCover(emp.approved.periods, r)) : [];
     if (otLate.length) return Object.assign(base, { status: 'abnormal', tag: '已核定過，加班單沒算進去', note: '核定後才核准的加班單，要重新核定', actions: [{ id: 'full', label: '到完整頁核對', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
@@ -285,11 +287,9 @@ function classifyRaw(inp) {
     return Object.assign(base, { status: 'done', hours: Number(emp.approved.approved_hours) });
   }
 
-  const pv = C.planPrefill(emp, emp.plan, brk);
   const segs = segsOf(emp);
   const hasPunch = !!(emp.segments && emp.segments.length) || emp.attempts > 0;
   const absent = !hasPunch && pv.mode !== 'plan';
-  base.planText = pv.mode === 'plan' ? pv.text.replace(/^班表 /, '') : (pv.text || '沒有班表');
   if (pv.mode === 'plan' && emp.plan && (emp.plan.day_type === 'H' || emp.plan.day_type === 'R')) base.planText += '（' + (emp.plan.day_type === 'R' ? '例假出勤' : '休息日加班') + '：整天算加班，要有加班單）';      // 2026-11-15 Eason
   base.punchText = segs.length ? segs.map(C.segmentText).join('、') : (emp.attempts > 0 ? '沒有入帳的打卡' : '沒有打卡');
   if (absent && !reqs.length) return Object.assign(base, { status: 'absent' });
