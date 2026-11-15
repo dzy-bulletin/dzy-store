@@ -77,7 +77,8 @@ function buildBatchBar(card, title) {
     if (!els.length) { if (skipNote) { msg.className = 'du-rq-msg bad'; msg.textContent = '✕ ' + skipNote; syncBatch(card); } return; }
     if (els.length > REQ_BATCH_MAX) { msg.className = 'du-rq-msg bad'; msg.textContent = '一次最多核准 ' + REQ_BATCH_MAX + ' 筆，請少勾幾筆'; return; }
     const list = els.map(el => '・' + (el.__req.storeName ? el.__req.storeName + ' ' : '') + el.__req.name + '：' + el.__req.summary).join('\n');
-    if (!await confirmBox('核准以下 ' + els.length + ' 筆申請？\n' + list + '\n\n核准後，那幾天的核定會先幫你填好，你核定那天時確認送出才算數。', '核准 ' + els.length + ' 筆')) return;
+    const elseL = els.filter(el => elsewhereText(el.__req)).map(el => '・' + elsewhereText(el.__req));
+    if (!await confirmBox('核准以下 ' + els.length + ' 筆申請？\n' + list + (elseL.length ? '\n\n⚠ 其中有這天沒在本店打卡的（可能送錯店）：\n' + elseL.join('\n') : '') + '\n\n核准後，那幾天的核定會先幫你填好，你核定那天時確認送出才算數。', '核准 ' + els.length + ' 筆')) return;
     btn.disabled = all.disabled = true; msg.className = 'du-rq-msg'; msg.textContent = '送出中…';
     // 跨店時依店分批（每批一次 mgr_req_decide_batch，帶那一批的店）；任一批沒通過只影響那一批，結果逐店回報
     const groups = new Map();
@@ -126,7 +127,9 @@ function buildMine(it) {
 }
 // 打卡端 upper_kind（2026-10-29）：mgr＝值班主管本人；dept＝總部同仁在門市（申請照原身分）；home＝不算本店支援。舊打卡後端沒有這欄＝值班主管本人
 function upperIsDept(it) { return it.upper_kind === 'dept' || it.upper_kind === 'home'; }
-function upperLabel(it) { return it.upper_kind === 'director' || it.proxy_by ? proxyLabel(it) : upperIsDept(it) ? '部門同仁' : '值班主管本人'; }
+function upperLabel(it) { return it.upper_kind === 'director' || it.proxy_by ? proxyLabel(it) : upperIsDept(it) ? '支援同仁' : '值班主管本人'; }      // 2026-11-15：原寫「部門同仁」，11/4 起是所有支援的同仁
+// 這天在別家打卡（伺服器 markElsewhere 附 elsewhere）：本店那天沒打卡、別家有 → 紅字提醒、核准前再確認（2026-11-15）
+function elsewhereText(it) { return it && Array.isArray(it.elsewhere) && it.elsewhere.length ? it.name + ' 這天沒有在本店打卡，在' + it.elsewhere.map(x => x.store + '（' + x.punch + '）').join('、') + '打卡。這張可能送錯店，要送到打卡那家才對' : ''; }
 // 代開標籤顯示代開人姓名（2026-11-14 Eason：不顯示職稱）：proxy_by 是「姓名（工號）」，只取姓名；舊資料沒有才退回「主管代開」
 function proxyLabel(it) { const n = String(it.proxy_by || '').replace(/（[^（）]*）\s*$/, '').trim(); return (n || '主管') + '代開'; }
 
@@ -147,6 +150,8 @@ function buildItem(it, card, title, onDone) {
   el.append(l1, h('div', 'du-rq-l2', it.summary + (it.reason ? '\n原因：' + it.reason : '') + compBalanceNote(leaveFor(it.store), it) + '\n送出：' + tsLabel(it.created_at)));
   const ev = punchEvidence(it);
   if (ev) el.append(h('div', 'du-rq-evid', ev));
+  const ew = elsewhereText(it);
+  if (ew) el.append(h('div', 'du-rq-warn du-rq-else', '⚠ ' + ew));
   const wl = reqWarnLines(it);                    // 事假前一天／出差前一週／本月事假第 3 次起／本月第 N 次忘刷（2026-11-06，提醒不擋）
   if (wl.length) el.append(h('div', 'du-rq-warn', wl.map(w => '⚠ ' + w).join('\n') + '（提醒，不影響核准）'));
 
@@ -155,7 +160,7 @@ function buildItem(it, card, title, onDone) {
   const qBlock = canDecide ? reqQuotaBlock(leaveFor(it.store), it) : '';      // 生理假／家庭照顧假額度用完不能核准（2026-11-10 Eason）；事假不擋
   el.__quotaBlock = qBlock;
   if (qBlock) { ok.disabled = true; ok.title = qBlock; acts.append(h('span', 'du-rq-upper du-rq-quota', qBlock)); }
-  if (canDecide) acts.append(ok, no); else acts.append(h('span', 'du-ro', upOn ? (isProxy ? '送總監層級審核中' : upperIsDept(it) ? '部門主管審核中' : '送上層審核中') : '唯讀'));
+  if (canDecide) acts.append(ok, no); else acts.append(h('span', 'du-ro', upOn ? (isProxy ? '送總監層級審核中' : upperIsDept(it) ? '原單位主管審核中' + (it.support_from ? '（' + it.support_from + '）' : '') : '送上層審核中') : '唯讀'));
   if (it.attach_id && canDecide) {
     const at = h('button', 'du-rq-att btn ghost', '看附件', { type: 'button' });
     at.onclick = async () => {
@@ -194,7 +199,7 @@ function buildItem(it, card, title, onDone) {
       }
       if (!reason.value.trim()) return say('bad', '請寫退回理由');
       body.reason = reason.value.trim();
-    } else if (!await confirmBox('核准 ' + it.name + '：' + it.summary + '？\n核准後，那天的核定會先幫你填好，你核定那天時確認送出才算數。', '核准')) return;
+    } else if (!await confirmBox((elsewhereText(it) ? '⚠ ' + elsewhereText(it) + '\n\n確定要在本店核准嗎？\n\n' : '') + '核准 ' + it.name + '：' + it.summary + '？\n核准後，那天的核定會先幫你填好，你核定那天時確認送出才算數。', '核准')) return;
     ok.disabled = no.disabled = true; say('', '送出中…');
     if (it.__mirror) body.bg = true;      // Mac mini 副本讀的清單：先顯示、背景送（2026-11-14），打卡端照樣檢查還是不是待審
     try {

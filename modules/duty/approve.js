@@ -396,6 +396,8 @@ function buildCard(emp, date) {
   const sup = supportTag(emp); if (sup) nameEl.append(sup);      // 支援（原單位）：別單位來這家店支援的同仁
   if (emp.store) nameEl.append(h('span', 'du-where', '打卡地點：' + emp.storeName, { 'data-where': emp.store }));      // 全部門市：這個人在哪一家店打的卡（同一人同一天在多家打卡會依店分列）
   if (pv.text) nameEl.append(h('span', 'du-shift' + (pv.mode === 'off' ? ' off' : ''), pv.text, { 'data-mode': pv.mode }));
+  // 班表排的是休息日（或例假）出勤（2026-11-15 Eason：休假加班要看得出來，主管才不會忘了要加班單）：整天都算加班
+  if (pv.mode === 'plan' && emp.plan && (emp.plan.day_type === 'H' || emp.plan.day_type === 'R')) nameEl.append(h('span', 'du-restot', (emp.plan.day_type === 'R' ? '例假出勤' : '休息日加班') + '・整天算加班，要有加班單'));
   const punchEl = h('div', 'du-punch');
   if (emp.segments && emp.segments.length) {
     const ref = (emp.reference === null || emp.reference === undefined) ? '參考 —' : '參考 ' + emp.reference + ' 小時';   // 忘刷卡整天 reference=null，不可印成 "null"
