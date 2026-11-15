@@ -104,6 +104,8 @@ export function renderQuick(ctx) {
     u = u || {};
     const p = Q.classify({ emp, date, today: todayNow(), nowMin: taipeiMin(), brk: brk(emp.store), LO: leaveFor(emp.store), canHours: canWriteRow('hours', emp.emp_id, emp.store),
       reqs: reqsFor(emp, date, approved), skipped: !!skipGet()[skipKey(date, key)], mismatch: u.mismatch || '', person: !!(ctx.session && ctx.session.person) });
+    // 薪資鎖月（2026-11-15 鎖月後不可再動）：這個月薪資鎖了就列在「現在不能核定」、不給核定鈕，寫清楚要先到薪資頁解鎖（重新載入這天會再問一次）
+    if (u.locked && (p.status === 'ok' || p.status === 'abnormal')) return Object.assign(p, { status: 'blocked', tag: '薪資已鎖定', note: u.locked, actions: [] });
     if (p.status === 'ok' && u.failed) {                      // 一鍵核定沒成功的人、送出前檢查說會被擋的人（u.pre）：回到異常區
       const main = Object.assign({}, p.actions[0] || { id: 'plan', hours: p.hours, payload: p.payload });
       main.primary = true; main.askReason = !!u.failedDiff;
@@ -322,6 +324,7 @@ export function renderQuick(ctx) {
       pairs.forEach(([p, it, core]) => {
         const r = rs.find((x) => x.emp_id === String(it.emp_id));
         if (!r) return;
+        if (r.error === 'pay_locked') { U(p.key).locked = String(r.message || '這個月薪資已鎖定，請先到薪資頁解鎖這個月'); return; }      // 薪資鎖月：不是缺單，不列「要補齊」
         const pay = Object.assign({}, it); delete pay.emp_id;
         // 打卡超出班表＋加班單合計達 30 分鐘（2026-11-14 Eason 選 B）：不放進核定通過，到完整頁補加班單或主管自己調確認
         if (r.ok && core && core.overMin >= OVER_BLOCK_MIN) {
@@ -452,7 +455,8 @@ export function renderQuick(ctx) {
         if (st.date !== date || !emp.approved || emp.approved.queued !== res.job) return;
         if (it.state === 'done') { emp.approved = it.result && it.result.approved_hours !== undefined ? it.result : Object.assign({}, emp.approved, { status_text: '已送出', queued: null }); recompute(); render(); return; }
         emp.approved = null;
-        Object.assign(U(p.key), { failed: '被退回：' + (it.msg || '請重新核定'), failedDiff: /^核定和打卡差/.test(it.msg || '') });      // 要填原因：按鈕改「選原因」，跟前景一樣
+        if (/薪資已鎖定/.test(it.msg || '')) { U(p.key).locked = it.msg; st.toast = ''; }      // 薪資鎖月：背景被退回也照前景，列在「現在不能核定」、不給「再核定一次」；「已核定 N 人」的提示收掉（整個月都送不進去）
+        else Object.assign(U(p.key), { failed: '被退回：' + (it.msg || '請重新核定'), failedDiff: /^核定和打卡差/.test(it.msg || '') });      // 要填原因：按鈕改「選原因」，跟前景一樣
         reconcile().catch(() => {}).then(() => { recompute(); render(); });      // 重讀這天：拿最新的資料（版本）才能重核
       });
     } else emp.approved = res;
@@ -486,7 +490,7 @@ export function renderQuick(ctx) {
           try { await reconcile(); const e2 = empOf(p.key); if (e2 && e2.approved) { okN++; break; } msg += '（已重讀確認：沒有寫入）'; } catch (e3) { msg += '（連線有問題，無法確認有沒有寫入）'; }
         }
         bad.push(p.name + '（' + msg + '）');
-        Object.assign(U(p.key), { failed: msg, failedDiff: /^核定和打卡差/.test(msg) });
+        if (/薪資已鎖定/.test(msg)) U(p.key).locked = msg; else Object.assign(U(p.key), { failed: msg, failedDiff: /^核定和打卡差/.test(msg) });
         if (halted) break;
       }
     }
@@ -568,7 +572,8 @@ export function renderQuick(ctx) {
         } catch (e3) { u.msg = '連線有問題，無法確認有沒有寫入，請重新載入頁面再看'; }
         recompute(); render(); return;
       }
-      if (/^核定和打卡差/.test(msg)) { u.ask = a.id; u.msg = msg; }
+      if (/薪資已鎖定/.test(msg)) { u.locked = msg; u.msg = ''; }      // 薪資鎖月（核准單或核定被擋）：列在「現在不能核定」，不給「再核定一次」
+      else if (/^核定和打卡差/.test(msg)) { u.ask = a.id; u.msg = msg; }
       else if (e && e.stage === 'decide') {
         if (/^申請和打卡對不上/.test(msg)) { u.mismatch = msg; u.msg = ''; }      // 伺服器明說對不上才只剩退回
         else if (/已經?處理過|已被處理/.test(msg)) { try { await refreshReqs(); u.msg = '這張申請已經處理過，已重新讀取，可以直接核定'; } catch (e2) { u.msg = '核准單沒成功：' + msg; } }
@@ -952,6 +957,15 @@ export function renderQuick(ctx) {
     if (S.pend) { const n = S.pend.length; S.pend = S.pend.filter((it) => !(it.date === d.date && String(it.emp_id) === String(d.emp_id) && (it.store || '') === (d.store || ''))); if (S.pend.length !== n) pendPanel.draw(); }
     st.toast = '已核定 ' + ((empOf(key) || {}).name || '') + '（細調送出）';
     setTimeout(() => { if (!live() || st.busy) return; st.fine.delete(key); st.fineEls.delete(key); reconcile().then(() => loadWaits()).catch(() => {}).then(() => afterChange()); }, 1200);      // 先讓主管看到細調裡的結果
+  });
+  // 細調裡送出被薪資鎖月擋下（前景失敗、背景被退回）：名單也照一鍵核定被擋的做法，這個人列在「現在不能核定」，不留在核定通過／已核定（送出中）
+  root.addEventListener('emp-pay-locked', (e) => {
+    const d = e.detail || {}, key = Q.keyOf({ store: d.store || '', emp_id: d.emp_id });
+    if (d.date !== st.date) return;
+    const emp = empOf(key);
+    if (emp && emp.approved && emp.approved.queued) { emp.approved = null; st.toast = ''; }      // 背景送出中的假結果拿掉；原本就核定過的（重新核定被擋）照舊列在已核定
+    U(key).locked = d.msg; U(key).fold = false; st.fine.add(key);      // 細調留著：卡片上的紅字原因還在
+    recompute(); render();
   });
   root.addEventListener('duty-reload-day', () => { if (!st.busy) load(); });
   root.addEventListener('hr-returned', () => retPanel.load());

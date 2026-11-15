@@ -782,9 +782,10 @@ function buildCard(emp, date) {
     } else {
       const msg = String(ck.message || CHECK_ERR[ck.error] || ck.error || '打卡系統不接受');
       const probs = Array.isArray(ck.probs) ? ck.probs : [];
+      const payLock = ck.error === 'pay_locked';      // 薪資鎖月（2026-11-15）：不是缺單，寫清楚是鎖月、要到薪資頁解鎖
       mini.className = 'du-mini bad'; mini.textContent = '未符合';
       verdict.className = 'du-verdict gray';
-      verdict.append(h('div', 'du-verdict-t', '未符合規定' + (ps ? '（照打卡＋單算：' + ps + '）' : '')));
+      verdict.append(h('div', 'du-verdict-t', payLock ? '這個月薪資已鎖定，不能核定' : '未符合規定' + (ps ? '（照打卡＋單算：' + ps + '）' : '')));
       if (probs.length) {
         const docs = probs.filter(DOC_RULES), fixes = probs.filter(p => !DOC_RULES(p));
         const noLine = /沒綁 LINE/.test(msg), canProxy = noLine || proxyOpen(date);
@@ -807,11 +808,11 @@ function buildCard(emp, date) {
         }
       } else verdict.append(h('div', 'du-verdict-n', msg.replace(/^這天還不能核定：/, '')));
       const acts = h('div', 'du-pre-acts');
-      const go = h('button', 'btn du-verdict-go', '核定通過（補齊後才能按）', { type: 'button' }); go.disabled = true;
+      const go = h('button', 'btn du-verdict-go', payLock ? '核定（解鎖後才能按）' : '核定通過（補齊後才能按）', { type: 'button' }); go.disabled = true;
       const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '自己調', { type: 'button' });
       adj.onclick = () => { setEdit(!editOpen); adj.textContent = editOpen ? '收起' : '自己調'; };
       acts.append(go, adj); verdict.append(acts);
-      submit.disabled = true; submit.title = '未符合規定：補齊後才能送出';      // Eason 定：灰底不能按（自己調也一樣）
+      submit.disabled = true; submit.title = payLock ? '這個月薪資已鎖定：先到薪資頁解鎖才能送出' : '未符合規定：補齊後才能送出';      // Eason 定：灰底不能按（自己調也一樣）
       setEdit(editOpen);
     }
     card.dispatchEvent(new CustomEvent('emp-checked', { bubbles: true }));
@@ -881,6 +882,11 @@ function buildCard(emp, date) {
   // 打卡端擋下時給主管下一步：差 30 分鐘以上打開原因欄；「這天還不能核定」且可代開（沒綁 LINE 或超過 7 天）打開代開表單。前景失敗、背景被退回共用（2026-11-14）
   // 回 true＝已打開可以直接處理的欄位（不用重新載入）
   function failHelp(msg, approveDate) {
+    if (/薪資已鎖定/.test(msg)) {                        // 薪資鎖月（2026-11-15）：下一步是到薪資頁解鎖，重新載入這天沒有用，不給那顆鈕
+      if (card.__pending) card.__setCheck({ emp_id: String(emp.emp_id), ok: false, error: 'pay_locked', message: msg });      // 先檢查時還沒鎖、送出才被擋：卡片改成鎖月的灰框（核定鈕灰掉），不留綠色「核定 N 小時」
+      card.dispatchEvent(new CustomEvent('emp-pay-locked', { bubbles: true, detail: { emp_id: emp.emp_id, store: emp.store, date: approveDate, msg } }));      // 新頁（quick.js）：這個人改列「現在不能核定」
+      return true;
+    }
     if (readOnly) return false;
     if (/^核定和打卡差/.test(msg)) { diffBox.hidden = false; diffIn.focus(); return true; }
     const noLine = /沒綁 LINE/.test(msg);                // 打卡端判斷的：沒綁 LINE 的同仁 7 天內也能代開（2026-11-09）
@@ -992,7 +998,7 @@ function buildCard(emp, date) {
       say('bad', '✕ 核定失敗：' + e.message);
       failHelp(e.message, approveDate);
     }
-    finally { submit.disabled = false; submit.textContent = '重新送出核定'; }
+    finally { submit.disabled = !!(card.__pending && card.__check && card.__check.error === 'pay_locked' && !e2eNoCore()); submit.textContent = '重新送出核定'; }      // 薪資鎖月：送出鈕維持不能按
   };
 
   function setExpanded(on) { body.hidden = !on; card.classList.toggle('open', on); head.setAttribute('aria-expanded', on ? 'true' : 'false'); }

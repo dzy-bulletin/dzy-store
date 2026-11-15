@@ -84,7 +84,7 @@ function buildBatchBar(card, title) {
     const groups = new Map();
     els.forEach(el => { const k = el.__req.store || ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(el); });
     const bad = [];
-    let nDone = 0, nSkip = 0;
+    let nDone = 0, nSkip = 0, nLock = 0;
     await Promise.all([...groups.entries()].map(async ([store, gEls]) => {
       try {
         const r = await call('mgr_req_decide_batch', { ids: gEls.map(el => el.__req.id), decision: 'approve', store: store || undefined });
@@ -95,6 +95,8 @@ function buildBatchBar(card, title) {
           const wn = warns.filter(x => String(x.id) === String(it.id))[0];
           if (done.indexOf(String(it.id)) >= 0) { nDone++; el.__markDone('✓ 已核准：' + tag + it.name + ' ' + it.summary + (wn ? '\n⚠ ' + (wn.message || '那天已經核定過，請重新核定一次') : '')); delete S.dayCache[it.date]; return; }
           const sk = skipped.filter(x => String(x.id) === String(it.id))[0];
+          // 薪資鎖月（2026-11-15）：那筆沒有被處理，留在清單上、寫出原因（解鎖後可以再核），不算「已被處理過」
+          if (sk && /薪資已鎖定/.test(String(sk.reason || ''))) { nLock++; const c = el.querySelector('.du-rq-pick'); if (c) c.checked = false; el.__say('bad', '✕ ' + sk.reason); return; }
           if (sk) { nSkip++; el.__markDone('— 略過：' + tag + it.name + ' ' + it.summary + '（' + sk.reason + '）'); }
         });
       } catch (e) { bad.push({ store, storeName: (gEls[0].__req.storeName || ''), names: gEls.map(el => el.__req.name + ' ' + el.__req.summary), message: (e && e.message) || '沒有成功，請再試一次' }); }
@@ -103,7 +105,10 @@ function buildBatchBar(card, title) {
       msg.className = 'du-rq-msg bad';
       msg.textContent = groups.size === 1 ? '✕ ' + bad[0].message
         : '✕ ' + bad.map(b => (b.storeName ? b.storeName + '：' : '') + b.message + '（沒送出：' + b.names.join('、') + '）').join('\n') + (nDone ? '\n其餘已核准 ' + nDone + ' 筆' : '');
-    } else msg.textContent = (nSkip ? '已核准 ' + nDone + ' 筆，略過 ' + nSkip + ' 筆（已被處理過）' : '') + (skipNote ? (nSkip ? '\n' : '') + skipNote : '');
+    } else {
+      msg.textContent = (nSkip ? '已核准 ' + nDone + ' 筆，略過 ' + nSkip + ' 筆（已被處理過）' : '') + (skipNote ? (nSkip ? '\n' : '') + skipNote : '');
+      if (nLock) { msg.className = 'du-rq-msg bad'; msg.textContent = '✕ ' + nLock + ' 筆沒有核准：那個月薪資已鎖定，請先到薪資頁解鎖' + (nDone ? '（其餘已核准 ' + nDone + ' 筆）' : '') + (msg.textContent ? '\n' + msg.textContent : ''); }
+    }
     all.disabled = false;
     refreshTitle(card, title); syncBatch(card);
   };
@@ -224,6 +229,7 @@ function buildItem(it, card, title, onDone) {
       if (onDone) onDone(decision, r);
     } catch (e) { ok.disabled = no.disabled = false; say('bad', '✕ ' + (e.message || '沒有成功，請再試一次')); }
   }
+  el.__say = say;                                 // 批次核准被擋（例：薪資鎖月）時把原因寫在這一筆上
   el.__markDone = text => { el.textContent = ''; el.classList.add('done'); el.append(h('div', 'du-rq-l2', text)); };   // 單筆與批次共用
   ok.onclick = () => decide('approve'); no.onclick = () => decide('reject');
   return el;

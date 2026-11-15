@@ -745,6 +745,9 @@ function markSelf(d, action, b, r) {
   if (action === 'mgr_req_decide_batch' && (Array.isArray(b.ids) ? b.ids : []).some(id => isMine(reqEmp(id)))) return { deny: fail('FORBIDDEN', '這是你自己的申請，要由上層主管（區督導或總監）審核') };
   return { mine: isMine };
 }
+// 薪資鎖月（2026-11-15 鎖月後不可再動；對照 server/proxy/duty.js payLockGuard 與打卡端 pay_locked）：e2e 設 d.duty.payLocked＝'YYYY-MM'（或陣列），
+// 日期落在那個月的核定（含只檢查）、核准／退回申請、批次核准、主管代開一律擋下。回要給主管看的那句，沒鎖回 ''
+function payLockMsg(d, date) { const ym = String(date || '').slice(0, 7); return ym && [].concat(d.payLocked || []).includes(ym) ? ym + ' 薪資已鎖定，請先到薪資頁解鎖這個月' : ''; }
 function dutyHas(emp, date) { const f = fakeOf(emp); return !!f && (f.segs.length > 0 || !!f.attempts); }
 function duty(action, me, s, b) {
   // 管理者（2026-10-11）：admin_stores 列門市；其他動作要帶 asStore。示範模式各店共用同一份假出勤資料。
@@ -890,6 +893,7 @@ function dutyDo(d, action, b) {
   }
   if (action === 'mgr_approve_check') {      // 只檢查不寫入（2026-11-14）：一天多人，逐人照 mgr_approve 跑到寫入前（打卡端 reqMgrApproveCheck_）
     window.__checkCalls = (window.__checkCalls || 0) + 1;      // e2e 數次數（不存進示範資料）
+    if (payLockMsg(d, b.date)) return ok({ date: b.date, results: (Array.isArray(b.items) ? b.items : []).slice(0, 40).map(it => ({ emp_id: String(it.emp_id), ok: false, error: 'pay_locked', message: payLockMsg(d, b.date) })), denied: [] });      // 薪資鎖月：每個人都擋
     const results = (Array.isArray(b.items) ? b.items : []).slice(0, 40).map(it => {
       const r = dutyDo(d, 'mgr_approve', Object.assign({}, it, { date: b.date, dry_run: true }));
       return r.ok ? { emp_id: String(it.emp_id), ok: true, approved_hours: r.data.approved_hours, status_text: r.data.status_text } : { emp_id: String(it.emp_id), ok: false, error: r.error, message: r.message, probs: r.probs, need: r.need, need_doc: r.need_doc };
@@ -900,6 +904,7 @@ function dutyDo(d, action, b) {
     // 一天多種假別（Code.gs handleMgrApprove，2026-10-26）：新前端送 leaves:[{type,hours}]；只送 leave_type 的舊呼叫端遇到「那天已有多種假別」擋 multi_leave_day
     const date = String(b.date || '');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return fail('BAD_INPUT', '日期格式不對。');
+    if (payLockMsg(d, date)) return fail('BAD_INPUT', payLockMsg(d, date));      // 薪資鎖月
     const emp = d.roster.find(r => r.emp_id === b.emp_id); if (!emp) return fail('NOT_FOUND', '名冊裡找不到這位同仁，請重新整理。');
     if (b.__who && !viewCanWrite(b.__who.view, 'hours', b.emp_id)) return fail('FORBIDDEN', DENY_EMP_MSG);      // 只看名單的人不能核定（2026-11-15）
     const multi = Array.isArray(b.leaves);
@@ -1010,6 +1015,7 @@ function dutyDo(d, action, b) {
     if (!r) return fail('NOT_FOUND', '找不到這筆申請');
     if (r.status !== 'pending') return fail('BAD_INPUT', r.status === 'cancelled' ? '同仁已經取消這筆申請' : '這筆已經處理過了');
     { const deny = reqDeny(d, r, b.__who); if (deny) return deny; }
+    if (payLockMsg(d, r.date)) return fail('BAD_INPUT', payLockMsg(d, r.date));      // 薪資鎖月：看申請單的日期（權限先擋，同真伺服器）
     if (decision === 'approve' && d.decideFail && d.decideFail[String(r.id)]) return fail('BAD_INPUT', d.decideFail[String(r.id)]);      // e2e：伺服器拒絕核准（申請和打卡對不上）
     r.status = decision === 'approve' ? 'approved' : 'rejected'; r.decided_at = new Date().toISOString(); r.decided_by = MGR; r.reject_reason = decision === 'reject' ? reason : '';
     return ok({ id: r.id, status: r.status });
@@ -1025,6 +1031,7 @@ function dutyDo(d, action, b) {
       const r = d.reqs.find(x => String(x.id) === id);
       if (!r) return skipped.push({ id, reason: '找不到這筆申請' });
       if (r.status !== 'pending') return skipped.push({ id, reason: r.status === 'cancelled' ? '同仁已經取消這筆申請' : '這筆已經處理過了' });
+      if (payLockMsg(d, r.date)) return skipped.push({ id, reason: payLockMsg(d, r.date) });      // 薪資鎖月：那筆略過並說原因，其他照做
       r.status = 'approved'; r.decided_at = now; r.decided_by = MGR; r.reject_reason = ''; done.push(id);
     });
     return ok({ done, skipped });
@@ -1074,6 +1081,7 @@ function dutyDo(d, action, b) {
     const emp = d.roster.find(r => r.emp_id === b.emp_id); if (!emp) return fail('NOT_FOUND', '名冊裡找不到這位同仁，請重新整理。');
     const reason = String(b.reason ?? '').trim().slice(0, 100);
     if (!reason) return fail('BAD_INPUT', '代開要寫原因');
+    if (payLockMsg(d, b.date)) return fail('BAD_INPUT', payLockMsg(d, b.date));      // 薪資鎖月
     // 2026-11-14：請假／加班／出差／忘打卡都 4 天（11/28 以前 11 月的日子不給代開，同仁自己補；同 Requests.gs reqPastLimit_）
     const dt = String(b.date || '');
     const openT01 = taipeiDay(0) <= '2026-11-28' && dt >= '2026-11-01';

@@ -54,7 +54,7 @@ export function rejectBar(onGo) {
       const row = h('div', 'du-bgbar-r');
       const who = j.act === 'mgr_approve' ? (j.date.slice(5).replace('-', '/') + ' ' + (nm[j.emp_id] || j.emp_id) + ' 的核定') : '一筆申請審核';
       row.append(h('span', 'du-bgbar-w', who + '：' + (j.msg || '請重新處理')));
-      if (j.act === 'mgr_approve' && onGo) {
+      if (j.act === 'mgr_approve' && onGo && !/薪資已鎖定/.test(j.msg || '')) {      // 薪資鎖月：要先到薪資頁解鎖，不給「去重新核定」
         const go = h('button', 'btn sm', '去重新核定', { type: 'button' });
         go.onclick = () => onGo(j.date, j.emp_id, j.code);
         row.append(go);
