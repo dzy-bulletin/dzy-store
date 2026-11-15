@@ -3,11 +3,11 @@
 import { confirmBox } from '../../js/ui.js';
 import { S, dutyManager, call, callAll, brk, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow, canVoidRow, supportTag, rememberOne, snapLabel, tipText, checkOnce, reqShown, refreshReqBadge } from './state.js';
 import { buildReqItem } from './request.js';
-import { corePeriods, OVER_BLOCK_MIN } from './core-calc.js';
+import { corePeriods, OVER_BLOCK_MIN, otSuggestText, cardDiffs, cardLabel, cardReasonText } from './core-calc.js';
 import * as C from './calc.js';
 import { qrButton } from './qr.js';
 import { api } from '../../js/api.js';
-import { planFlags } from './quick-calc.js';
+import { planFlags, REASONS } from './quick-calc.js';
 import { ssoSwitch, setSession, toSession } from '../../js/auth.js';
 import { renderQuick, backBar, e2eNoCore } from './quick.js';
 import { canBg, watchJob, refreshJobs, rejectBar } from './bg.js';
@@ -711,7 +711,6 @@ function buildCard(emp, date) {
     if (p.rule === 'over_credit') return '沒有打卡的 ' + ((need && need.over_min) || '') + ' 分鐘：忘打卡單、假單或補休單';
     return p.text;
   };
-  const overText = m => (m >= 60 ? Math.floor(m / 60) + ' 小時' : '') + (m % 60 ? (m >= 60 ? ' ' : '') + (m % 60) + ' 分鐘' : '');
   const DOC_RULES = p => (p.rule === 'ot_hours' && /要有加班單/.test(p.text)) || p.rule === 'miss' || /^ft8/.test(p.rule) || p.rule === 'over_credit';
   card.__setCheck = res => {
     card.__check = res && typeof res === 'object' && typeof res.ok === 'boolean' && res.error !== 'unknown_action' ? res : null;
@@ -739,7 +738,7 @@ function buildCard(emp, date) {
       verdict.append(h('div', 'du-verdict-t', '未符合規定：要補加班單'));
       verdict.append(h('div', 'du-needk', '要補齊：'));
       const ul = h('ul', 'du-needs'), li = h('li');
-      li.append(h('span', 'du-need-t', '☐ 加班單 ' + pr.over.map(x => x.start + '–' + x.end).join('、') + '（' + overText(pr.overMin) + '）'));
+      li.append(h('span', 'du-need-t', '☐ 加班單 ' + otSuggestText(pr.over, pr.overMin)));
       if (canProxy) { const b = h('button', 'btn sm ghost du-preproxy', '替他代開', { type: 'button' }); b.onclick = () => proxyForm(date, noLine, '打卡比班表多，沒有加班單'); li.append(b); }
       ul.append(li); verdict.append(ul);
       verdict.append(h('div', 'du-verdict-n', (canProxy ? '' : '有加班：請同仁在 LINE「加班請假」補申請，核准後這裡會自動重算。') + '沒有加班（例：提早到、晚打卡）：按「自己調」確認後照班表送出 ' + ck.approved_hours + ' 小時，多出的時段不算。'));
@@ -778,6 +777,36 @@ function buildCard(emp, date) {
       const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '自己調', { type: 'button' });
       adj.onclick = () => { setEdit(!editOpen); adj.textContent = editOpen ? '收起' : '自己調'; };
       acts.append(go, adj); verdict.append(acts);
+      setEdit(editOpen);
+    } else if (ck.error === 'need_diff_reason') {
+      // 每張卡跟核定差超過 30 分鐘（2026-11-16 Eason）：單都齊了，每張卡選一個原因；選好寫進原因欄（diff_reason）→ 重新檢查 → 變「核定通過」
+      const cards = Array.isArray(ck.cards) && ck.cards.length ? ck.cards : cardDiffs(emp.segments, readRows().filter(r => r.start && r.end));
+      mini.className = 'du-mini pending'; mini.textContent = '要選原因';
+      verdict.className = 'du-verdict gray du-verdict-why';
+      verdict.append(h('div', 'du-verdict-t', '打卡跟核定差超過 30 分鐘，每張卡選一個原因' + (ps ? '（核定 ' + ps + '）' : '')));
+      const box = h('div', 'du-cardask');
+      const picks = card.__cardPicks || (card.__cardPicks = {});
+      const put = () => { const all = cards.every((x, j) => picks[j]); diffIn.value = all ? cardReasonText(cards, cards.map((x, j) => picks[j])) : ''; if (all) diffIn.dispatchEvent(new Event('input')); };
+      cards.forEach((cd, i) => {
+        const row = h('div', 'du-cardrow');
+        const sel = h('select', 'du-card-sel', null, { 'aria-label': cardLabel(cd) + ' 的原因' });
+        ['', ...REASONS, '其他'].forEach(t => sel.append(h('option', null, t || '選原因', { value: t })));
+        const other = h('input', 'du-card-other', null, { type: 'text', maxlength: '40', placeholder: '原因（必填）', 'aria-label': cardLabel(cd) + ' 的其他原因' });
+        const cur = picks[i] || '';
+        if (REASONS.includes(cur)) sel.value = cur; else if (cur) { sel.value = '其他'; other.value = cur; }
+        other.hidden = sel.value !== '其他';
+        sel.onchange = () => { other.hidden = sel.value !== '其他'; picks[i] = sel.value === '其他' ? other.value.trim() : sel.value; put(); };
+        other.onchange = () => { picks[i] = other.value.trim(); put(); };
+        row.append(h('span', 'du-cardlab', cardLabel(cd)), sel, other);
+        box.append(row);
+      });
+      verdict.append(box);
+      const acts = h('div', 'du-pre-acts');
+      const go = h('button', 'btn du-verdict-go', '核定（每張卡選好原因後）', { type: 'button' }); go.disabled = true;
+      const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '自己調', { type: 'button' });
+      adj.onclick = () => { setEdit(!editOpen); adj.textContent = editOpen ? '收起' : '自己調'; };
+      acts.append(go, adj); verdict.append(acts);
+      submit.disabled = true; submit.title = '每張卡選好原因才能送出';
       setEdit(editOpen);
     } else {
       const msg = String(ck.message || CHECK_ERR[ck.error] || ck.error || '打卡系統不接受');

@@ -13,6 +13,55 @@ const TOL = 15;
 export const OVER_BLOCK_MIN = 30;
 /** 一天不用加班單的上限（分鐘）：班表內＋班表外加起來到這裡為止都照打卡算 */
 export const DAY_FREE_MIN = 480;
+/** 每張卡跟核定時間差（2026-11-16 Eason：「每一次打卡時間跟核定時間相差超過 30 分鐘以上，都需要填寫原因」；剛好 30 分不用）。
+ *  跟打卡端 Requests.gs reqCardDiffs_ 同一套：一段打卡對到重疊的核定時段，上班卡比最早那段的開始、下班卡比最晚那段的結束；
+ *  整段沒被核定就比最近的開始／結束；只有單邊的卡只比有的那邊。CARD_REASON_FROM 起的日子才要（打卡端 REQ_CARD_REASON_FROM）。 */
+export const CARD_DIFF_MIN = 30;
+export const CARD_REASON_FROM = '2026-11-17';
+export function cardDiffs(segs, periods) {
+  const ps = (periods || []).map((p) => span(toMin(p.start), toMin(p.end))).filter(Boolean);
+  if (!ps.length) return [];
+  const near = (t, i) => ps.reduce((a, p) => (a == null || Math.abs(p[i] - t) < Math.abs(a - t) ? p[i] : a), null);
+  const out = [];
+  for (const g of segs || []) {
+    if (!g) continue;
+    let a = toMin(g.in), b = toMin(g.out);
+    if (a != null && b != null && (g.cross || b < a)) b += 1440;
+    let st = null, en = null;
+    if (a != null && b != null) {
+      const ov = ps.filter((p) => Math.min(b, p[1]) > Math.max(a, p[0]));
+      if (ov.length) { st = Math.min(...ov.map((p) => p[0])); en = Math.max(...ov.map((p) => p[1])); }
+    }
+    if (a != null) { const c = st != null ? st : near(a, 0), d = Math.abs(a - c); if (d > CARD_DIFF_MIN) out.push({ side: 'in', card: toHm(a), core: toHm(c), min: d }); }
+    if (b != null) { const c = en != null ? en : near(b, 1), d = Math.abs(b - c); if (d > CARD_DIFF_MIN) out.push({ side: 'out', card: toHm(b), core: toHm(c), min: d }); }
+  }
+  return out;
+}
+/** 「上班卡 08:20（核定 09:00，早 40 分）」 */
+export function cardLabel(c) {
+  const early = c.side === 'in' ? toMin(c.card) < toMin(c.core) : toMin(c.card) < toMin(c.core);
+  return (c.side === 'in' ? '上班卡 ' : '下班卡 ') + c.card + '（核定 ' + c.core + '，' + (early ? '早 ' : '晚 ') + c.min + ' 分）';
+}
+/** 每張卡的原因合成一句存進 diff_reason：「上班卡 08:20：臨時調班；下班卡 17:45：主管同意」 */
+export const cardReasonText = (cards, picks) => cards.map((c, i) => (c.side === 'in' ? '上班卡 ' : '下班卡 ') + c.card + '：' + picks[i]).join('；');
+/** 建議補的加班單時段（2026-11-16 Eason：15 分鐘內不計、以整數建議）：每段開始往後、結束往前取到 15 分，取完不到 15 分的整段不列。
+ *  例 08:57–09:00、13:00–14:34、16:57–18:00、22:00–22:03 → 13:00–14:30、17:00–18:00（2.5 小時）。全部都不到 15 分時回原本的時段（照實寫，不讓建議變空白） */
+export function otSuggest(over) {
+  const out = [];
+  for (const x of over || []) {
+    const sp = span(toMin(x.start), toMin(x.end)); if (!sp) continue;
+    const a = Math.ceil(sp[0] / TOL) * TOL, b = Math.floor(sp[1] / TOL) * TOL;
+    if (b - a >= TOL) out.push({ start: toHm(a), end: toHm(b), min: b - a });
+  }
+  if (!out.length) return { list: (over || []).map((x) => ({ start: x.start, end: x.end })), text: (over || []).map((x) => x.start + '–' + x.end).join('、'), min: null, rounded: false };
+  const min = out.reduce((t, x) => t + x.min, 0);
+  return { list: out, text: out.map((x) => x.start + '–' + x.end).join('、'), min, rounded: true };
+}
+/** 「要補加班單 13:00–14:30、17:00–18:00（共 2.5 小時）」；取不到整數時段時照實寫分鐘 */
+export function otSuggestText(over, overMin) {
+  const g = otSuggest(over);
+  return g.text + (g.rounded ? '（共 ' + Math.round(g.min / 60 * 100) / 100 + ' 小時）' : '（' + overMin + ' 分鐘）');
+}
 const toMin = (hm) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || '')); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
 const toHm = (n) => { const x = ((n % 1440) + 1440) % 1440; return String(Math.floor(x / 60)).padStart(2, '0') + ':' + String(x % 60).padStart(2, '0'); };
 const span = (a, b) => (a == null || b == null ? null : (b <= a ? [a, b + 1440] : [a, b]));

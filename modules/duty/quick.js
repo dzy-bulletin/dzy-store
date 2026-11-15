@@ -8,7 +8,7 @@ import * as C from './calc.js';
 import * as Q from './quick-calc.js';
 import { qrButton } from './qr.js';
 import { canBg, watchJob, refreshJobs, rejectBar } from './bg.js';
-import { corePeriods, OVER_BLOCK_MIN } from './core-calc.js';
+import { corePeriods, OVER_BLOCK_MIN, otSuggestText, cardDiffs, cardLabel, cardReasonText } from './core-calc.js';
 import { MOCK } from '../../js/config.js';
 
 // 總開關：改成 false、重新發布網站，手機也回到舊畫面（不必動別的）
@@ -43,20 +43,30 @@ const MODE_KEY = 'dzystore_dutymode';
 function modeGet() { try { return localStorage.getItem(MODE_KEY) === 'detail'; } catch (e) { return false; } }
 function modePut(d) { try { localStorage.setItem(MODE_KEY, d ? 'detail' : 'simple'); } catch (e) {} }
 // 時間軸：一個人那天的班表（虛線）、打卡（灰條）、單（框）、差異（色塊）。資料由 timeline-calc.js 算，這裡只畫
-const TL_KIND = { short: '遲到、早退或缺勤', miss: '缺卡', leave: '請假', leavepend: '請假（假單待審）', comp: '補休', comppend: '補休（假單待審）', extra: '比班表多（當天沒滿 8 小時，不用加班單）', ot: '加班、沒有加班單（超過 8 小時）', otok: '加班（有加班單）', rest: '空班休息' };
+const TL_KIND = { short: '遲到、早退或缺勤', miss: '缺卡', missok: '忘刷（忘打卡單已核准）', leave: '請假', leavepend: '請假（假單待審）', trip: '出差', trippend: '出差（出差單待審）', comp: '補休', comppend: '補休（假單待審）', extra: '比班表多（當天沒滿 8 小時，不用加班單）', ot: '加班、沒有加班單（超過 8 小時）', otok: '加班（有加班單）', rest: '空班休息' };
 export function timelineEl(m, label) {
   const wrap = h('div', 'tl');
   const track = h('div', 'tl-track', null, { role: 'img', 'aria-label': label || '時間軸' });
   const W = m.to - m.from, pct = (t) => ((t - m.from) / W * 100).toFixed(2) + '%', wid = (a, b) => ((b - a) / W * 100).toFixed(2) + '%';
   const box = (cls, a, b, title) => { const d = h('div', cls, null, title ? { title } : null); d.style.left = pct(a); d.style.width = wid(a, b); track.append(d); return d; };
   const marks = m.planTicks && m.planTicks.length ? m.planTicks : m.ticks.filter((t) => t > m.from && t < m.to);
-  m.plan.forEach((s) => box('tl-plan', s.a, s.b, '班表 ' + T.hhmm(s.a) + '–' + T.hhmm(s.b)));      // 班表時段＝淺色實心底（2026-11-15 不用虛線）
-  marks.forEach((t) => { const g = h('div', 'tl-grid'); g.style.left = pct(t); track.append(g); });
+  m.plan.forEach((s) => box('tl-plan', s.a, s.b, '班表 ' + T.hhmm(s.a) + '–' + T.hhmm(s.b)));      // 班表時段＝淡色帶（2026-11-15 不用虛線）
+  // A 版精準刻度（2026-11-16 Eason 選）：每小時一條淡格線、班表畫成上方括號並標起訖
+  const hours = []; for (let t = Math.ceil(m.from / 60) * 60; t < m.to; t += 60) if (t > m.from) hours.push(t);
+  hours.forEach((t) => { const g = h('div', 'tl-grid' + ((t / 60) % 2 ? '' : ' h')); g.style.left = pct(t); track.append(g); });
+  m.plan.forEach((s) => {
+    box('tl-brk', s.a, s.b, null);
+    [s.a, s.b].forEach((t, i) => { const l = h('span', 'tl-blab' + (i ? ' en' : ' st'), T.hhmm(t)); l.style.left = pct(t); track.append(l); });
+  });
   m.forms.forEach((f) => box('tl-form tl-f-' + f.kind + (f.comp ? ' tl-f-comp' : '') + (f.pending ? ' pend' : ''), f.a, f.b, (f.pending ? '待審 ' : '') + f.label + ' ' + T.hhmm(f.a) + '–' + T.hhmm(f.b)));
   m.devs.filter((d) => d.kind === 'rest').forEach((d) => box('tl-dev tl-rest', d.a, d.b, '空班休息 ' + T.hhmm(d.a) + '–' + T.hhmm(d.b)));
   m.punch.forEach((s) => box('tl-punch', s.a, s.b, '打卡 ' + T.hhmm(s.a) + '–' + T.hhmm(s.b)));
   m.open.forEach((x) => { const t = x.a != null ? x.a : x.b; box('tl-dot', t, t, (x.side === 'out' ? '只有上班卡 ' : '只有下班卡 ') + T.hhmm(t)); });
   m.devs.filter((d) => d.kind !== 'rest').forEach((d) => box('tl-dev tl-' + d.kind, d.a, d.b, TL_KIND[d.kind] + ' ' + T.hhmm(d.a) + '–' + T.hhmm(d.b)));
+  // 多做、少做的段落直接在條下寫分鐘數（+94、−40）；太窄放不下就不寫（滑過去看提示）
+  m.devs.filter((d) => /^(ot|otok|extra|short)$/.test(d.kind) && (d.b - d.a) / W * 100 >= 5).forEach((d) => {
+    const n = h('span', 'tl-ann' + (d.kind === 'short' ? ' neg' : ''), (d.kind === 'short' ? '−' : '+') + Math.round(d.b - d.a)); n.style.left = pct((d.a + d.b) / 2); track.append(n);
+  });
   // 實際打卡時間直接標在打卡條兩端（2026-11-16 Eason：更直觀）；太短的段落合成一個標籤，少一張卡的標「?」
   const labs = [];
   const plab = (t, cls, txt) => {
@@ -72,19 +82,14 @@ export function timelineEl(m, label) {
   });
   m.open.forEach((x) => { if (x.a != null) plab(x.a, 'st', T.hhmm(x.a) + '–？'); else plab(x.b, 'en', '？–' + T.hhmm(x.b)); });
   const ax = h('div', 'tl-axis');
-  // 刻度：有班表標班表起訖（HH:MM），沒有班表標整點；兩個刻度太近就第二個往下一行，不疊字
-  const usePlan = !!(m.planTicks && m.planTicks.length);
-  let lastPct = -100, row = 0;
-  marks.forEach((t) => {
-    const x = (t - m.from) / W * 100;
-    row = x - lastPct < 11 ? 1 - row : 0; lastPct = x;
-    const hh = Math.floor(t / 60);
-    const lab = usePlan ? T.hhmm(t) : String(hh > 24 ? hh - 24 : hh).padStart(2, '0');
-    const sp = h('span', row ? 'tl-ax2' : null, lab); sp.style.left = x.toFixed(2) + '%';
-    if (x < 6) sp.classList.add('tl-axl'); else if (x > 94) sp.classList.add('tl-axr');
+  // 刻度：每兩小時標一次整點（班表起訖已經標在上方括號）
+  void marks;
+  hours.filter((t) => (t / 60) % 2 === 0).forEach((t) => {
+    const x = (t - m.from) / W * 100, hh = Math.floor(t / 60);
+    const sp = h('span', null, String(hh >= 24 ? hh - 24 : hh).padStart(2, '0')); sp.style.left = x.toFixed(2) + '%';
+    if (x < 4) sp.classList.add('tl-axl'); else if (x > 96) sp.classList.add('tl-axr');
     ax.append(sp);
   });
-  if (marks.some((t, i) => i && (t - marks[i - 1]) / W * 100 < 11)) ax.classList.add('two');
   wrap.append(track, ax);
   return wrap;
 }
@@ -105,6 +110,7 @@ export function renderQuick(ctx) {
     detail: modeGet(), fine: new Set(), fineEls: new Map(), fineNew: [], waits: null, elsewhere: [], mirrorAt: 0, okOpen: false, doneOpen: false, openKey: null };
   const U = (k) => st.ui[k] || (st.ui[k] = {});
   const empOf = (key) => st.emps.find((e) => Q.keyOf(e) === key);
+  const emp0 = (p) => empOf(p.key) || {};
 
   // ---------- 資料 ----------
   function reqsFor(emp, date, approved) {
@@ -129,8 +135,11 @@ export function renderQuick(ctx) {
     }
     // 打卡＋單＝核定時數（2026-11-14）：檢查會過＝照算好的時段核定；異常的人也移到「核定通過」；不會過＝寫出要補齊的單
     if (u.pass && !u.failed && !e2eNoCore() && (p.status === 'ok' || p.status === 'abnormal')) {
-      const act = { id: 'plan', label: '核定 ' + C.round2(u.pass.hours) + ' 小時', primary: true, hours: u.pass.hours, payload: u.pass.payload };
-      Object.assign(p, { status: 'ok', hours: u.pass.hours, payload: u.pass.payload, tag: '核定通過', note: (u.pass.notes || []).join('；'), actions: [act, { id: 'full', label: '到完整頁核對', primary: false }] });
+      const cards = u.cards && u.cards.length ? u.cards : null;
+      const act = { id: 'plan', label: '核定 ' + C.round2(u.pass.hours) + ' 小時' + (cards ? '（選原因）' : ''), primary: true, hours: u.pass.hours, payload: u.pass.payload, askReason: !!cards, cards };
+      Object.assign(p, cards ? { status: 'abnormal', tag: '要選原因', note: '打卡跟核定差超過 30 分鐘：' + cards.map(cardLabel).join('、') }
+        : { status: 'ok', tag: '核定通過', note: (u.pass.notes || []).join('；') },
+        { hours: u.pass.hours, payload: u.pass.payload, actions: [act, { id: 'full', label: '到完整頁核對', primary: false }] });
     } else if (u.need && !e2eNoCore() && p.status === 'abnormal') {      // 不會過：寫出要補齊的單，不再給「選原因」（2026-11-14 不再靠寫原因放行）
       Object.assign(p, { tag: '未符合', note: '要補齊：' + u.need, actions: [{ id: 'full', label: '到完整頁補單', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
     }
@@ -343,11 +352,17 @@ export function renderQuick(ctx) {
         const pay = Object.assign({}, it); delete pay.emp_id;
         // 打卡超出班表＋加班單合計達 30 分鐘（2026-11-14 Eason 選 B）：不放進核定通過，到完整頁補加班單或主管自己調確認
         if (r.ok && core && core.overMin >= OVER_BLOCK_MIN) {
-          const t = '要補加班單 ' + core.over.map((x) => x.start + '–' + x.end).join('、') + '（' + core.overMin + ' 分鐘）';
+          const t = '要補加班單 ' + otSuggestText(core.over, core.overMin);      // 15 分鐘內不列、以 15 分為單位建議（2026-11-16 Eason）
           if (p.status === 'ok') Object.assign(U(p.key), { failed: '未符合：' + t, failedDiff: false, pre: true }); else Object.assign(U(p.key), { need: t });
           return;
         }
-        if (r.ok) { Object.assign(U(p.key), { pass: { payload: pay, hours: r.approved_hours, notes: core ? core.notes : [] } }); return; }
+        if (r.ok) { Object.assign(U(p.key), { pass: { payload: pay, hours: r.approved_hours, notes: core ? core.notes : [] }, cards: null }); return; }
+        // 每張卡跟核定差超過 30 分（2026-11-16 Eason）：單都齊了，只差每張卡選原因 → 列「要選原因」，選完就核定
+        if (r.error === 'need_diff_reason') {
+          const cards = Array.isArray(r.cards) && r.cards.length ? r.cards : cardDiffs(emp0(p).segments, it.periods);
+          Object.assign(U(p.key), { pass: { payload: pay, hours: core ? core.hours : p.hours, notes: core ? core.notes : [] }, cards });
+          return;
+        }
         const probs = Array.isArray(r.probs) ? r.probs : [];
         if (!probs.length && !r.message && CHECK_CODE[r.error] === null) return;      // 格式類錯誤（不是缺單）：不標，照原本分類
         const ps = (Array.isArray(it.periods) ? it.periods : []).filter((x) => x && x.start && x.end).map((x) => x.start + '–' + x.end).join('、');
@@ -487,7 +502,7 @@ export function renderQuick(ctx) {
       if (U(p.key).pass || e2eNoCore()) return true;
       const emp = empOf(p.key), core = emp && corePeriods({ segs: emp.segments, plan: emp.plan, reqs: st.appr[p.key] || [], brk: brk(emp.store) });
       if (!core || core.overMin < OVER_BLOCK_MIN) return true;
-      Object.assign(U(p.key), { failed: '未符合：要補加班單 ' + core.over.map((x) => x.start + '–' + x.end).join('、') + '（' + core.overMin + ' 分鐘）', failedDiff: false, pre: true });
+      Object.assign(U(p.key), { failed: '未符合：要補加班單 ' + otSuggestText(core.over, core.overMin), failedDiff: false, pre: true });
       return false;
     });
     if (!list.length) { recompute(); render(); return; }
@@ -565,7 +580,7 @@ export function renderQuick(ctx) {
       st.busy = false; return render();
     }
     // 核定（照班表／照打卡／核准單）
-    if (a.askReason && !(extra && extra.reason)) { u.ask = a.id; u.msg = ''; render(); return; }
+    if (a.askReason && !(extra && extra.reason)) { u.ask = a.id; u.msg = ''; u.askCards = a.cards || null; u.picks = {}; render(); return; }
     st.busy = true; st.toast = ''; u.msg = ''; render();
     if (!(await freshEnough([p]))) { st.busy = false; return render(); }
     try {
@@ -588,7 +603,7 @@ export function renderQuick(ctx) {
         recompute(); render(); return;
       }
       if (/薪資已鎖定/.test(msg)) { u.locked = msg; u.msg = ''; }      // 薪資鎖月（核准單或核定被擋）：列在「現在不能核定」，不給「再核定一次」
-      else if (/^核定和打卡差/.test(msg)) { u.ask = a.id; u.msg = msg; }
+      else if (/^核定和打卡差/.test(msg)) { u.ask = a.id; u.msg = msg; u.askCards = cardDiffs(emp0(p).segments, (a.payload || p.payload || {}).periods); u.picks = {}; }
       else if (e && e.stage === 'decide') {
         if (/^申請和打卡對不上/.test(msg)) { u.mismatch = msg; u.msg = ''; }      // 伺服器明說對不上才只剩退回
         else if (/已經?處理過|已被處理/.test(msg)) { try { await refreshReqs(); u.msg = '這張申請已經處理過，已重新讀取，可以直接核定'; } catch (e2) { u.msg = '核准單沒成功：' + msg; } }
@@ -629,6 +644,14 @@ export function renderQuick(ctx) {
     const b = h('button', cls, text, Object.assign({ type: 'button' }, attrs || {}));
     b.disabled = st.busy; b.onclick = onclick; return b;
   }
+  // 把一句話裡的「HH:MM–HH:MM」包成小標籤（文字不變，只換外觀）
+  function timeChips(el) {
+    if (!el || !el.textContent) return;
+    const parts = el.textContent.split(/(\d{1,2}:\d{2}–\d{1,2}:\d{2}|（[^（）]{1,12}）)/);
+    if (parts.length < 2) return;
+    el.textContent = '';
+    parts.forEach((t, i) => { if (t) el.append(i % 2 ? h('span', t[0] === '（' ? 'dq-nowrap' : 'dq-tchip', t) : document.createTextNode(t)); });
+  }
   function line(label, text, cls) {
     if (!text) return null;
     return [h('span', 'dq-lb', label), h('span', cls || '', text)];
@@ -637,15 +660,15 @@ export function renderQuick(ctx) {
     const u = U(p.key);
     const c = h('div', 'dq-card' + (p.status === 'blocked' ? ' blocked' : ''), null, { 'data-key': p.key });
     const top = h('div', 'dq-ctop');
-    const nm = h('div', 'dq-name', p.name); const emp0 = empOf(p.key); const sup = emp0 && supportTag(emp0); if (sup) nm.append(sup);
-    top.append(nm, h('div', 'dq-tag' + (p.status === 'blocked' ? ' blocked' : '') + ' sev' + sevOf(p), p.tag));
+    top.append(whoEl(p), h('div', 'dq-tag' + (p.status === 'blocked' ? ' blocked' : '') + ' sev' + sevOf(p), p.tag));
     c.append(top);
     const tl = tlFor(p); if (tl) c.append(tl);
     const grid = h('div', 'dq-grid');
     // 要同仁補單的那句是建議，不是同仁送的申請（2026-11-16 Eason：「申請那句話改成建議」）
     const adv = /^(要補齊|請同仁|還沒有|要有|要補)/.test(p.note || '');
     const noteTxt = adv ? String(p.note).replace(/^要補齊：\s*(要補)?/, '請同仁補').replace(/^要補/, '請同仁補') : p.note;
-    [line(adv ? '建議' : '申請', noteTxt), line('比對', p.chk, 'dq-chk')].forEach((x) => { if (x) grid.append(...x); });
+    [line(adv ? '建議' : /^打卡跟核定差/.test(p.note || '') ? '提醒' : '申請', noteTxt), line('比對', p.chk, 'dq-chk')].forEach((x) => { if (x) grid.append(...x); });
+    if (adv && grid.firstChild) { grid.classList.add('adv'); timeChips(grid.childNodes[1]); }      // 建議補單：底色框＋時段做成小標籤，一眼看得出要補哪幾段（2026-11-16 Eason：更有質感、好辨識）
     if (grid.childNodes.length) c.append(grid);
     if (Q.overText(p)) c.append(h('div', 'du-total-over dq-over', Q.overText(p)));      // 超過單日 10 小時：紅字、不擋（2026-11-15）
     const pend = st.pending.filter((it) => it.date === st.date && Q.keyOf(it) === p.key && !st.handled.has(hid(it)) && it.attach_id && Q.reqDecidable(it, canWriteRow));      // 不能審的單（含自己的）伺服器不給看附件，同 request.js
@@ -654,6 +677,40 @@ export function renderQuick(ctx) {
     if (u.msg) c.append(h('div', 'dq-msg bad', u.msg, { role: 'alert' }));
     const acts = p.actions.filter((a) => !((u.proxied || u.proxyMaybe) && a.id === 'proxy'));
     const askA = u.ask ? p.actions.find((a) => a.id === u.ask) : null;
+    const askCards = askA && !askA.reasonTitle && u.askCards && u.askCards.length ? u.askCards : null;
+    if (askA && askCards) {                                   // 每張卡跟核定差超過 30 分鐘（2026-11-16 Eason）：每張卡各選一個原因，全選好就核定
+      const box = h('div', 'dq-cardask');
+      box.append(h('div', 'dq-ask', '打卡跟核定差超過 30 分鐘，每張卡選一個原因（會留在核定紀錄）'));
+      const picks = u.picks || (u.picks = {});
+      askCards.forEach((cd, i) => {
+        const row = h('div', 'dq-cardrow');
+        row.append(h('div', 'dq-cardlab', cardLabel(cd)));
+        const chips = h('div', 'dq-chips');
+        Q.REASONS.concat(['其他']).forEach((r) => {
+          const on = r === '其他' ? u['other' + i] : picks[i] === r;
+          const b = btn('dq-chip' + (on ? ' on' : ''), r, () => {
+            if (r === '其他') { u['other' + i] = true; picks[i] = (u['otherText' + i] || '').trim(); }
+            else { u['other' + i] = false; picks[i] = r; }
+            render();
+          });
+          b.setAttribute('aria-pressed', on ? 'true' : 'false');
+          chips.append(b);
+        });
+        row.append(chips);
+        if (u['other' + i]) {
+          const inp = h('input', 'dq-reason', null, { type: 'text', maxlength: '40', placeholder: '這張卡的原因（必填）', 'aria-label': cardLabel(cd) + ' 的原因' });
+          inp.value = u['otherText' + i] || ''; inp.oninput = () => { u['otherText' + i] = inp.value; picks[i] = inp.value.trim(); goBtn.disabled = !askCards.every((x, j) => picks[j]); };
+          row.append(inp);
+        }
+        box.append(row);
+      });
+      const ready = askCards.every((x, j) => picks[j]);
+      const goBtn = btn('dq-act primary', ready ? askA.label.replace('（選原因）', '') : '每張卡都選好原因才能核定', () => act(p, askA, { reason: cardReasonText(askCards, askCards.map((x, j) => picks[j])) }));
+      goBtn.disabled = !ready || st.busy;
+      box.append(goBtn, btn('dq-cancel', '取消', () => { u.ask = null; render(); }));
+      c.append(box);
+      return c;
+    }
     if (askA) {                                               // 核定和打卡差 30 分鐘以上：選一個原因就完成
       c.append(h('div', 'dq-ask', askA.reasonTitle || '和打卡差 30 分鐘以上，選一個原因就完成'));
       const chips = h('div', 'dq-chips');
@@ -727,20 +784,24 @@ export function renderQuick(ctx) {
     const m = modelOf(e, st.date, st.appr);
     const w = h('div', 'dq-tlw');
     w.append(timelineEl(m, p.name + ' ' + (p.planText || '') + ' ' + (p.punchText || '')));
-    const t = h('div', 'dq-tltxt');
     const pt = p.punchText || (e.segments && e.segments.length ? e.segments.map(C.segmentText).join('、') : '');
-    t.append(h('span', null, p.planText ? '班表 ' + p.planText.replace(/^班表\s*/, '') : (e.plan && e.plan.work === false ? '班表 排休' : '沒有班表')));      // 打卡時間已經標在時間軸上（2026-11-16），這裡只寫班表
-    if (!pt) t.append(h('span', null, '沒有打卡'));
-    w.append(t);
+    if (!pt) { const t = h('div', 'dq-tltxt'); t.append(h('span', null, '沒有打卡')); w.append(t); }      // 打卡時間標在時間軸上（2026-11-16）、班表寫在姓名右邊（2026-11-16 Eason：省版面）
     return w;
+  }
+  // 姓名列：姓名、支援標籤、班表時段（2026-11-16 Eason：「班表顯示的位置移到姓名的右側」）。.dq-name 只放姓名，測試與讀螢幕照舊
+  function whoEl(p, where) {
+    const box = h('div', 'dq-who');
+    const nm = h('div', 'dq-name', p.name); box.append(nm);
+    const e = empOf(p.key); const sup = e && supportTag(e); if (sup) box.append(sup);
+    if (where && S.all && e && (e.storeName || e.store)) box.append(h('span', 'du-where', e.storeName || e.store, { 'data-where': e.store || '' }));      // 全部門市：寫是哪一家店
+    if (e) box.append(h('span', 'dq-plantxt', p.planText ? '班表 ' + p.planText.replace(/^班表\s*/, '') : (e.plan && e.plan.work === false ? '班表 排休' : '沒有班表')));
+    return box;
   }
   // 摘要列、已核定與只能看的人（精簡卡：時間軸＋細調）
   function miniCard(p, right) {
     const c = h('div', 'dq-card dq-mini', null, { 'data-key': p.key });
     const top = h('div', 'dq-ctop');
-    const nm = h('div', 'dq-name', p.name); const e0 = empOf(p.key); const sup = e0 && supportTag(e0); if (sup) nm.append(sup);
-    if (S.all && e0 && (e0.storeName || e0.store)) nm.append(h('span', 'du-where', e0.storeName || e0.store, { 'data-where': e0.store || '' }));      // 全部門市：寫是哪一家店
-    top.append(nm, h('div', 'dq-mright', right || ''));
+    top.append(whoEl(p, true), h('div', 'dq-mright', right || ''));
     c.append(top);
     const tl = tlFor(p); if (tl) c.append(tl);
     const row = h('div', 'dq-acts two');
@@ -753,8 +814,8 @@ export function renderQuick(ctx) {
   // 時間軸顏色說明（2026-11-15 Eason：「班別的時段要有顏色說明，避免主管看不懂」）
   function legendEl() {
     const box = h('div', 'dq-legend', null, { id: 'dqLegend', 'aria-label': '時間軸顏色說明' });
-    [['tl-lg-plan', '班表時段'], ['tl-punch', '照班表上班'], ['tl-extra', '比班表多（沒滿 8 小時，不用單）'], ['tl-otok', '加班（有加班單）'], ['tl-ot', '加班沒單（超過 8 小時）'],
-      ['tl-short', '遲到、早退、缺勤'], ['tl-miss', '缺卡'], ['tl-rest', '空班休息'], ['tl-comp', '補休'], ['tl-leave', '請假、出差'], ['tl-lg-pend', '待審的單（虛線框）']].forEach(([cls, t]) => {
+    [['tl-lg-plan', '班別（班表）'], ['tl-punch', '出勤'], ['tl-extra', '比班表多（沒滿 8 小時，不用單）'], ['tl-otok', '加班（有單）'], ['tl-ot', '加班沒單（要補單）'],
+      ['tl-trip', '出差'], ['tl-missok', '忘刷（有單）'], ['tl-miss', '缺卡沒單（要補忘打卡單）'], ['tl-short', '遲到、早退、缺勤'], ['tl-leave', '請假'], ['tl-comp', '補休'], ['tl-rest', '空班'], ['tl-lg-pend', '單還在審（反向斜紋）']].forEach(([cls, t]) => {
       const it = h('span', 'dq-lgi'); it.append(h('i', 'dq-sw ' + cls, null, { 'aria-hidden': 'true' }), h('span', null, t)); box.append(it);
     });
     return box;

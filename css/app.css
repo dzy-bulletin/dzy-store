@@ -795,3 +795,125 @@ body.embed .dq-legend{border-color:var(--dzy-line);border-radius:var(--dzy-radiu
 .dq-sw.tl-lg-pend{border-color:#444}
 .tl-track.tl-two{height:56px}
 .tl-plab.low{top:38px}
+/* 2026-11-16 Eason：班表寫在姓名右邊（省一行）；時間軸底色改白，班表時段的米色底更好認 */
+.dq-ctop{align-items:flex-start}
+.dq-who{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;min-width:0;flex:1}
+.dq-who .du-support,.dq-who .du-where{margin-left:0;white-space:normal}
+.dq-plantxt{font-size:12.5px;font-weight:700;color:#7a5a2e;background:#f6ead3;border-radius:8px;padding:1px 7px;line-height:1.5;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.dq-ctop .dq-tag,.dq-ctop .dq-mright{flex:none;max-width:45%}
+.tl-track{background:#fff;border:1px solid #ddd5ca}
+.tl-grid{background:#e6dfd5}
+.tl-plan{background:#f3e3c3}
+.dq-sw.tl-lg-plan{background:#f3e3c3;border:1px solid #ddd5ca}
+.dq-sw.tl-lg-ot{background:#fff}
+/* 卡片質感（2026-11-16 Eason：「更有質感、更清楚辨識」）：班表區塊上緣一條線、打卡條加粗；建議補單放進淡橘框、時段做成標籤；電腦上按鈕排成一列 */
+.tl-track{height:44px;border-radius:8px}
+.tl-plan{box-shadow:inset 0 2px 0 #d8bd88}
+.tl-punch,.tl-dev,.tl-rest{top:23px;height:14px;border-radius:4px}
+.tl-dot{top:20px;height:20px}
+.tl-form{top:19px;bottom:3px}
+.tl-plab{top:4px}
+.tl-plab.low{top:40px}
+.tl-track.tl-two{height:58px}
+.tl-axis{color:#8a6d43;font-weight:600}
+.dq-grid.adv{background:#fff6ec;border:1px solid #f6dcbc;border-radius:10px;padding:8px 10px;column-gap:6px}
+.dq-grid.adv .dq-lb{color:#b4610b;font-weight:700}
+.dq-tchip{display:inline-block;margin:1px 0;padding:0 6px;border-radius:6px;background:#fff;border:1px solid #f0c48f;color:#8a4a0c;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dq-card>.dq-acts .dq-act{min-height:46px}
+@media (min-width:641px){
+  .dq-card>.dq-acts:not(.two){flex-direction:row;flex-wrap:wrap}
+  .dq-card>.dq-acts .dq-act{flex:0 1 auto;min-height:42px;padding:0 20px}
+  .dq-card>.dq-acts.two>.dq-act{flex:0 1 auto}
+}
+.dq-tchip{font-size:13.5px;padding:0 5px;line-height:1.6}
+.dq-nowrap{white-space:nowrap}
+/* 時間軸第三版（2026-11-16 Eason：「用設計 skill 重新設計有質感的時間軸」；dataviz 配色檢查器驗過：四個實心色色盲可辨、對白底對比 ≥3:1）
+   語意：實心＝算數的時段（綠 照班表、藍 比班表多不用單、琥珀 加班有單、紅 遲到早退缺勤）；淡色底＝不上班的時段（請假青、補休紫）；
+   45° 斜紋＝缺東西（橘 加班沒單、紅 缺卡）；135° 斜紋＝單還在審；細灰線＝空班。標記之間留 2px 白縫（不畫外框）、兩端 4px 圓角；文字一律用文字色，不用資料色 */
+.tl-track{--tl-surface:#fff;height:46px;background:var(--tl-surface);border:1px solid #e7e2da;border-radius:10px}
+.tl-plan{background:#f2e6cc;box-shadow:none;border-radius:0}
+.tl-grid{width:1px;border:0;background:#e3d8c4}
+.tl-punch,.tl-dev{top:25px;height:10px;border-radius:4px;box-shadow:0 0 0 1px var(--tl-surface,#fff)}
+.tl-dot{top:21px;height:18px;width:4px!important;border-radius:2px;background:#1f8a4c;box-shadow:0 0 0 1px #fff}
+.tl-punch{background:#1f8a4c}
+.tl-extra{background:#2a78d6}
+.tl-otok{background:#c98500}
+.tl-short{background:#e34948}
+.tl-ot{background:repeating-linear-gradient(45deg,#c98500 0 2px,#f8e7c2 2px 6px)}
+.tl-miss{background:repeating-linear-gradient(45deg,#e34948 0 2px,#fbdcdb 2px 6px)}
+.tl-leave{background:#c6e8e3}
+.tl-leavepend{background:repeating-linear-gradient(135deg,#5fb8ad 0 2px,#dcf1ee 2px 6px)}
+.tl-comp{background:#ddd5f3}
+.tl-comppend{background:repeating-linear-gradient(135deg,#9a86d6 0 2px,#ece7f8 2px 6px)}
+.tl-rest{top:29px;height:2px;border-radius:1px;box-shadow:none;background:#c9cfd6}
+.tl-form{top:21px;bottom:5px;border:1px dashed #b98a3c;border-radius:6px}
+.tl-form.tl-f-leave,.tl-form.tl-f-trip{border-color:#4ea79c}
+.tl-form.tl-f-comp{border-color:#8a74cf}
+.tl-form.pend{border-color:#6f6a64}
+.tl-plab{top:5px;font-size:11.5px;font-weight:600;color:#3d3a36;letter-spacing:.01em}
+.tl-plab.low{top:40px}
+.tl-track.tl-two{height:60px}
+.tl-axis{color:#8a857e;font-weight:500;font-size:11.5px}
+.dq-plantxt{color:#5c5249;background:#f5eedf}
+.dq-sw{width:22px;height:10px;border-radius:4px}
+.dq-sw.tl-lg-plan{background:#f2e6cc;border:0;height:14px}
+.dq-sw.tl-rest{height:2px;border-radius:1px;background:#c9cfd6}
+.dq-sw.tl-punch,.dq-sw.tl-rest{position:static}
+.dq-sw.tl-lg-pend{background:repeating-linear-gradient(135deg,#8a857e 0 2px,#ecebe8 2px 6px);border:0}
+.dq-legend{color:#5c5650}
+/* 每張卡選原因（2026-11-16 Eason：打卡跟核定差超過 30 分鐘要原因） */
+.dq-cardask{display:flex;flex-direction:column;gap:10px;background:#fff8ec;border:1px solid #f2dcb6;border-radius:10px;padding:10px 12px}
+.dq-cardrow{display:flex;flex-direction:column;gap:6px;padding-top:8px;border-top:1px solid #f2e4cb}
+.dq-cardrow:first-of-type{border-top:0;padding-top:0}
+.dq-cardlab{font-weight:700;font-variant-numeric:tabular-nums}
+.dq-chip.on{background:#3d3a36;border-color:#3d3a36;color:#fff}
+.du-cardask{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.du-cardask .du-cardrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
+.du-cardask select,.du-cardask input{font:inherit;min-height:40px}
+
+/* 時間軸第四版（2026-11-16 Eason 選「A 精準刻度＋科技風」，比較頁 https://claude.ai/artifact/UkNm9jxUr2VfDFmKZnFt3C ）：
+   班別＝淡靛藍帶＋上方括號、出勤＝翡翠綠、加班＝橘、出差＝天藍、忘刷＝紫（四實心色 dataviz 檢查器 --pairs all 全過，色盲 9.2）；
+   沒單＝同色 45° 斜紋、待審＝135° 斜紋、遲到早退＝紅斜紋；每小時一條淡格線；時間用等寬數字 */
+.tl-track{--tl-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;height:62px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:visible}
+.tl-track.tl-two{height:74px}
+.tl-plan{top:15px;bottom:17px;background:#e3e8f8;box-shadow:none;border-radius:0}
+.tl-grid{top:15px;bottom:17px;width:1px;border:0;background:#f1f5f9}
+.tl-grid.h{background:#e2e8f0}
+.tl-brk{position:absolute;top:8px;height:6px;border:1.5px solid #7b86c9;border-bottom:0;border-radius:2px 2px 0 0}
+.tl-blab{position:absolute;top:-2px;font:600 10.5px/1 var(--tl-mono);color:#5b67b3;white-space:nowrap;transform:translateX(-50%);background:#fff;padding:0 2px}
+.tl-punch,.tl-dev,.tl-rest{top:25px;height:8px;border-radius:2px;box-shadow:0 0 0 1px #fff}
+.tl-dot{top:21px;height:16px;width:3px!important;border-radius:1px;background:#10a37f}
+.tl-punch{background:#10a37f}
+.tl-extra{background:#7fd3b9}
+.tl-otok{background:#ea580c}
+.tl-ot{background:repeating-linear-gradient(45deg,#ea580c 0 2px,#fde3d3 2px 6px)}
+.tl-trip{background:#0284c7}
+.tl-trippend{background:repeating-linear-gradient(135deg,#0284c7 0 2px,#dbeffa 2px 6px)}
+.tl-missok{background:#7c3aed}
+.tl-miss{background:repeating-linear-gradient(45deg,#7c3aed 0 2px,#ece4fd 2px 6px)}
+.tl-short{background:repeating-linear-gradient(45deg,#dc2626 0 2px,#fde2e2 2px 6px)}
+.tl-leave{background:#94a3b8}
+.tl-leavepend{background:repeating-linear-gradient(135deg,#94a3b8 0 2px,#eef2f6 2px 6px)}
+.tl-comp{background:#a78bfa}
+.tl-comppend{background:repeating-linear-gradient(135deg,#a78bfa 0 2px,#f1ecfe 2px 6px)}
+.tl-rest{top:28px;height:2px;border-radius:0;box-shadow:none;background:#cbd5e1}
+.tl-form{top:21px;bottom:21px;border:1px dashed #94a3b8;border-radius:4px}
+.tl-form.tl-f-ot{border-color:#ea580c}
+.tl-form.tl-f-trip{border-color:#0284c7}
+.tl-form.tl-f-leave{border-color:#94a3b8}
+.tl-form.tl-f-comp{border-color:#a78bfa}
+.tl-form.pend{border-color:#334155}
+.tl-ann{position:absolute;top:36px;font:600 10.5px/1 var(--tl-mono);color:#9a3412;transform:translateX(-50%);white-space:nowrap}
+.tl-ann.neg{color:#b91c1c}
+.tl-plab{top:auto;bottom:2px;font:600 11px/1 var(--tl-mono);color:#0f172a;letter-spacing:0}
+.tl-plab.low{top:auto;bottom:-12px}
+.tl-axis{height:14px;font:500 10px/1 var(--tl-mono);color:#94a3b8;margin-top:2px}
+.tl-axis.two{height:14px}
+.dq-plantxt{color:#334155;background:#e3e8f8;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-weight:600}
+.dq-sw.tl-lg-plan{background:#e3e8f8;border:0;box-shadow:inset 0 2px 0 #7b86c9;height:14px}
+.dq-sw.tl-rest{height:2px;background:#cbd5e1}
+.dq-sw.tl-lg-pend{background:repeating-linear-gradient(135deg,#334155 0 2px,#e2e8f0 2px 6px);border:0}
+.dq-sw.tl-punch,.dq-sw.tl-rest{position:static}
+.tl{--tl-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+.tl-axis span{font:500 10px/1 var(--tl-mono);color:#94a3b8}
+.dq-plantxt{font-family:inherit;font-variant-numeric:tabular-nums}      /* 姓名旁的班表用一般字（等寬字在 375 寬會把時間拆兩行） */

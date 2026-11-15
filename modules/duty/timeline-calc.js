@@ -89,9 +89,10 @@ export function timelineModel(o) {
   const push = (list, kind) => list.forEach((s) => { if (s.b - s.a >= (kind === 'ot' || kind === 'otok' || kind === 'extra' ? SHOW_OT_MIN : SHOW_MIN)) devs.push({ a: s.a, b: s.b, kind }); });
   // 假單蓋住的缺勤：補休一個顏色、其他請假（含出差）一個顏色（2026-11-16 Eason：一目瞭然有沒有補休）
   const pushLeave = (list, cover, pend) => {
-    const comp = cover.filter((f) => f.comp), other = cover.filter((f) => !f.comp);
+    const comp = cover.filter((f) => f.comp), trip = cover.filter((f) => !f.comp && f.kind === 'trip'), other = cover.filter((f) => !f.comp && f.kind !== 'trip');
     push(inter(list, comp), pend ? 'comppend' : 'comp');
-    push(minus(inter(list, other), comp), pend ? 'leavepend' : 'leave');
+    push(minus(inter(list, trip), comp), pend ? 'trippend' : 'trip');      // 出差單獨一個顏色（2026-11-16 Eason 科技風配色：班別、出勤、加班、出差、忘刷）
+    push(minus(minus(inter(list, other), comp), trip), pend ? 'leavepend' : 'leave');
   };
   // 班表外的打卡：加班單蓋到＝加班（有單）；其餘照時間先後補到當天 8 小時為止＝比班表多（不用單）；再多＝加班沒單
   const splitExtra = (extra, workedMin) => {
@@ -113,7 +114,9 @@ export function timelineModel(o) {
       if (x.side === 'out') { const end = Math.max(...plan.filter((p) => p.b > x.a).map((p) => p.b), x.a); if (end > x.a) missing.push({ a: x.a, b: end }); }
       else { const st = Math.min(...plan.filter((p) => p.a < x.b).map((p) => p.a), x.b); if (x.b > st) missing.push({ a: st, b: x.b }); }
     });
-    push(missing, 'miss');
+    // 忘刷：有已核准的忘打卡單＝實心（單補上了），沒有＝斜紋（要補單）（2026-11-16）
+    const missOk = rs.some((r) => r && r.kind === 'miss' && !r.pending);
+    push(missing, missOk ? 'missok' : 'miss');
     const notWorked = minus(minus(work, punch), missing);
     pushLeave(notWorked, leaveCover, false);
     const rest = minus(notWorked, leaveCover);

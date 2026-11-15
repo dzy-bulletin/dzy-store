@@ -5,7 +5,8 @@
 import { whileLeaving } from './leaving.js';
 import { lossMock, lossAlias } from './mock-loss.js';
 import { transferMock, transferHome, TRANSFER_NODES, DEFAULT_TRANSFER_ALIAS } from './mock-transfer.js';   // 門市調撥假後端（獨立檔）
-import { LEAVE_TYPES as MOCK_LEAVES, viewCanWrite } from '../modules/duty/calc.js';   // 假別名稱沿用內建清單，假後端的「薪酬假別表」預設就是這些
+import { LEAVE_TYPES as MOCK_LEAVES, viewCanWrite } from '../modules/duty/calc.js';
+import { cardDiffs } from '../modules/duty/core-calc.js';      // 每張卡跟核定差（同打卡端 reqCardDiffs_）   // 假別名稱沿用內建清單，假後端的「薪酬假別表」預設就是這些
 import { inventory as invMock, homeItems as invHome } from './mock-inventory.js';   // 庫存盤點假後端（另一支檔案）
 const KEY = 'dzystore_mockdb';
 // e2e 注入的資料（window.__E2E_DATA，由測試每次隨機產生）；沒有就用下面內建預設，示範模式不受影響。
@@ -896,7 +897,7 @@ function dutyDo(d, action, b) {
     if (payLockMsg(d, b.date)) return ok({ date: b.date, results: (Array.isArray(b.items) ? b.items : []).slice(0, 40).map(it => ({ emp_id: String(it.emp_id), ok: false, error: 'pay_locked', message: payLockMsg(d, b.date) })), denied: [] });      // 薪資鎖月：每個人都擋
     const results = (Array.isArray(b.items) ? b.items : []).slice(0, 40).map(it => {
       const r = dutyDo(d, 'mgr_approve', Object.assign({}, it, { date: b.date, dry_run: true }));
-      return r.ok ? { emp_id: String(it.emp_id), ok: true, approved_hours: r.data.approved_hours, status_text: r.data.status_text } : { emp_id: String(it.emp_id), ok: false, error: r.error, message: r.message, probs: r.probs, need: r.need, need_doc: r.need_doc };
+      return r.ok ? { emp_id: String(it.emp_id), ok: true, approved_hours: r.data.approved_hours, status_text: r.data.status_text } : { emp_id: String(it.emp_id), ok: false, error: r.error, message: r.message, probs: r.probs, need: r.need, need_doc: r.need_doc, cards: r.cards };
     });
     return ok({ date: b.date, results, denied: [] });
   }
@@ -970,6 +971,14 @@ function dutyDo(d, action, b) {
         if (over >= (Number(d.diffRule) || 30)) return Object.assign(fail('BAD_INPUT', '這天還不能核定：核定比打卡多 ' + over + ' 分鐘（沒有打卡的時間要有忘打卡單、假單或補休單）。請同仁在 LINE「加班請假」補申請。'),
           { probs: [{ rule: 'over_credit', text: '核定比打卡多 ' + over + ' 分鐘（沒有打卡的時間要有忘打卡單、假單或補休單）' }], need: { over_min: over }, need_doc: true });
       }
+    }
+    // 每張卡跟核定差超過 30 分鐘要原因（2026-11-16 Eason；打卡端 REQ_CARD_REASON_FROM 預設 2026-11-17）：示範模式預設不擋（舊 e2e 的日子都在之後）；
+    // e2e 設 d.cardRule＝起算日（或 true＝2026-11-17）才打開。缺單的檢查在上面，單齊了才看這條，同打卡端
+    const cardFrom = d.cardRule === true ? '2026-11-17' : d.cardRule;
+    if (cardFrom && date >= cardFrom && periods.length && !String(b.diff_reason ?? '').trim()) {
+      const f = fakeOf(emp.emp_id);
+      const cards = f ? cardDiffs(f.segs, periods) : [];
+      if (cards.length) return Object.assign(fail('need_diff_reason', '核定和打卡差超過 30 分鐘：' + cards.map(c => (c.side === 'in' ? '上班卡 ' : '下班卡 ') + c.card + '（核定 ' + c.core + '，差 ' + c.min + ' 分）').join('、') + '，每張卡要選原因才能送出。'), { cards });
     }
     const dupIgn = Array.isArray(b.dup_ignore) ? b.dup_ignore.slice() : ((d.approved[date + emp.emp_id] || {}).dup_ignore || []);
     if (periods.length && dupIgn.length) status = (status === '正常' ? '' : status + '、') + '主管認定重複打卡（' + dupIgn.map(t => String(t).slice(11, 16)).sort().join('／') + '）';
