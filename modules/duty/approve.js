@@ -703,10 +703,10 @@ function buildCard(emp, date) {
       const noLine = false, canProxy = proxyOpen(date);
       mini.className = 'du-mini bad'; mini.textContent = '未符合';
       verdict.className = 'du-verdict gray du-verdict-over';
-      verdict.append(h('div', 'du-verdict-t', '未符合規定：打卡比班表多 ' + overText(pr.overMin) + '，沒有加班單'));
+      verdict.append(h('div', 'du-verdict-t', '未符合規定：要補加班單'));
       verdict.append(h('div', 'du-needk', '要補齊：'));
       const ul = h('ul', 'du-needs'), li = h('li');
-      li.append(h('span', 'du-need-t', '☐ 加班單（多出的時段：' + pr.over.map(x => x.start + '–' + x.end).join('、') + '）'));
+      li.append(h('span', 'du-need-t', '☐ 加班單 ' + pr.over.map(x => x.start + '–' + x.end).join('、') + '（' + overText(pr.overMin) + '）'));
       if (canProxy) { const b = h('button', 'btn sm ghost du-preproxy', '替他代開', { type: 'button' }); b.onclick = () => proxyForm(date, noLine, '打卡比班表多，沒有加班單'); li.append(b); }
       ul.append(li); verdict.append(ul);
       verdict.append(h('div', 'du-verdict-n', (canProxy ? '' : '有加班：請同仁在 LINE「加班請假」補申請，核准後這裡會自動重算。') + '沒有加班（例：提早到、晚打卡）：按「自己調」確認後照班表送出 ' + ck.approved_hours + ' 小時，多出的時段不算。'));
@@ -754,7 +754,7 @@ function buildCard(emp, date) {
         if (fixes.length) {
           verdict.append(h('div', 'du-needk', '要處理：'));
           const ul = h('ul', 'du-needs');
-          fixes.forEach(p => ul.append(h('li', null, '☐ ' + p.text)));
+          fixes.forEach(p => ul.append(h('li', null, '☐ ' + C.fixText(p, ps))));      // 直接講要怎麼改單（2026-11-15）
           verdict.append(ul, h('div', 'du-verdict-n', '已核准的單要作廢或請同仁改：點上面「已核准的申請」。'));
         }
       } else verdict.append(h('div', 'du-verdict-n', msg.replace(/^這天還不能核定：/, '')));

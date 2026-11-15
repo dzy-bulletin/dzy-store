@@ -231,14 +231,15 @@ export function renderQuick(ctx) {
         const pay = Object.assign({}, it); delete pay.emp_id;
         // 打卡超出班表＋加班單合計達 30 分鐘（2026-11-14 Eason 選 B）：不放進核定通過，到完整頁補加班單或主管自己調確認
         if (r.ok && core && core.overMin >= OVER_BLOCK_MIN) {
-          const t = '打卡比班表多 ' + core.overMin + ' 分鐘，沒有加班單（' + core.over.map((x) => x.start + '–' + x.end).join('、') + '）';
+          const t = '要補加班單 ' + core.over.map((x) => x.start + '–' + x.end).join('、') + '（' + core.overMin + ' 分鐘）';
           if (p.status === 'ok') Object.assign(U(p.key), { failed: '未符合：' + t, failedDiff: false, pre: true }); else Object.assign(U(p.key), { need: t });
           return;
         }
         if (r.ok) { Object.assign(U(p.key), { pass: { payload: pay, hours: r.approved_hours, notes: core ? core.notes : [] } }); return; }
         const probs = Array.isArray(r.probs) ? r.probs : [];
         if (!probs.length && !r.message && CHECK_CODE[r.error] === null) return;      // 格式類錯誤（不是缺單）：不標，照原本分類
-        const text = probs.length ? probs.map((x) => x.text).join('；') : String(r.message || CHECK_CODE[r.error] || '打卡系統不接受，請到完整頁核對').replace(/^這天還不能核定：/, '');
+        const ps = (Array.isArray(it.periods) ? it.periods : []).filter((x) => x && x.start && x.end).map((x) => x.start + '–' + x.end).join('、');
+        const text = probs.length ? probs.map((x) => C.fixText(x, ps)).join('；') : String(r.message || CHECK_CODE[r.error] || '打卡系統不接受，請到完整頁核對').replace(/^這天還不能核定：/, '');
         if (p.status === 'ok') Object.assign(U(p.key), { failed: '未符合：' + text, failedDiff: false, pre: true });
         else Object.assign(U(p.key), { need: text });
       });
@@ -329,7 +330,7 @@ export function renderQuick(ctx) {
       if (U(p.key).pass || e2eNoCore()) return true;
       const emp = empOf(p.key), core = emp && corePeriods({ segs: emp.segments, plan: emp.plan, reqs: st.appr[p.key] || [], brk: brk(emp.store) });
       if (!core || core.overMin < OVER_BLOCK_MIN) return true;
-      Object.assign(U(p.key), { failed: '未符合：打卡比班表多 ' + core.overMin + ' 分鐘，沒有加班單（' + core.over.map((x) => x.start + '–' + x.end).join('、') + '）', failedDiff: false, pre: true });
+      Object.assign(U(p.key), { failed: '未符合：要補加班單 ' + core.over.map((x) => x.start + '–' + x.end).join('、') + '（' + core.overMin + ' 分鐘）', failedDiff: false, pre: true });
       return false;
     });
     if (!list.length) { recompute(); render(); return; }

@@ -512,3 +512,34 @@ export function ft8Text(s) {
 }
 /** 代開假單預填時數：還差的時數往上取到半小時（LINE 申請最小 0.5 小時） */
 export const ft8Round = (gap) => Math.max(0.5, Math.ceil((Number(gap) || 0) * 2 - 1e-9) / 2);
+
+// 「要處理」改成直接講要怎麼改單（2026-11-15 Eason：不說明原因，直接跟主管說要什麼單才能通過；所有同仁一體適用）。
+// p＝打卡端回的 {rule, text}；ps＝核定時段字串（「11:30–17:30、18:30–20:15」）。認不出的格式照原文。
+const HM_RE = /(\d{1,2}:\d{2})[–-](\d{1,2}:\d{2})/g;
+const fxMin = s => { const [a, b] = s.split(':').map(Number); return a * 60 + b; };
+const fxHm = m => String(Math.floor(m / 60) % 24).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+function spansOf(s) { const out = []; let m; HM_RE.lastIndex = 0; while ((m = HM_RE.exec(String(s || '')))) { const a = fxMin(m[1]); let b = fxMin(m[2]); if (b <= a) b += 1440; out.push([a, b]); } return out; }
+export function fixText(p, ps) {
+  const t = String((p && p.text) || ''), rule = p && p.rule;
+  let m;
+  if (rule === 'ot_void' && (m = /卻有 ([\d.]+) 小時的已核准加班單/.exec(t))) return '把已核准的加班單（' + m[1] + ' 小時）作廢';
+  if (rule === 'ot_hours' && (m = /^加班單 ([\d.]+) 小時比應有的 ([\d.]+) 小時多/.exec(t))) return '加班單改成 ' + m[2] + ' 小時（現在 ' + m[1] + ' 小時）';
+  if (rule === 'ot_slot' && (m = /^加班單 (\d{1,2}:\d{2})[–-](\d{1,2}:\d{2})/.exec(t))) {
+    const [ot] = spansOf(m[1] + '–' + m[2]);
+    const hit = spansOf(ps).map(([a, b]) => [Math.max(a, ot[0]), Math.min(b, ot[1])]).filter(([a, b]) => b > a);
+    if (hit.length === 1) return '加班單 ' + m[1] + '–' + m[2] + ' 改成 ' + fxHm(hit[0][0]) + '–' + fxHm(hit[0][1]);
+    return '加班單 ' + m[1] + '–' + m[2] + ' 改到核定時段內' + (ps ? '（' + ps + '）' : '');
+  }
+  if (rule === 'ot_in_sched' && (m = /^加班單 (\d{1,2}:\d{2})[–-](\d{1,2}:\d{2}).*?在班表上班時段內（(.*)）/.exec(t))) {
+    const [ot] = spansOf(m[1] + '–' + m[2]);
+    const ends = spansOf(m[3]).map(x => x[1]).filter(e => e > ot[0] && e < ot[1]);
+    if (ends.length) return '加班單 ' + m[1] + '–' + m[2] + ' 改成 ' + fxHm(Math.max(...ends)) + '–' + m[2] + '（從班表下班開始）';
+    return '加班單 ' + m[1] + '–' + m[2] + ' 改到班表下班之後';
+  }
+  if (rule === 'leave') {
+    if ((m = /^登記了(.+?) ([\d.]+) 小時，但沒有已核准的(假單|出差單)$/.exec(t))) return '補' + m[1] + ' ' + m[2] + ' 小時的' + m[3] + '（或核定拿掉這筆' + m[1] + '）';
+    if ((m = /^(.+?)核定登記 ([\d.]+) 小時，已核准的單是 ([\d.]+) 小時$/.exec(t))) return '核定的' + m[1] + '改成 ' + m[3] + ' 小時';
+    if ((m = /^有已核准的(.+?) ([\d.]+) 小時，核定沒有登記$/.exec(t))) return '核定登記' + m[1] + ' ' + m[2] + ' 小時';
+  }
+  return t;
+}
