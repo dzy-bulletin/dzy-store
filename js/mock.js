@@ -551,7 +551,7 @@ function dutyStore(code) {
   return db.duty2[code];
 }
 function withFake(code, fn) { const prev = curFake; curFake = code && code !== 'TEST1' ? DUTY2_FAKE : null; try { return fn(); } finally { curFake = prev; } }
-const ALL_OPS = { mgr_day: 'employees', mgr_pending_approvals: 'items', mgr_req_pending: 'items', mgr_req_day: null, payroll_leave_options: null, mgr_req_month: 'items', hr_return_list: 'items' };
+const ALL_OPS = { mgr_day: 'employees', mgr_pending_approvals: 'items', mgr_req_pending: 'items', mgr_req_day: null, payroll_leave_options: null, mgr_req_month: 'items', hr_return_list: 'items', duty_wait_list: 'items' };
 // 合併時要併的清單（mgr_req_month 有兩份：申請 items、核定 leaves）
 const listsOfOp = op => (op === 'mgr_req_month' ? ['items', 'leaves', 'log'] : ALL_OPS[op] ? [ALL_OPS[op]] : []);
 // 支援標示（對照 server/proxy/duty.js filterFor 的 support_from，2026-10-26）：示範人物的 support＝{門市代號: {員編: 原單位名稱}}，只在個人登入時加
@@ -973,6 +973,7 @@ function dutyDo(d, action, b) {
     const rec = { periods: periods.map(p => ({ ...p })), approved_hours: hours, status_text: status, manager_name: MGR, dup_ignore: periods.length ? dupIgn : [], ...(String(b.diff_reason ?? '').trim() ? { diff_reason: String(b.diff_reason).trim() } : {}) };
     d.approved[date + emp.emp_id] = rec; d.leave[date + emp.emp_id] = leaves;
     for (const x of (d.returns || [])) if (x.status === 'open' && x.emp_id === emp.emp_id && x.date === date) x.status = 'resolved';      // 人資退回：重核就結案
+    for (const x of (d.waits || [])) if (x.status === 'open' && x.emp_id === emp.emp_id && x.date === date) x.status = 'resolved';      // 等同仁補單：核定成功就結案（2026-11-15）
     (d.hlog = d.hlog || []).push({ at: new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 19) + '+08:00', date, emp_id: emp.emp_id, name: emp.name, hours, status, periods: periods.map(p => p.start + '-' + p.end).join(','), by: MGR });   // 核定紀錄（打卡端 approved 分頁只追加）
     return ok({ date, emp_id: emp.emp_id, name: emp.name, periods, approved_hours: hours, ...leaveOut(leaves), status_text: status, manager_name: MGR });
   }
@@ -1081,6 +1082,25 @@ function dutyDo(d, action, b) {
     const r = { id: 'P' + (d.reqs.length + 1), created_at: new Date().toISOString(), emp_id: emp.emp_id, name: emp.name, kind: String(b.kind || 'miss'), date: b.date, leave_type: '', start: b.start || '', end: b.end || '', hours: null, miss_type: b.miss_type || '', reason, attach_id: '', status: 'pending', upper_kind: 'director', proxy_by: b.__who ? b.__who.by : MGR };
     d.reqs.push(r);
     return ok({ id: r.id, summary: reqSummary(r) });
+  }
+  // 等同仁補單（2026-11-15，營運系統 proxy/duty.js localAction duty_wait_*，docs/duty-timeline）：同一人同一天只能一筆在等；核定成功就結案
+  if (action === 'duty_wait_list') return ok({ items: (d.waits || []).filter(x => x.status === 'open').map(x => ({ id: x.id, emp_id: x.emp_id, date: x.date, emp_name: x.emp_name, what: x.what, req_ids: x.req_ids, by_name: x.by_name, created_at: x.created_at, can_cancel: true })) });
+  if (action === 'duty_wait_add') {
+    const what = String(b.what ?? '').trim();
+    if (!what) return fail('BAD_INPUT', '要寫等什麼單');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.date || ''))) return fail('BAD_INPUT', '日期格式不對');
+    d.waits = d.waits || [];
+    if (d.waits.some(x => x.status === 'open' && x.emp_id === b.emp_id && x.date === b.date)) return fail('BAD_INPUT', '這天已經在等同仁補單');
+    const emp = d.roster.find(r => r.emp_id === b.emp_id);
+    const x = { id: d.waits.length + 1, emp_id: String(b.emp_id), date: String(b.date), emp_name: emp ? emp.name : String(b.emp_name || ''), what: what.slice(0, 200), req_ids: Array.isArray(b.req_ids) ? b.req_ids.map(String).slice(0, 20) : [], by_name: MGR, created_at: new Date().toISOString(), status: 'open' };
+    d.waits.push(x);
+    return ok({ id: x.id });
+  }
+  if (action === 'duty_wait_cancel') {
+    const x = (d.waits || []).find(y => y.id === Number(b.id) && y.status === 'open');
+    if (!x) return fail('NOT_FOUND', '這筆已經處理過或找不到，請重新整理');
+    x.status = 'cancelled';
+    return ok({ cancelled: true, id: x.id });
   }
   if (action === 'hr_return_list') return ok({ items: (d.returns || []).filter(x => x.status === 'open').map(x => ({ id: x.id, emp_id: x.emp_id, date: x.date, emp_name: x.emp_name, reason: x.reason, by_name: x.by_name, created_at: x.created_at, lock_unknown: false, can_cancel: !!d.returnOk })) });
   if (action === 'hr_return_create') {           // 營運系統 proxy/duty.js localAction（2026-11-13）

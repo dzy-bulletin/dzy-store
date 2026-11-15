@@ -9,11 +9,15 @@ import { qrButton } from './qr.js';
 import { api } from '../../js/api.js';
 import { planFlags } from './quick-calc.js';
 import { ssoSwitch, setSession, toSession } from '../../js/auth.js';
-import { quickWanted, quickAvailable, renderQuick, backBar, e2eNoCore } from './quick.js';
+import { renderQuick, backBar, e2eNoCore } from './quick.js';
 import { canBg, watchJob, refreshJobs, rejectBar } from './bg.js';
 
+// 2026-11-15 考勤核定合成一頁時間軸（docs/duty-timeline/）：所有人都用新頁（quick.js）；舊的完整頁只留系統管理員從新頁最下面切回，
+// 到 FULL_UNTIL 為止當緊急備用（Eason 定 14 天），之後連程式一起刪。卡片的編輯（buildCard）搬進新頁的「細調」，所以這支檔留著。
+export const FULL_UNTIL = '2026-11-30';
+export const fullAllowed = (ctx) => !!S.dqFull && !!(ctx && ctx.session && ctx.session.role === 'admin') && C.taipeiToday() <= FULL_UNTIL;
 export function renderApprove(ctx) {
-  if (quickWanted(ctx)) return renderQuick(ctx);      // 手機寬度：預設用「一頁核定」（quick.js）；完整頁是退路
+  if (!fullAllowed(ctx)) return renderQuick(ctx);
   const el = ctx.el;
   el.innerHTML = `<div id="duQrSlot"></div><div class="du-datebar"><button type="button" class="btn ghost du-nav" id="duPrev" aria-label="前一天">‹</button>
     <input type="date" id="duDate" aria-label="日期"><button type="button" class="btn ghost du-nav" id="duNext" aria-label="後一天">›</button>
@@ -21,78 +25,15 @@ export function renderApprove(ctx) {
     <div id="duBg"></div><div id="duRet"></div><div id="duPend"></div><div id="duDayBox"></div>`;
   const dateIn = el.querySelector('#duDate'), pendEl = el.querySelector('#duPend'), box = el.querySelector('#duDayBox'), retEl = el.querySelector('#duRet');
   const live = () => el.isConnected;
-  if (quickAvailable(ctx)) el.insertBefore(backBar(ctx), el.firstChild);      // 手機的完整頁：上面一顆「回到一頁核定」
+  el.insertBefore(backBar(ctx), el.firstChild);      // 舊畫面（管理員緊急備用）：上面一顆「回到新畫面」
   if (dutyManager(ctx.session) && !S.all) el.querySelector('#duQrSlot').append(qrButton(el));      // 打卡 QR（同仁定位抓不到時給他掃），日期列上方
   // 考勤副本（2026-11-14）：背景送出被打卡系統退回的，列在最上面；點了跳到那天那位
   el.querySelector('#duBg').append(rejectBar((date, empId) => { S.focusEmp = rowKey({ emp_id: empId }); delete S.dayCache[date]; loadDay(date); }));
   refreshJobs();
 
-  // ---------- 本月待核定提醒（manager.html:1604–1745）：沒有待核定＝整塊不畫 ----------
-  function loadPending() {
-    (S.all ? callAll('mgr_pending_approvals') : call('mgr_pending_approvals')).then(r => { if (!live()) return; S.pend = Array.isArray(r.items) ? r.items : []; S.pendFailed = r.failed || []; drawPending(); },
-      e => { if (live()) failBar(pendEl, '本月待核定提醒', e, loadPending); });
-  }
-  function drawPending() {
-    pendEl.innerHTML = '';
-    const items = S.pend || [];
-    failedStores(pendEl, S.pendFailed, loadPending);
-    if (!items.length) return;
-    // 天數只算核得了的（2026-11-10）：那天全部是只能看的人（督導看區內門市、原單位主管看支援帳號…）不是你的待辦，
-    // 不算天數、列在最後面。首頁待辦是同一個算法（calc.js pendGroups），兩邊的天數才對得起來
-    const { mine, ro } = C.pendGroups(items, it => canWriteRow('hours', it.emp_id, it.store));
-    const groups = mine.concat(ro);
-    const card = h('div', 'du-pa');
-    card.append(h('div', 'du-pa-title', mine.length ? '本月還有 ' + mine.length + ' 天沒核定' : '本月沒有要你核定的日子'));
-    if (mine.length) card.append(h('div', 'du-pa-sub', '點名字直接跳到那天核定'));
-    const shown = S.pendAll ? groups : groups.slice(0, 5);
-    const roNote = () => h('div', 'du-pa-ronote', mine.length ? '另有 ' + ro.length + ' 天只能看，不算在上面的天數裡' : '以下 ' + ro.length + ' 天只能看（不是你要核定的）');
-    shown.forEach(g => {
-      if (ro.length && g === ro[0]) card.append(roNote());
-      const row = h('div', 'du-pa-group'), names = h('div', 'du-pa-names');
-      row.append(h('div', 'du-pa-date', C.weekdayLabel(g.date)));
-      g.names.forEach(n => {
-        const chip = h('button', 'du-chip', n.name + (n.storeName ? '・' + n.storeName : ''), { type: 'button' });
-        const sup = supportTag(n); if (sup) chip.append(sup);
-        chip.dataset.date = g.date; chip.dataset.emp = String(n.emp_id); if (n.store) chip.dataset.store = n.store;
-        chip.onclick = () => { S.focusEmp = rowKey(n); loadDay(g.date); };
-        names.append(chip);
-      });
-      row.append(names); card.append(row);
-    });
-    if (ro.length && shown.indexOf(ro[0]) < 0) card.append(roNote());      // 只能看的日子都還收在「再顯示」裡：這行提示照樣要看得到
-    if (!S.pendAll && groups.length > 5) {
-      const more = h('button', 'du-more', '再顯示 ' + (groups.length - 5) + ' 天', { type: 'button' });
-      more.onclick = () => { S.pendAll = true; drawPending(); };
-      card.append(more);
-    }
-    pendEl.append(card);
-  }
-  // ---------- 人資退回待重核（2026-11-13，管理系統 docs/att-void-hr/return-spec.md）：沒有就整塊不畫 ----------
-  function loadReturns() {
-    (S.all ? callAll('hr_return_list') : call('hr_return_list')).then(r => { if (live()) drawReturns(Array.isArray(r.items) ? r.items : []); }, () => { if (live()) retEl.innerHTML = ''; });
-  }
-  function drawReturns(items) {
-    retEl.innerHTML = '';
-    if (!items.length) return;
-    const card = h('div', 'du-pa du-hrret-list');
-    card.append(h('div', 'du-pa-title', '人資退回 ' + items.length + ' 筆，請重新核定'));
-    card.append(h('div', 'du-pa-sub', '點名字跳到那天，核對後重新送出核定就結案；原本的核定在重核前照舊算'));
-    items.slice().sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))).forEach(it => {
-      const row = h('div', 'du-pa-group');
-      row.append(h('div', 'du-pa-date', C.weekdayLabel(it.date)));
-      const right = h('div', 'du-hrret-item');
-      const chip = h('button', 'du-chip', (it.emp_name || it.emp_id) + (it.storeName ? '・' + it.storeName : ''), { type: 'button' });
-      chip.onclick = () => { S.focusEmp = rowKey(it); loadDay(it.date); };
-      right.append(chip, h('div', 'du-hrret-why', '理由：' + it.reason + '（' + it.by_name + '）' + (it.lock_unknown ? '　⚠ 退回時沒辦法確認薪資有沒有鎖定' : '')));
-      if (it.can_cancel) {
-        const cb = h('button', 'btn sm ghost du-hrret-cancel', '取消退回', { type: 'button' });
-        cb.onclick = () => { cb.disabled = true; call('hr_return_cancel', { id: it.id, store: it.store }).then(() => { delete S.dayCache[it.date]; loadReturns(); if (S.date === it.date) loadDay(it.date); }, e => { cb.disabled = false; cb.textContent = '✕ ' + (e.message || '取消失敗'); }); };
-        right.append(cb);
-      }
-      row.append(right); card.append(row);
-    });
-    retEl.append(card);
-  }
+  const pendPanel = pendingPanel(pendEl, (date, key) => { S.focusEmp = key; loadDay(date); });
+  const loadPending = pendPanel.load, drawPending = pendPanel.draw;
+  const loadReturns = returnsPanel(retEl, (date, key) => { S.focusEmp = key; loadDay(date); }, (date) => { if (S.date === date) loadDay(date); }, live).load;
   box.addEventListener('hr-returned', () => loadReturns());
   box.addEventListener('duty-reload-day', e => { const d = e.detail || {}; S.focusEmp = rowKey(d.emp); delete S.dayCache[d.date]; loadDay(d.date); });   // 背景送出被退回：重新載入那天
   // 核定成功後即時從提醒移除（不必重打後端）
@@ -273,6 +214,81 @@ export function renderApprove(ctx) {
   loadDay(S.date, S.leave ? null : loadLeave());
 }
 
+
+// ---------- 本月待核定提醒（manager.html:1604–1745）：沒有待核定＝整塊不畫。新頁與舊畫面共用（2026-11-15）----------
+export function pendingPanel(pendEl, onPick) {
+  const el = pendEl;
+  function loadPending() {
+    (S.all ? callAll('mgr_pending_approvals') : call('mgr_pending_approvals')).then(r => { if (!el.isConnected) return; S.pend = Array.isArray(r.items) ? r.items : []; S.pendFailed = r.failed || []; drawPending(); },
+      e => { if (el.isConnected) failBar(pendEl, '本月待核定提醒', e, loadPending); });
+  }
+  function drawPending() {
+    pendEl.innerHTML = '';
+    const items = S.pend || [];
+    failedStores(pendEl, S.pendFailed, loadPending);
+    if (!items.length) return;
+    // 天數只算核得了的（2026-11-10）：那天全部是只能看的人（督導看區內門市、原單位主管看支援帳號…）不是你的待辦，
+    // 不算天數、列在最後面。首頁待辦是同一個算法（calc.js pendGroups），兩邊的天數才對得起來
+    const { mine, ro } = C.pendGroups(items, it => canWriteRow('hours', it.emp_id, it.store));
+    const groups = mine.concat(ro);
+    const card = h('div', 'du-pa');
+    card.append(h('div', 'du-pa-title', mine.length ? '本月還有 ' + mine.length + ' 天沒核定' : '本月沒有要你核定的日子'));
+    if (mine.length) card.append(h('div', 'du-pa-sub', '點名字直接跳到那天核定'));
+    const shown = S.pendAll ? groups : groups.slice(0, 5);
+    const roNote = () => h('div', 'du-pa-ronote', mine.length ? '另有 ' + ro.length + ' 天只能看，不算在上面的天數裡' : '以下 ' + ro.length + ' 天只能看（不是你要核定的）');
+    shown.forEach(g => {
+      if (ro.length && g === ro[0]) card.append(roNote());
+      const row = h('div', 'du-pa-group'), names = h('div', 'du-pa-names');
+      row.append(h('div', 'du-pa-date', C.weekdayLabel(g.date)));
+      g.names.forEach(n => {
+        const chip = h('button', 'du-chip', n.name + (n.storeName ? '・' + n.storeName : ''), { type: 'button' });
+        const sup = supportTag(n); if (sup) chip.append(sup);
+        chip.dataset.date = g.date; chip.dataset.emp = String(n.emp_id); if (n.store) chip.dataset.store = n.store;
+        chip.onclick = () => onPick(g.date, rowKey(n));
+        names.append(chip);
+      });
+      row.append(names); card.append(row);
+    });
+    if (ro.length && shown.indexOf(ro[0]) < 0) card.append(roNote());      // 只能看的日子都還收在「再顯示」裡：這行提示照樣要看得到
+    if (!S.pendAll && groups.length > 5) {
+      const more = h('button', 'du-more', '再顯示 ' + (groups.length - 5) + ' 天', { type: 'button' });
+      more.onclick = () => { S.pendAll = true; drawPending(); };
+      card.append(more);
+    }
+    pendEl.append(card);
+  }
+  return { load: loadPending, draw: drawPending };
+}
+// ---------- 人資退回待重核（2026-11-13，管理系統 docs/att-void-hr/return-spec.md）：沒有就整塊不畫 ----------
+export function returnsPanel(retEl, onPick, onCancel, live) {
+  function loadReturns() {
+    (S.all ? callAll('hr_return_list') : call('hr_return_list')).then(r => { if (live()) drawReturns(Array.isArray(r.items) ? r.items : []); }, () => { if (live()) retEl.innerHTML = ''; });
+  }
+  function drawReturns(items) {
+    retEl.innerHTML = '';
+    if (!items.length) return;
+    const card = h('div', 'du-pa du-hrret-list');
+    card.append(h('div', 'du-pa-title', '人資退回 ' + items.length + ' 筆，請重新核定'));
+    card.append(h('div', 'du-pa-sub', '點名字跳到那天，核對後重新送出核定就結案；原本的核定在重核前照舊算'));
+    items.slice().sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))).forEach(it => {
+      const row = h('div', 'du-pa-group');
+      row.append(h('div', 'du-pa-date', C.weekdayLabel(it.date)));
+      const right = h('div', 'du-hrret-item');
+      const chip = h('button', 'du-chip', (it.emp_name || it.emp_id) + (it.storeName ? '・' + it.storeName : ''), { type: 'button' });
+      chip.onclick = () => onPick(it.date, rowKey(it));
+      right.append(chip, h('div', 'du-hrret-why', '理由：' + it.reason + '（' + it.by_name + '）' + (it.lock_unknown ? '　⚠ 退回時沒辦法確認薪資有沒有鎖定' : '')));
+      if (it.can_cancel) {
+        const cb = h('button', 'btn sm ghost du-hrret-cancel', '取消退回', { type: 'button' });
+        cb.onclick = () => { cb.disabled = true; call('hr_return_cancel', { id: it.id, store: it.store }).then(() => { delete S.dayCache[it.date]; loadReturns(); onCancel(it.date); }, e => { cb.disabled = false; cb.textContent = '✕ ' + (e.message || '取消失敗'); }); };
+        right.append(cb);
+      }
+      row.append(right); card.append(row);
+    });
+    retEl.append(card);
+  }
+  return { load: loadReturns };
+}
+
 // ---------- 送出前先檢查（2026-11-14 Eason「五個全做」第 1 項，docs/duty-easy/）----------
 // 打卡系統 mgr_approve_check：用「送出核定」同一套檢查跑到寫入前就停，回每個人會不會被擋、被擋的原因。
 // 一天打開時整批算一次（每家店一次），之後主管改了某人的時段或假別，停手 1 秒只重算那一位（buildCard 的 queueCheck）。
@@ -339,7 +355,7 @@ function renderEmployees(box, date, employees, failed, retry) {
 
 // 捷徑卡（2026-11-01 Eason 選 A）：歸屬這組、但在別家店打卡的人（例：財務部同仁固定在央廚打卡，總部那組也看得到她）。
 // 資料只有一份，在打卡那家核；按鈕換店過去（同「換店」：換新 token、整頁重載）
-function elsewhereCards(list) {
+export function elsewhereCards(list) {
   const wrap = h('div', 'du-else');
   list.forEach(x => {
     const card = h('div', 'du-card du-else-card');
@@ -370,6 +386,23 @@ function periodRow(p, onChange) {
   return row;
 }
 
+// 新頁的「細調」（2026-11-15，docs/duty-timeline/）：舊畫面的整張卡片搬進新頁的時間軸卡片，展開就能改時段、假別、遲到分鐘、
+// 重複打卡、原因、作廢申請、代開…；規則一行都不重寫。reqs＝那天這個人已核准的申請，pending＝還沒審的；開好就先跟打卡系統檢查一次。
+export function fineCard(emp, date, o) {
+  const card = buildCard(emp, date);
+  card.classList.add('du-fine');
+  card.__setExpanded(true);
+  if (card.__applyReq) card.__applyReq((o && o.reqs) || []);
+  if (card.__applyPending) card.__applyPending((o && o.pending) || []);
+  if (!(o && o.defer)) { const box = h('div'); box.append(card); runChecks(box, date, o && o.current); }
+  return card;
+}
+// 一次開很多張細調（詳細模式）：先建好、最後合併成每家店一批（最多 40 人）跟打卡系統檢查，不要一張一個請求
+export function checkCards(cards, date, current) {
+  const box = h('div'); cards.forEach(c => box.append(c));
+  runChecks(box, date, current);
+}
+const NOT_COUNT_REASONS = ['下班後私人逗留', '等人來載', '忘按下班，其實已經離開'];
 function buildCard(emp, date) {
   const br = brk(emp.store);
   const readOnly = !canWriteRow('hours', emp.emp_id, emp.store);      // 不在核定工時名單（只看）：不出現送出核定，欄位不可改
@@ -718,7 +751,22 @@ function buildCard(emp, date) {
       if (!editOpen) { const go = h('button', 'btn du-verdict-go', '核定通過（補齊後才能按）', { type: 'button' }); go.disabled = true; acts.append(go); }
       acts.append(adj); verdict.append(acts);
       setEdit(editOpen);
-      if (editOpen) submit.textContent = '確認沒加班，照班表核定 ' + ck.approved_hours + ' 小時';
+      if (editOpen) {
+        submit.textContent = '確認沒加班，照班表核定 ' + ck.approved_hours + ' 小時';
+        // 多做的時段不認列要選理由（2026-11-15 開工確認第 2 題）：理由寫進核定紀錄（diff_reason），不通知同仁
+        const nc = h('div', 'du-notcount');
+        nc.append(h('div', 'du-needk', '不認列的理由（必選，會留在核定紀錄）'));
+        const sel = h('select', 'du-nc-sel', null, { 'aria-label': '不認列的理由' });
+        ['', ...NOT_COUNT_REASONS, '其他'].forEach((t) => sel.append(h('option', null, t || '請選一個', { value: t })));
+        const other = h('input', 'du-nc-other', null, { type: 'text', maxlength: '80', placeholder: '其他理由（必填）', 'aria-label': '其他理由' });
+        const cur = String(diffIn.value || '').replace(/^不認列：/, '');
+        if (/^不認列：/.test(diffIn.value || '')) { if (NOT_COUNT_REASONS.includes(cur)) sel.value = cur; else { sel.value = '其他'; other.value = cur; } }
+        other.hidden = sel.value !== '其他';
+        const put = () => { other.hidden = sel.value !== '其他'; const t = sel.value === '其他' ? other.value.trim() : sel.value; card.__notCount = t; diffIn.value = t ? '不認列：' + t : ''; };
+        sel.onchange = put; other.oninput = put; put();
+        nc.append(sel, other);
+        verdict.append(nc);
+      }
     } else if (ck.ok) {
       mini.className = 'du-mini ok'; mini.textContent = '核定通過';
       verdict.className = 'du-verdict ok';
@@ -848,7 +896,8 @@ function buildCard(emp, date) {
     say('ok', '✓ 已核定，正在背景送到打卡系統，可以繼續核下一位');
     card.__pending = false;
     planDone = true; if (card.__planR) card.__showPlan(card.__planR);
-    card.dispatchEvent(new CustomEvent('emp-approved', { bubbles: true, detail: { emp_id: emp.emp_id, date: approveDate, store: emp.store } }));
+    const qp = readRows().filter(r => r.start && r.end).map(r => ({ start: r.start, end: r.end }));
+    card.dispatchEvent(new CustomEvent('emp-approved', { bubbles: true, detail: { emp_id: emp.emp_id, date: approveDate, store: emp.store, queued: true, hours: C.round2(C.sumPeriods(readRows()).total + tripH()), periods: qp } }));
     watchJob(job, it => {
       if (!card.isConnected) return;
       if (it.state === 'done') {
@@ -871,6 +920,7 @@ function buildCard(emp, date) {
   }
 
   submit.onclick = async () => {
+    if (/^確認沒加班/.test(submit.textContent) && !card.__notCount) return say('bad', '✕ 請先選不認列的理由（會留在核定紀錄）');
     // 硬擋（Eason 2026-08-22「硬擋，不給送出」，manager.html:1296–1320）：額度用完、期限過了的假別不給送出。
     // 下拉的 disabled 只擋滑鼠，程式指定仍設得進去，所以送出前用同一份資料再判一次；原本就選著這個假別的既有紀錄放行，否則已超額的人連重送核定都做不了
     const lv = leaveList();

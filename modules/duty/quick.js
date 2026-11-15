@@ -1,7 +1,9 @@
 // 考勤管理「手機一頁核定」（核定工時分頁在手機寬度 ≤860px 的新畫面；規格 docs/duty-quick/requirements.md，2026-11-09 Eason 定案）。
 // 一頁完成：沒問題的人一鍵核定、有異常的人一人一張卡按一下完成、少打卡又沒單的人先擋住。舊畫面（approve.js）完整保留當退路。
 // 規則都在 quick-calc.js（純函式，有單元測試）；這裡只負責讀資料、畫畫面、依序呼叫既有的 mgr_approve／mgr_req_decide／mgr_req_proxy。
-import { S, call, callAll, h, failBar, failedStores, supportTag, loadLeave, staleLeave, leaveFor, canWriteRow, brk, dutyManager, dutyHours, viewNoHoursStore, snapLabel, checkOnce } from './state.js';
+import { S, call, callAll, h, failBar, failedStores, supportTag, loadLeave, staleLeave, leaveFor, canWriteRow, brk, dutyManager, dutyHours, viewNoHoursStore, snapLabel, checkOnce, reqShown, dropChecks } from './state.js';
+import * as T from './timeline-calc.js';
+import { fineCard, checkCards, pendingPanel, returnsPanel, elsewhereCards, FULL_UNTIL } from './approve.js';
 import * as C from './calc.js';
 import * as Q from './quick-calc.js';
 import { qrButton } from './qr.js';
@@ -24,9 +26,10 @@ const skipDel = (keys) => { const m = skipGet(); keys.forEach((k) => delete m[k]
 
 // 這個人、這個畫面能不能用一頁核定：不是管理者代看、有核定工時的對象。
 // 2026-11-14 考勤管理好上手第 3 項（Eason 全照推薦）：電腦也預設一頁核定、全部門市也能用（按門市分組）；系統管理員「各店總覽」維持舊畫面。
+// 2026-11-15 合成一頁（docs/duty-timeline/）：所有人都用這頁（系統管理員選了門市之後也是；只看名單、沒有核定工時的人看到的是唯讀卡）
 export function quickAvailable(ctx) {
   const s = ctx && ctx.session;
-  return QUICK_ON && !!s && !S.admin && s.role !== 'admin' && dutyHours(s) && !viewNoHoursStore(s);
+  return QUICK_ON && !!s;
 }
 // 全部門市：讀取改走合併讀（callAll），回來的列都帶 store
 const rd = (op, body) => (S.all ? callAll(op, body) : call(op, body));
@@ -36,6 +39,27 @@ const REQ_CLS = { leave: 'leave', ot: 'ot', trip: 'trip', miss: 'miss' };
 const taipeiMin = () => { const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date()).split(':'); return Number(p[0]) * 60 + Number(p[1]); };
 const hid = (it) => String(it.id) + '|' + (it.store || '');
 
+const MODE_KEY = 'dzystore_dutymode';
+function modeGet() { try { return localStorage.getItem(MODE_KEY) === 'detail'; } catch (e) { return false; } }
+function modePut(d) { try { localStorage.setItem(MODE_KEY, d ? 'detail' : 'simple'); } catch (e) {} }
+// 時間軸：一個人那天的班表（虛線）、打卡（灰條）、單（框）、差異（色塊）。資料由 timeline-calc.js 算，這裡只畫
+const TL_KIND = { short: '少做', miss: '缺卡', leave: '請假', leavepend: '請假（假單待審）', ot: '多做、沒有加班單', otok: '多做、有加班單' };
+export function timelineEl(m, label) {
+  const wrap = h('div', 'tl');
+  const track = h('div', 'tl-track', null, { role: 'img', 'aria-label': label || '時間軸' });
+  const W = m.to - m.from, pct = (t) => ((t - m.from) / W * 100).toFixed(2) + '%', wid = (a, b) => ((b - a) / W * 100).toFixed(2) + '%';
+  const box = (cls, a, b, title) => { const d = h('div', cls, null, title ? { title } : null); d.style.left = pct(a); d.style.width = wid(a, b); track.append(d); return d; };
+  m.ticks.forEach((t) => { if (t > m.from && t < m.to) { const g = h('div', 'tl-grid'); g.style.left = pct(t); track.append(g); } });
+  m.plan.forEach((s) => box('tl-plan', s.a, s.b, '班表 ' + T.hhmm(s.a) + '–' + T.hhmm(s.b)));
+  m.forms.forEach((f) => box('tl-form tl-f-' + f.kind + (f.pending ? ' pend' : ''), f.a, f.b, (f.pending ? '待審 ' : '') + f.label + ' ' + T.hhmm(f.a) + '–' + T.hhmm(f.b)));
+  m.punch.forEach((s) => box('tl-punch', s.a, s.b, '打卡 ' + T.hhmm(s.a) + '–' + T.hhmm(s.b)));
+  m.open.forEach((x) => { const t = x.a != null ? x.a : x.b; box('tl-dot', t, t, (x.side === 'out' ? '只有上班卡 ' : '只有下班卡 ') + T.hhmm(t)); });
+  m.devs.forEach((d) => box('tl-dev tl-' + d.kind, d.a, d.b, TL_KIND[d.kind] + ' ' + T.hhmm(d.a) + '–' + T.hhmm(d.b)));
+  const ax = h('div', 'tl-axis');
+  m.ticks.forEach((t) => { const hh = Math.floor(t / 60), x = h('span', null, String(hh > 24 ? hh - 24 : hh).padStart(2, '0')); x.style.left = pct(t); ax.append(x); });      // 24 點寫 24，跨夜之後寫隔天的鐘點
+  wrap.append(track, ax);
+  return wrap;
+}
 export function renderQuick(ctx) {
   const el = ctx.el;
   const root = h('div', 'dq');
@@ -47,7 +71,10 @@ export function renderQuick(ctx) {
   const skipKey = (date, key) => ((ctx.session && ctx.session.code) || '') + '|' + ((S.meta && S.meta.clockStore) || '') + '|' + date + '|' + key;      // 加店別：同一分頁換店，別家同員編的人不會被跳過
   const st = { tok: 0, busy: false, loading: true, error: null, date: null, emps: [], people: [], appr: {}, pending: [], handled: new Set(),
     failed: [], capped: false, manual: null, skipN: 0, loadedAt: Date.now(), loadedToday: '',
-    toast: '', failLine: '', extra: [], progress: '', showReq: false, ui: {}, reqMsg: {}, reqReject: {} };
+    toast: '', failLine: '', extra: [], progress: '', showReq: false, ui: {}, reqMsg: {}, reqReject: {},
+    // 時間軸（2026-11-15）：detail＝詳細模式（每張卡的細調都攤開，每人自己選、記在這台裝置）；fine＝簡潔模式下按了「細調」的人；
+    // fineEls＝細調卡片本身（重畫時搬回去，裡面填到一半的欄位不會不見）；waits＝等同仁補單（伺服器記，null＝讀不到或還沒上線）
+    detail: modeGet(), fine: new Set(), fineEls: new Map(), fineNew: [], waits: null, elsewhere: [], mirrorAt: 0, okOpen: false, doneOpen: false, openKey: null };
   const U = (k) => st.ui[k] || (st.ui[k] = {});
   const empOf = (key) => st.emps.find((e) => Q.keyOf(e) === key);
 
@@ -79,7 +106,37 @@ export function renderQuick(ctx) {
     }
     // 列進「核定通過」的人：打卡比班表晚到、早退達 15 分鐘，名單上標橘色「遲到 N 分／早退 N 分」（只提醒不擋，同完整頁的橘色標籤；2026-11-15 考勤驗收 B2-2b-4）
     if (p.status === 'ok') p.warn = Q.lateEarlyOf(emp, brk(emp.store)).tags;
+    // 請假卻有打卡（2026-11-15 開工確認第 5 題）：標紅提醒、不擋。維持請假要選理由；要算上班就到細調把假單作廢
+    if ((p.status === 'ok' || p.status === 'abnormal') && !emp.approved) {
+      const m = modelOf(emp, date, approved);
+      if (m.leavePunch) {
+        const base = mainAction(p);
+        const acts = [];
+        if (base && base.payload) acts.push(Object.assign({}, base, { primary: true, askReason: true, reasons: ['維持請假，打卡不算工時'], reasonTitle: '維持請假：選理由後核定（理由會留在核定紀錄）', label: '維持請假，核定 ' + C.round2(base.hours != null ? base.hours : p.hours) + ' 小時' }));
+        acts.push({ id: 'full', label: '細調（要算上班：作廢假單）', primary: !acts.length });
+        Object.assign(p, { status: 'abnormal', tag: '請假卻有打卡', note: '核准的假單時段裡有打卡。要算上班：按細調把假單作廢；維持請假：選理由後核定。', actions: acts });
+      }
+    }
+    // 在等同仁補單、還沒有新的單送來：不列在要處理的人裡（列在「等同仁補單」），不算「還剩幾人」；單送來了就回到原本的分類
+    const w = waitOf(key, date);
+    if (w && ['ok', 'abnormal', 'blocked'].includes(p.status) && !arrived(w)) p.status = 'waiting';
     return p;
+  }
+  // 那天這個人的時間軸資料（班表、打卡、已核准與待審的單）
+  function modelOf(emp, date, approved) {
+    return T.timelineModel({ segments: emp.segments, plan: emp.plan, reqs: reqsFor(emp, date, approved), brk: brk(emp.store) });
+  }
+  // 等同仁補單（伺服器記）：這個人這天有沒有在等；等的時候有沒有新的單送來（送來了＝回到正常流程讓主管核）
+  const waitOf = (key, date) => (st.waits || []).find((w) => Q.keyOf(w) === key && w.date === date) || null;
+  function arrived(w) {
+    const had = new Set((w.req_ids || []).map(String));
+    const emp = st.emps.find((e) => Q.keyOf(e) === Q.keyOf(w));
+    const now = w.date === st.date && emp ? reqsFor(emp, w.date, st.appr) : st.pending.filter((it) => it.date === w.date && Q.keyOf(it) === Q.keyOf(w));
+    return now.some((r) => r && r.id != null && !had.has(String(r.id)));
+  }
+  async function loadWaits() {
+    try { const r = await rd('duty_wait_list'); st.waits = Array.isArray(r && r.items) ? r.items : []; }
+    catch (e) { st.waits = null; }
   }
   function classifyOne(emp) { return classifyAt(emp, st.date, st.appr, U(Q.keyOf(emp))); }
   function peopleFor(date, day) { return day.emps.map((emp) => classifyAt(emp, date, day.appr, null)); }
@@ -121,7 +178,7 @@ export function renderQuick(ctx) {
   async function readDay(date) {
     if (st.dayPre && st.dayPre.has(date)) { const p = st.dayPre.get(date); st.dayPre.delete(date); return p; }      // 副本先算出要看哪一天，已經先向打卡讀了
     const [d, rq] = await Promise.all([rd('mgr_day', { date }), rd('mgr_req_day', { date })]);
-    return { emps: Array.isArray(d.employees) ? d.employees : [], appr: apprFrom(rq), failed: [].concat((d && d.failed) || [], (rq && rq.failed) || []) };
+    return { emps: Array.isArray(d.employees) ? d.employees : [], appr: apprFrom(rq), failed: [].concat((d && d.failed) || [], (rq && rq.failed) || []), elsewhere: Array.isArray(d && d.elsewhere) ? d.elsewhere : [], mirrorAt: (d && d.mirror_at) || 0 };
   }
   // Mac mini 記得的上次資料先顯示（2026-11-10 Eason）：灰色不能按，最新資料到了整份換掉。少任何一份就不顯示
   async function peekFirst(tok, isFresh, round1) {
@@ -147,7 +204,11 @@ export function renderQuick(ctx) {
   async function load() {
     if (st.busy) return;                                      // 寫入途中不換資料（含「重新載入」鈕）
     const tok = ++st.tok;
-    st.loading = true; st.error = null; st.ui = {}; st.peekAt = 0; st.peekSaved = null; st.checking = false; render();
+    st.loading = true; st.error = null; st.ui = {}; st.peekAt = 0; st.peekSaved = null; st.checking = false;
+    st.fine = new Set(); st.fineEls = new Map(); st.okOpen = false; st.doneOpen = false; render();
+    dropChecks();
+    const waitsP = loadWaits();
+    retPanel.load();      // 重新載入這天時，人資退回一起重讀；本月待核定提醒沿用下面讀到的那份（不多問一次打卡系統）
     refreshJobs();
     let fresh = false;
     st.dayPre = new Map();
@@ -155,7 +216,7 @@ export function renderQuick(ctx) {
     const round1 = Promise.all([st.manual ? null : rd('mgr_pending_approvals', opt), rd('mgr_req_pending', opt)]).catch(() => [null, null]);
     peekFirst(tok, () => fresh, round1).catch(() => {});
     // 副本已經知道要看哪一天：同時向打卡確認那天的名單，不等申請清單回來才開始（2026-11-10）
-    const preRead = (date) => { if (!date || st.dayPre.has(date)) return; const p = (async () => { const [d, rq2] = await Promise.all([rd('mgr_day', { date }), rd('mgr_req_day', { date })]); return { emps: Array.isArray(d.employees) ? d.employees : [], appr: apprFrom(rq2), failed: [].concat((d && d.failed) || [], (rq2 && rq2.failed) || []) }; })(); p.catch(() => {}); st.dayPre.set(date, p); };
+    const preRead = (date) => { if (!date || st.dayPre.has(date)) return; const p = (async () => { const [d, rq2] = await Promise.all([rd('mgr_day', { date }), rd('mgr_req_day', { date })]); return { emps: Array.isArray(d.employees) ? d.employees : [], appr: apprFrom(rq2), failed: [].concat((d && d.failed) || [], (rq2 && rq2.failed) || []), elsewhere: Array.isArray(d && d.elsewhere) ? d.elsewhere : [], mirrorAt: (d && d.mirror_at) || 0 }; })(); p.catch(() => {}); st.dayPre.set(date, p); };
     if (st.manual) preRead(st.manual);
     else round1.then(([p, r]) => {
       if (tok !== st.tok || !live() || !p || p.snapshot_kind !== 'replica' || !r || !r.snapshot_at) return;
@@ -164,10 +225,13 @@ export function renderQuick(ctx) {
     });
     try {
       const leaveReady = loadLeave().catch(() => null);          // 不等額度才去抓名單；分類前（下面 readDay 那裡）才要到齊
+      let leaveDone = false; leaveReady.then(() => { leaveDone = true; });
       // 待核定的日子只用來決定先看哪一天：有副本就用副本；申請清單要最新，不用副本
       const pendP = st.manual ? Promise.resolve(null) : round1.then(([p]) => (p && p.snapshot_kind === 'replica' ? p : rd('mgr_pending_approvals')));
       const [pend, rq] = await Promise.all([pendP, rd('mgr_req_pending')]);
       fresh = true;
+      if (pend && Array.isArray(pend.items) && tok === st.tok) { S.pend = pend.items; S.pendFailed = pend.failed || []; pendPanel.draw(); }      // 本月待核定提醒：用同一份
+      else if (tok === st.tok) pendPanel.load();
       if (tok !== st.tok || !live()) return;
       st.pending = Array.isArray(rq && rq.items) ? rq.items : [];
       st.handled = new Set(); st.date = null; st.emps = []; st.people = []; st.appr = {}; st.extra = []; st.capped = false; st.skipN = 0;
@@ -179,8 +243,16 @@ export function renderQuick(ctx) {
       let selected = null;
       for (let from = 0; from < scanDates.length; from += Q.READ_BATCH_DAYS) {
         const batchDates = scanDates.slice(from, from + Q.READ_BATCH_DAYS);
-        const [batch] = await Promise.all([Promise.all(batchDates.map((date) => readDay(date).then((day) => ({ date, day }), (error) => ({ date, error })))), leaveReady]);
+        const batch = await Promise.all(batchDates.map((date) => readDay(date).then((day) => ({ date, day }), (error) => ({ date, error }))));
         if (tok !== st.tok || !live()) return;
+        // 假別額度比名單晚到（2026-11-09 規則，舊畫面搬來）：名單先畫出來看、整塊不能按，額度到了才分類成可操作的卡片
+        if (!leaveDone) {
+          const first = batch.find((x) => !x.error);
+          if (first && from === 0 && !st.peekAt) { st.date = first.date; st.emps = first.day.emps; st.appr = first.day.appr; st.people = peopleFor(first.date, first.day); st.leaveWait = true; render(); }
+          await leaveReady;
+          if (tok !== st.tok || !live()) return;
+        }
+        st.leaveWait = false;
         const ready = batch.map((x) => (x.error ? x : Object.assign(x, { people: peopleFor(x.date, x.day) })));
         const choice = Q.selectDateResult(ready.map((x) => (x.error ? { error: x.error } : Q.sections(x.people))), !!st.manual);
         if (choice.error) throw choice.error;
@@ -188,9 +260,16 @@ export function renderQuick(ctx) {
         st.skipN += choice.skipN;
         if (choice.index >= 0) { selected = ready[choice.index]; break; }
       }
+      await waitsP;
+      if (tok !== st.tok || !live()) return;
+      st.fineEls = new Map(); st.fineNew = [];      // 先顯示（上次資料、額度還沒到）時建的細調卡不能沿用：最新資料、額度到了重建
       if (selected) {
         st.date = selected.date; st.emps = selected.day.emps; st.appr = selected.day.appr; st.people = selected.people;
+        st.elsewhere = S.all ? [] : (selected.day.elsewhere || []); st.mirrorAt = selected.day.mirrorAt || 0;
       } else if (!st.manual && dates.length > scanDates.length) st.capped = true;
+      const ok0 = st.openKey && st.people.find((p) => p.key === st.openKey);
+      if (ok0) { st.fine.add(st.openKey); U(st.openKey).fold = false; st.scrollTo = st.openKey; if (ok0.status === 'ok') st.okOpen = true; if (ok0.status === 'done') st.doneOpen = true; }      // 點提醒名字跳來：核定通過、已核定的人也要看得到他的卡
+      st.openKey = null;
       st.failed = failedAll.filter((f, i, a) => a.findIndex((x) => x.store === f.store) === i);      // 任一讀取有門市讀不到：不可一鍵、不可顯示完成
       st.peekAt = 0; st.peekSaved = null;
       st.loading = false; render();
@@ -281,16 +360,57 @@ export function renderQuick(ctx) {
     const next = btn('dq-navb', '後一天 ›', () => gotoDate(C.addDaysStr(cur, 1)), { id: 'dqNext' });
     prev.disabled = off; next.disabled = off || cur >= todayNow();
     nav.append(prev);
+    const di = h('input', 'dq-date', null, { type: 'date', id: 'dqDate', 'aria-label': '選日期', max: todayNow() });
+    di.value = cur; di.disabled = off; di.onchange = () => { if (di.value && di.value <= todayNow()) gotoDate(di.value); };
+    nav.append(di);
     if (st.manual) { const b = btn('dq-navb', '回待處理', backToAuto, { id: 'dqAuto' }); b.disabled = st.busy; nav.append(b); }
     nav.append(next);
     return nav;
   }
 
   // ---------- 動作 ----------
-  function goFull(p) {                                       // 到完整頁核對：帶日期與同仁（既有 focus 機制）
-    if (st.date) S.date = st.date;
-    S.focusEmp = p ? p.key : null; S.dqFull = true;
-    ctx.rerender();
+  // 細調（2026-11-15 合成一頁）：原本「到完整頁核對」改成在這張卡片下面展開舊畫面的整張卡片（時段、假別、遲到分鐘、重複打卡、原因、作廢、代開…）
+  function goFull(p) {
+    if (!p) return;
+    if (st.detail) { const u = U(p.key); u.fold = !u.fold; }
+    else if (st.fine.has(p.key)) st.fine.delete(p.key); else st.fine.add(p.key);
+    st.scrollTo = fineShown(p.key) ? p.key : null;
+    render();
+  }
+  const fineShown = (key) => (st.detail ? !U(key).fold : st.fine.has(key));
+  function fineEl(p) {
+    let c = st.fineEls.get(p.key);
+    if (!c) {
+      const emp = empOf(p.key); if (!emp) return null;
+      const date = st.date;
+      const pend = reqShown(st.pending).filter((it) => it.date === date && Q.keyOf(it) === p.key && !st.handled.has(hid(it)));
+      c = fineCard(emp, date, { reqs: st.appr[p.key] || [], pending: pend, current: () => live() && st.date === date, defer: true });
+      st.fineEls.set(p.key, c); st.fineNew.push(c);
+    }
+    const w = h('div', 'dq-fine'); w.append(c);
+    return w;
+  }
+  // 等同仁補單：記到伺服器（能核這家店的人都看得到），這張卡先收到「等同仁補單」；單送來或核定了就回到正常流程
+  async function addWait(p) {
+    if (st.busy) return;
+    const emp = empOf(p.key); if (!emp) return;
+    const u = U(p.key);
+    st.busy = true; u.msg = ''; render();
+    try {
+      const ids = reqsFor(emp, st.date, st.appr).map((r) => String(r.id)).filter((x) => x && x !== 'undefined');
+      const what = (p.tag || '要補單') + (u.need ? '：' + u.need : p.note ? '：' + p.note : '');
+      await call('duty_wait_add', { store: emp.store || undefined, emp_id: emp.emp_id, emp_name: emp.name, date: st.date, what: what.slice(0, 200), req_ids: ids.slice(0, 20) });
+      await loadWaits(); recompute();
+      st.toast = p.name + ' 放到「等同仁補單」，同仁補好單、核准後會回到這裡';
+    } catch (e) { u.msg = '沒有記下來：' + ((e && e.message) || '請再試一次'); }
+    st.busy = false; render();
+  }
+  async function cancelWait(w) {
+    if (st.busy) return;
+    st.busy = true; render();
+    try { await call('duty_wait_cancel', { id: w.id, store: w.store || undefined }); await loadWaits(); }
+    catch (e) { st.failLine = '取消等待沒成功：' + ((e && e.message) || '請再試一次'); }
+    st.busy = false; recompute(); render();
   }
   async function approveOne(p, a, reason) {
     const emp = empOf(p.key);
@@ -355,7 +475,7 @@ export function renderQuick(ctx) {
       }
     }
     st.busy = false; st.progress = '';
-    st.toast = okN ? '已核定 ' + okN + ' 人，要改可到完整頁重新核定' : '';
+    st.toast = okN ? '已核定 ' + okN + ' 人，要改可在下面「已核定」按細調重新送出' : '';
     st.failLine = (bad.length ? '沒有核定成功 ' + bad.length + ' 人：' + bad.join('、') : '') + (halted ? (bad.length ? '。' : '') + '連線不穩，後面的人先停下，請看過再按一次' : '');
     await afterChange();
   }
@@ -363,6 +483,7 @@ export function renderQuick(ctx) {
     if (st.busy) return;
     const u = U(p.key);
     if (a.id === 'full') return goFull(p);
+    if (a.id === 'wait') return addWait(p);
     if (a.id === 'skip') { skipSet(skipKey(st.date, p.key)); u.ask = null; return afterChange(); }
     if (a.id === 'reject') {                                  // 退回：第一次只打開理由欄，再按「確定退回」才送（現行規則）
       if (!u.rejecting) { u.rejecting = true; u.msg = ''; render(); const i = root.querySelector('.dq-card[data-key="' + p.key + '"] .dq-reason'); if (i) i.focus(); return; }
@@ -481,10 +602,12 @@ export function renderQuick(ctx) {
     const c = h('div', 'dq-card' + (p.status === 'blocked' ? ' blocked' : ''), null, { 'data-key': p.key });
     const top = h('div', 'dq-ctop');
     const nm = h('div', 'dq-name', p.name); const emp0 = empOf(p.key); const sup = emp0 && supportTag(emp0); if (sup) nm.append(sup);
-    top.append(nm, h('div', 'dq-tag' + (p.status === 'blocked' ? ' blocked' : ''), p.tag));
+    top.append(nm, h('div', 'dq-tag' + (p.status === 'blocked' ? ' blocked' : '') + ' sev' + sevOf(p), p.tag));
+    c.append(top);
+    const tl = tlFor(p); if (tl) c.append(tl);
     const grid = h('div', 'dq-grid');
-    [line('班表', p.planText), line('打卡', p.punchText, 'dq-b'), line('申請', p.note), line('比對', p.chk, 'dq-chk')].forEach((x) => { if (x) grid.append(...x); });
-    c.append(top, grid);
+    [line('申請', p.note), line('比對', p.chk, 'dq-chk')].forEach((x) => { if (x) grid.append(...x); });
+    if (grid.childNodes.length) c.append(grid);
     if (Q.overText(p)) c.append(h('div', 'du-total-over dq-over', Q.overText(p)));      // 超過單日 10 小時：紅字、不擋（2026-11-15）
     const pend = st.pending.filter((it) => it.date === st.date && Q.keyOf(it) === p.key && !st.handled.has(hid(it)) && it.attach_id && Q.reqDecidable(it, canWriteRow));      // 不能審的單（含自己的）伺服器不給看附件，同 request.js
     pend.forEach((it) => c.append(attachEl(it)));
@@ -493,9 +616,9 @@ export function renderQuick(ctx) {
     const acts = p.actions.filter((a) => !((u.proxied || u.proxyMaybe) && a.id === 'proxy'));
     const askA = u.ask ? p.actions.find((a) => a.id === u.ask) : null;
     if (askA) {                                               // 核定和打卡差 30 分鐘以上：選一個原因就完成
-      c.append(h('div', 'dq-ask', '和打卡差 30 分鐘以上，選一個原因就完成'));
+      c.append(h('div', 'dq-ask', askA.reasonTitle || '和打卡差 30 分鐘以上，選一個原因就完成'));
       const chips = h('div', 'dq-chips');
-      Q.REASONS.forEach((r) => chips.append(btn('dq-chip', r, () => act(p, askA, { reason: r }))));
+      (askA.reasons || Q.REASONS).forEach((r) => chips.append(btn('dq-chip', r, () => act(p, askA, { reason: r }))));
       chips.append(btn('dq-chip', '其他', () => { u.other = !u.other; render(); }));
       c.append(chips);
       if (u.other) {
@@ -526,16 +649,94 @@ export function renderQuick(ctx) {
       c.append(box);
     }
     const row = h('div', 'dq-acts');
-    acts.forEach((a) => {
-      let label = a.label;
+    const list = acts.slice();
+    if (canWait(p) && !list.some((a) => a.id === 'wait')) list.splice(list.findIndex((a) => a.id === 'skip') >= 0 ? list.findIndex((a) => a.id === 'skip') : list.length, 0, { id: 'wait', label: '請同仁補單，先放到「等同仁補單」', primary: false });
+    if (!list.some((a) => a.id === 'full')) list.push({ id: 'full', label: '細調', primary: false });
+    list.forEach((a) => {
+      let label = a.id === 'full' ? fullLabel(a, p) : a.label;
       if (a.id === 'reject' && u.rejecting) label = '確定退回';
       if (a.id === 'proxy' && u.proxyOpen) label = '送出代開（送總監層級審核）';
-      row.append(btn('dq-act ' + (a.primary ? 'primary' : 'ghost'), label, () => act(p, a)));
+      row.append(btn('dq-act ' + (a.primary ? 'primary' : 'ghost') + (a.id === 'full' ? ' dq-finebtn' : ''), label, () => act(p, a)));
     });
     if (u.rejecting) row.append(btn('dq-cancel', '先不退回', () => { u.rejecting = false; u.msg = ''; render(); }));
     if (u.proxyOpen) row.append(btn('dq-cancel', '先不代開', () => { u.proxyOpen = false; u.msg = ''; render(); }));
     c.append(row);
+    if (fineShown(p.key)) { const f = fineEl(p); if (f) c.append(f); }
     return c;
+  }
+  // 「到完整頁核對／補單」改成「細調」；已經展開的寫「收起細調」
+  function fullLabel(a, p) {
+    if (fineShown(p.key)) return '收起細調';
+    const l = String(a.label || '');
+    return /^細調/.test(l) ? l : /補單/.test(l) ? '細調（代開或改單）' : '細調';
+  }
+  // 能不能「請同仁補單」：缺卡、缺單、排休有打卡、送出前檢查說要補齊（今天還沒下班、等上層審核這種不是缺單，不給）
+  function canWait(p) {
+    if (st.waits === null || !canWriteRow('hours', p.empId, p.store)) return false;
+    if (p.status !== 'abnormal' && p.status !== 'blocked') return false;
+    if (/今天還沒下班|跨夜班還沒下班|等上層審核/.test(p.tag || '')) return false;
+    const e = empOf(p.key);
+    const rq = e ? reqsFor(e, st.date, st.appr) : [];
+    if (rq.some((r) => r.pending)) return false;      // 同仁已經送了單在等審：該做的是審單，不是等補單
+    if (rq.length && !U(p.key).need) return false;      // 單已經核准（例：忘打卡單），送出前檢查也沒說還要補：問題不是缺單
+    if ((p.actions || []).some((a) => a.id === 'proxy') || /超過 \d+ 天|沒綁 LINE|代開要用個人帳號/.test(p.note || '')) return false;      // 超過 4 天或沒綁 LINE：同仁自己補不了單，該做的是代開（門市帳號要改用個人帳號），不是等
+    return !!U(p.key).need || /少打卡|少上班卡|少下班卡|沒有打卡|排休有打卡|未符合|要補/.test((p.tag || '') + (p.note || ''));
+  }
+  const sevOf = (p) => { const e = empOf(p.key); return T.severity(p.tag, e ? modelOf(e, st.date, st.appr) : null); };
+  function tlFor(p) {
+    const e = empOf(p.key); if (!e) return null;
+    const m = modelOf(e, st.date, st.appr);
+    const w = h('div', 'dq-tlw');
+    w.append(timelineEl(m, p.name + ' ' + (p.planText || '') + ' ' + (p.punchText || '')));
+    const t = h('div', 'dq-tltxt');
+    t.append(h('span', null, p.planText || (e.plan && e.plan.work === false ? '排休' : '沒有班表')), h('span', null, p.punchText || (e.segments && e.segments.length ? '打卡 ' + e.segments.map(C.segmentText).join('、') : '沒有打卡')));
+    w.append(t);
+    return w;
+  }
+  // 摘要列、已核定與只能看的人（精簡卡：時間軸＋細調）
+  function miniCard(p, right) {
+    const c = h('div', 'dq-card dq-mini', null, { 'data-key': p.key });
+    const top = h('div', 'dq-ctop');
+    const nm = h('div', 'dq-name', p.name); const e0 = empOf(p.key); const sup = e0 && supportTag(e0); if (sup) nm.append(sup);
+    if (S.all && e0 && (e0.storeName || e0.store)) nm.append(h('span', 'du-where', e0.storeName || e0.store, { 'data-where': e0.store || '' }));      // 全部門市：寫是哪一家店
+    top.append(nm, h('div', 'dq-mright', right || ''));
+    c.append(top);
+    const tl = tlFor(p); if (tl) c.append(tl);
+    const row = h('div', 'dq-acts two');
+    if (p.status === 'ok') row.append(btn('dq-act primary', '核定 ' + C.round2(mainAction(p).hours != null ? mainAction(p).hours : p.hours) + ' 小時', () => act(p, Object.assign({}, mainAction(p), { label: '' }))));
+    row.append(btn('dq-act ghost dq-finebtn', fineShown(p.key) ? '收起細調' : (p.status === 'done' ? '細調（重新核定）' : p.status === 'readonly' ? '細調（只能看）' : '細調'), () => goFull(p)));
+    c.append(row);
+    if (fineShown(p.key)) { const f = fineEl(p); if (f) c.append(f); }
+    return c;
+  }
+  function summaryEl(s) {
+    const box = h('div', 'dq-sum');
+    const tile = (k, v, cls) => { const t = h('div', 'dq-sumt' + (cls ? ' ' + cls : '')); t.append(h('div', 'dq-sumk', k), h('div', 'dq-sumv', v)); box.append(t); };
+    const hs = T.hoursSummary(st.emps.map((e) => modelOf(e, st.date, st.appr)));
+    tile('要你處理', (s.abnormal.length + s.blocked.length) + ' 人', 'bad');
+    if (st.waits !== null) tile('等同仁補單', st.waits.length + ' 筆', 'warn');
+    tile('可一鍵核定', s.ok.length + ' 人', 'ok');
+    tile('排班 → 上班＋請假', C.round2(hs.plan) + ' → ' + C.round2(hs.work) + (hs.leave ? '＋' + C.round2(hs.leave) : '') + ' 小時');
+    return box;
+  }
+  function waitSection() {
+    const ws = (st.waits || []).filter((w) => !(w.date === st.date && st.people.some((p) => p.key === Q.keyOf(w) && p.status === 'done')));
+    const sec = h('div', 'dq-waits');
+    sec.append(h('div', 'dq-sec muted', '等同仁補單 ' + ws.length + ' 筆'));
+    if (!ws.length) { sec.append(h('div', 'dq-done', '沒有在等同仁補的單。按「請同仁補單」的人會放在這裡，同仁補好單、核准後會回到上面讓你核定。')); return sec; }
+    ws.slice().sort((a, b) => String(a.date).localeCompare(String(b.date))).forEach((w) => {
+      const row = h('div', 'dq-wait', null, { 'data-key': Q.keyOf(w), 'data-date': w.date });
+      const ok = arrived(w);
+      const t = h('div', 'dq-wtop');
+      t.append(h('b', null, (w.emp_name || w.emp_id) + (w.storeName ? '・' + w.storeName : '')), h('span', 'dq-rd', C.shortDate(w.date)), h('span', 'dq-wtag' + (ok ? ' ok' : ''), ok ? '單送來了' : '等同仁補單'));
+      row.append(t, h('div', 'dq-rs', w.what || ''), h('div', 'dq-wby', (w.by_name || '') + ' ' + String(w.created_at || '').slice(5, 16).replace('T', ' ') + ' 記下'));
+      const acts = h('div', 'dq-acts two');
+      acts.append(btn('dq-act ' + (ok ? 'primary' : 'ghost'), ok ? '去核定' : '看那天', () => { st.openKey = Q.keyOf(w); gotoDate(w.date); }));
+      if (w.can_cancel !== false) acts.append(btn('dq-act ghost', '不等了', () => cancelWait(w)));
+      row.append(acts);
+      sec.append(row);
+    });
+    return sec;
   }
   // 看證明（同申請審核的「看附件」：line_hub_attach_get）
   function attachEl(it) {
@@ -584,22 +785,30 @@ export function renderQuick(ctx) {
     if (!live()) return;
     const keepScroll = window.scrollY;
     root.innerHTML = '';
-    const stale = !!st.peekAt && (st.loading || !!st.error);      // 正在顯示上次資料
+    const stale = (!!st.peekAt && (st.loading || !!st.error)) || (st.loading && !!st.leaveWait);      // 正在顯示上次資料（或名單到了、假別額度還沒到）
     const s = st.loading && !stale ? null : secs();
     const head = h('div', 'dq-head');
     const hl = h('div'); hl.append(h('div', 'dq-store', S.all ? '全部門市' : (S.meta && S.meta.label) || (ctx.session && ctx.session.name) || ''), h('div', 'dq-title', st.date ? Q.dayLabel(st.date, todayNow()) : '考勤管理'));
-    head.append(hl, h('div', 'dq-left', st.date && s ? '還剩 ' + s.left + ' 人' : ''));
+    const hr = h('div', 'dq-hright');
+    const seg = h('div', 'dq-mode', null, { role: 'group', 'aria-label': '顯示方式' });
+    [['簡潔', false], ['詳細', true]].forEach(([t, d]) => { const b = btn('dq-modeb', t, () => { if (st.detail === d) return; st.detail = d; modePut(d); st.ui && Object.values(st.ui).forEach((u) => { u.fold = false; }); render(); }, { 'aria-pressed': String(st.detail === d), id: d ? 'dqModeDetail' : 'dqModeSimple' }); b.disabled = false; seg.append(b); });
+    hr.append(seg, h('div', 'dq-left', st.date && s ? '還剩 ' + s.left + ' 人' : ''));
+    head.append(hl, hr);
     root.append(head, navEl());
     root.append(rejectBar((date) => gotoDate(date)));      // 背景送出被打卡系統退回的（考勤副本，2026-11-14）
+    root.append(retEl, pendEl);      // 人資退回、本月待核定提醒（舊畫面搬來，2026-11-15）
     if (st.loading && !stale) { root.append(h('div', 'card du-center', '載入中…', { id: 'dqLoading' })); return; }
     if (st.error && !stale) { const c = h('div', 'card'); root.append(c); failBar(c, '考勤資料', st.error, load); return; }
     if (stale) {
-      root.append(h('div', 'du-stale-note', st.error ? '讀不到最新資料，下面是' + snapLabel(st.peekAt) + '的舊資料，不能核定' : '這是' + snapLabel(st.peekAt) + '的資料，正在讀取最新資料，讀到後就可以核定…', { id: 'dqStale' }));
+      root.append(h('div', 'du-stale-note', st.leaveWait && !st.peekAt ? '假別額度還在讀取，讀到後就可以核定…' : st.error ? '讀不到最新資料，下面是' + snapLabel(st.peekAt) + '的舊資料，不能核定' : '這是' + snapLabel(st.peekAt) + '的資料，正在讀取最新資料，讀到後就可以核定…', { id: 'dqStale' }));
       if (st.error) { const c = h('div', 'card'); root.append(c); failBar(c, '考勤資料', st.error, load); }
     }
     const staleFrom = root.children.length;
 
     if (st.failed.length) failedStores(root, st.failed, load);
+    if (st.date && s) root.append(summaryEl(s));
+    if (st.mirrorAt) root.append(h('div', 'du-mirror-at', '資料更新於 ' + snapLabel(st.mirrorAt) + '・從 Mac mini 讀取', { id: 'dqMirrorAt' }));
+    if (st.elsewhere.length) root.append(elsewhereCards(st.elsewhere));
     if (st.toast) root.append(h('div', 'dq-toast', st.toast, { role: 'status' }));
     if (st.failLine) root.append(h('div', 'dq-fails', st.failLine, { role: 'alert' }));
     // 全部門市：按門市分組，每家一個「一鍵核定」（第 3 項）；單一門市照舊
@@ -628,16 +837,33 @@ export function renderQuick(ctx) {
         if (st.failed.length) { okb.disabled = true; okb.textContent = '有門市讀不到，先重新載入'; }
         // 檢查中也可以先按（2026-11-14 Eason 選 C）：名單是照打卡＋單先算好的；送出時打卡系統照樣檢查，沒過的人列出原因、回到異常區
         ok.append(okb);
+        const showOk = st.detail || st.okOpen;
+        ok.append(btn('dq-okopen', showOk ? '收起逐筆' : '展開逐筆看時間軸', () => { st.okOpen = !showOk; if (st.detail && !st.okOpen) { st.detail = false; modePut(false); } render(); }, { id: 'dqOkOpen' }));
         root.append(ok);
+        if (showOk) gs.ok.forEach((p) => root.append(miniCard(p, '核定通過')));
       }
-      if (gs.abnormal.length) { root.append(h('div', 'dq-sec', '有異常 ' + gs.abnormal.length + ' 人，逐筆確認')); gs.abnormal.forEach((p) => root.append(cardEl(p))); }
+      // 有異常：依嚴重程度排（缺卡 → 缺勤沒單 → 假單對不上 → 單待審 → 加班 → 遲到；2026-11-15 開工確認），同級照原順序
+      const sorted = gs.abnormal.map((p, i) => [sevOf(p), i, p]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((x) => x[2]);
+      if (sorted.length) { root.append(h('div', 'dq-sec', '有異常 ' + sorted.length + ' 人，逐筆確認')); sorted.forEach((p) => root.append(cardEl(p))); }
       if (gs.blocked.length) { root.append(h('div', 'dq-sec muted', '現在不能核定 ' + gs.blocked.length + ' 人')); gs.blocked.forEach((p) => root.append(cardEl(p))); }
     });
-    const doneBits = s.done.map((p) => p.name + ' ' + C.round2(p.hours) + ' 小時').concat(s.skipped.map((p) => p.name + ' 先跳過'), st.extra);
+    if (st.waits !== null && st.date) root.append(waitSection());
+    // 已核定的人：精簡卡（時間軸＋細調可重新核定）。舊畫面「依日期查看、重新送出核定」搬到這裡
+    if (s.done.length) {
+      const showDone = st.detail || st.doneOpen;
+      root.append(btn('dq-toggle', null, () => { st.doneOpen = !showDone; render(); }, { id: 'dqDoneToggle' }));
+      root.lastChild.append(h('span', null, '已核定 ' + s.done.length + ' 人：' + s.done.map((p) => p.name + ' ' + C.round2(p.hours) + ' 小時').join('、')), h('span', null, showDone ? '收起' : '›'));
+      root.lastChild.disabled = false;
+      if (showDone) s.done.forEach((p) => { const e = empOf(p.key), ap = e && e.approved; root.append(miniCard(p, '已核定 ' + C.round2(p.hours) + ' 小時' + (ap && ap.manager_name ? '（' + ap.manager_name + '）' : ''))); });
+    }
+    const doneBits = s.skipped.map((p) => p.name + ' 先跳過').concat(st.extra);
     if (doneBits.length) root.append(h('div', 'dq-done', '已處理：' + doneBits.join('、')));
     if (s.skipped.length) root.append(btn('dq-unskip', '取消跳過 ' + s.skipped.length + ' 人，重新顯示', () => { skipDel(s.skipped.map((p) => skipKey(st.date, p.key))); recompute(); render(); }));
-    if (st.manual && st.date && !s.left && !doneBits.length && !s.readonly.length) root.append(h('div', 'dq-done', '這天沒有要處理的人'));
-    if (s.readonly.length) root.append(h('div', 'dq-done', s.readonly.length + ' 人不在你的核定名單（唯讀），請到完整頁看'));
+    if (st.manual && st.date && !s.left && !doneBits.length && !s.readonly.length && !s.done.length) root.append(h('div', 'dq-done', '這天沒有要處理的人'));
+    if (s.readonly.length) { root.append(h('div', 'dq-sec muted', '只能看 ' + s.readonly.length + ' 人（不在你的核定名單）')); s.readonly.forEach((p) => root.append(miniCard(p, '只能看'))); }
+    // 未出勤（沒打卡、也沒排上班）：舊畫面有列，要能在細調核整天請假或出差（2026-11-15 e2e 抓到新頁漏了）
+    const absent = st.people.filter((p) => p.status === 'absent');
+    if (absent.length) { root.append(h('div', 'dq-sec muted', '未出勤 ' + absent.length + ' 人（沒打卡、沒排上班；要核整天請假或出差按細調）')); absent.forEach((p) => root.append(miniCard(p, '未出勤'))); }
     if (!st.date && !st.failed.length && !st.capped) root.append(h('div', 'dq-alldone', Q.allDoneText(st.skipN)));
     if (st.capped) root.append(h('div', 'dq-done', '還有更早的日期沒看完，按上方「前一天」繼續'));
 
@@ -652,17 +878,54 @@ export function renderQuick(ctx) {
 
     const foot = h('div', 'dq-foot');
     if (qrBtn && !S.all) foot.append(qrBtn);
-    const fl = h('button', 'dq-fulllink', '完整頁（舊畫面，可依日期查看）', { type: 'button' });
-    fl.disabled = st.busy;      // 核定進行中不離開，免得看不到失敗名單
-    fl.onclick = () => { if (st.date) S.date = st.date; S.dqFull = true; ctx.rerender(); };
-    foot.append(fl);
+    // 舊畫面只留系統管理員當緊急備用，到 FULL_UNTIL 為止（2026-11-15 Eason 定 14 天）
+    if (ctx.session && ctx.session.role === 'admin' && todayNow() <= FULL_UNTIL) {
+      const fl = h('button', 'dq-fulllink', '舊畫面（管理員緊急備用，' + C.shortDate(FULL_UNTIL) + ' 下架）', { type: 'button', id: 'dqFullLink' });
+      fl.disabled = st.busy;      // 核定進行中不離開，免得看不到失敗名單
+      fl.onclick = () => { if (st.date) S.date = st.date; S.dqFull = true; ctx.rerender(); };
+      foot.append(fl);
+    }
     root.append(foot);
     if (stale) [...root.children].slice(staleFrom).forEach((el) => { el.inert = true; el.classList.add('dq-stale'); });
     window.scrollTo(0, keepScroll);
+    if (st.fineNew.length) {      // 這次重畫新開的細調卡：一起送檢查（卡片已經放回畫面上了）
+      const list = st.fineNew.splice(0), date = st.date;
+      // checkCards 會把卡片暫時搬進自己的盒子：先記下原本的位置，檢查送出後放回去
+      const spots = list.map((c) => [c, c.parentNode, c.nextSibling]);
+      checkCards(list, date, () => live() && st.date === date);
+      spots.forEach(([c, par, nx]) => { if (par) par.insertBefore(c, nx); });
+    }
+    if (st.scrollTo) { const k = st.scrollTo; st.scrollTo = null; const c = root.querySelector('.dq-card[data-key="' + (window.CSS && CSS.escape ? CSS.escape(k) : k) + '"]'); if (c && c.scrollIntoView) c.scrollIntoView({ block: 'start' }); }
   }
 
+  // 人資退回、本月待核定提醒：舊畫面搬來（2026-11-15），點名字跳到那天並打開那個人的細調
+  const pendEl = h('div', 'dq-pend'), retEl = h('div', 'dq-ret');
+  const pick = (date, key) => { st.openKey = key; gotoDate(date); };
+  const pendPanel = pendingPanel(pendEl, pick);
+  // 本月待核定提醒在新頁預設只留一行（2026-11-15）：點標題展開名單，詳細模式一律展開
+  pendEl.classList.add('fold');
+  pendEl.addEventListener('click', (e) => { if (e.target.closest('.du-pa-title')) { pendEl.classList.toggle('fold'); } });
+  const retPanel = returnsPanel(retEl, pick, (date) => { if (date === st.date) load(); }, live);
+  // 細調裡送出核定成功（或背景送出被退回）：重讀這天、收起細調，名單照新的狀態重分
+  root.addEventListener('emp-approved', (e) => {
+    const d = e.detail || {}, key = Q.keyOf({ store: d.store || '', emp_id: d.emp_id });
+    if (d.queued) {      // 細調裡背景送出（考勤副本）：這張細調卡要留著接背景結果（被退回會在卡上標紅、給重新載入），不重建
+      const emp = empOf(key);
+      if (emp) emp.approved = { approved_hours: d.hours, status_text: '送出中', manager_name: '', periods: d.periods || [], queued: true };
+      st.fine.add(key); U(key).fold = false; st.doneOpen = true;
+      retPanel.load();
+      st.toast = '已核定 ' + ((emp || {}).name || '') + '，正在背景送到打卡系統';
+      recompute(); render(); return;
+    }
+    retPanel.load();
+    if (S.pend) { const n = S.pend.length; S.pend = S.pend.filter((it) => !(it.date === d.date && String(it.emp_id) === String(d.emp_id) && (it.store || '') === (d.store || ''))); if (S.pend.length !== n) pendPanel.draw(); }
+    st.toast = '已核定 ' + ((empOf(key) || {}).name || '') + '（細調送出）';
+    setTimeout(() => { if (!live() || st.busy) return; st.fine.delete(key); st.fineEls.delete(key); reconcile().then(() => loadWaits()).catch(() => {}).then(() => afterChange()); }, 1200);      // 先讓主管看到細調裡的結果
+  });
+  root.addEventListener('duty-reload-day', () => { if (!st.busy) load(); });
+  root.addEventListener('hr-returned', () => retPanel.load());
   render();
-  load();
+  load();      // load() 會順便讀上方兩個提醒
   // 頁面回到前景：台北日期變了、或離開超過 5 分鐘就重新載入（資料與「昨天」都會更新）
   const onVis = () => {
     if (!live()) { document.removeEventListener('visibilitychange', onVis); return; }
@@ -675,7 +938,7 @@ export function renderQuick(ctx) {
 // 舊畫面（完整頁）上的「回到一頁核定」：手機才有
 export function backBar(ctx) {
   const wrap = h('div', 'dq-back');
-  const b = h('button', 'btn ghost sm', '回到一頁核定', { type: 'button', id: 'duQuickBack' });
+  const b = h('button', 'btn ghost sm', '回到新畫面', { type: 'button', id: 'duQuickBack' });
   b.onclick = () => { S.dqFull = false; ctx.rerender(); };
   wrap.append(b);
   return wrap;

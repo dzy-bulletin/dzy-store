@@ -64,7 +64,7 @@ const READS = new Set(['all', 'hr_return_list', 'mgr_day', 'mgr_req_day', 'mgr_r
   'mgr_line_binds', 'mgr_qr_token', 'payroll_leave_options', 'payroll_annual_left', 'line_hub_attach_get', 'admin_stores', 'mgr_req_month',
   'mirror_jobs', 'mirror_ack', 'mgr_approve_check']);      // mgr_approve_check：送出前只檢查，不寫入（2026-11-14）      // 背景送出的進度、按知道了：不動考勤資料，不清上次看到的名單
 export async function call(action, body) {
-  if (!READS.has(action)) { S.recent = {}; S.reqPre = null; }
+  if (!READS.has(action)) { S.recent = {}; S.reqPre = null; checkMemo.clear(); }      // 寫入之後：記住的送出前檢查結果作廢
   try {
     const k = S.key, st = S.asStore;
     const r = await api('POST', '/m/duty/' + action, st ? Object.assign({}, body || {}, { asStore: st }) : (body || {}), undefined, { read: READS.has(action) });
@@ -116,9 +116,25 @@ export function h(tag, cls, text, attrs) {
 
 // 送出前只檢查（2026-11-14 考勤管理好上手第 1 項）：打卡系統 mgr_approve_check，用送出核定同一套檢查跑到寫入前就停。
 // 回每人 {emp_id, ok, error, message, approved_hours}；讀不到（舊版打卡、連不上）回 null＝不標、照舊送出才知道。
+// 同一個人、同一份內容 20 秒內只問一次（2026-11-15 新頁：整天先檢查一次，詳細模式的細調卡打開時拿同一份結果，不重複打）
+const CHECK_TTL = 20000, checkMemo = new Map();
+const checkKey = (date, store, it) => [date, store || '', String(it.emp_id), JSON.stringify((it.periods || []).map(p => [p.start, p.end])),
+  JSON.stringify((it.leaves || []).map(l => [l.type || l.leave_type || '', String(l.hours ?? '')]).sort()), String(it.late_min ?? ''), String(it.diff_reason || ''), JSON.stringify(it.dup_ignore || null)].join('|');
 export function checkOnce(date, store, items) {
-  return call('mgr_approve_check', Object.assign({ date, items }, store ? { store } : {})).then(r => (r && Array.isArray(r.results) ? r.results : null), () => null);
+  const now = Date.now();
+  for (const [k, v] of checkMemo) if (now - v.at > CHECK_TTL) checkMemo.delete(k);
+  const keys = items.map(it => checkKey(date, store, it));
+  const need = items.filter((it, i) => !checkMemo.has(keys[i]));
+  if (need.length) {
+    const p = call('mgr_approve_check', Object.assign({ date, items: need }, store ? { store } : {})).then(r => (r && Array.isArray(r.results) ? r.results : null), () => null);
+    need.forEach(it => { const k = checkKey(date, store, it); checkMemo.set(k, { at: now, p: p.then(rs => (rs ? rs.find(r => r.emp_id === String(it.emp_id)) || null : undefined)) }); });
+  }
+  return Promise.all(keys.map(k => checkMemo.get(k).p)).then(list => {
+    if (list.some(x => x === undefined)) { keys.forEach(k => { const v = checkMemo.get(k); if (v) v.p.then(x => { if (x === undefined) checkMemo.delete(k); }); }); return null; }      // 讀不到：不記住，下次再問
+    return list.filter(Boolean);
+  });
 }
+export const dropChecks = () => checkMemo.clear();      // 送出核定、核准單之後：內容可能變了，重新問
 
 // 情境提示（2026-11-14 考勤管理好上手第 5 項）：平常只顯示一句短的，旁邊「?」點了才展開完整說明（再點收起）
 export function tipText(short, long, cls) {
