@@ -471,7 +471,7 @@ function buildCard(emp, date) {
     const btns = [{ ts: '', label: '不處理' }].concat(g.cards.map(c => ({ ts: c.ts, label: '以 ' + c.hm + ' 為準' }))).map(o => {
       const b = h('button', 'btn sm ghost du-dupopt', o.label, { type: 'button', 'data-ts': o.ts });
       b.disabled = readOnly;
-      b.onclick = () => { dupPicks[gi] = o.ts; paint(); };
+      b.onclick = () => { dupPicks[gi] = o.ts; paint(); if (card.__propose) card.__propose(); queueCheck(true); };      // 選了馬上照那張重算、重新檢查（2026-11-15 Eason）
       opts.append(b); return b;
     });
     function paint() { btns.forEach(b => { const on = b.dataset.ts === dupPicks[gi]; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }); }
@@ -664,7 +664,7 @@ function buildCard(emp, date) {
   const setEdit = on => { editOpen = on; editEls().forEach(x => { x.hidden = !on; }); if (!on) moreBox.hidden = true; else { try { if (localStorage.getItem('dzystore_dutymore') === '1') moreBox.hidden = false; } catch (e) {} } };
   card.__propose = () => {
     if (readOnly || !card.__pending || emp.approved || e2eNoCore()) return;
-    const pr = corePeriods({ segs: emp.segments, plan: emp.plan, reqs: card.__dayReqs || [], brk: br });
+    const pr = corePeriods({ segs: C.segsWithDupPicks(emp.segments, dupGroups, dupPicks), plan: emp.plan, reqs: card.__dayReqs || [], brk: br });
     card.__prop = pr;
     if (!pr) return;
     periodRows.textContent = '';

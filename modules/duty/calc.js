@@ -543,3 +543,23 @@ export function fixText(p, ps) {
   }
   return t;
 }
+
+// 重複打卡選了「以 X 為準」：打卡段照選的那張重組，給「打卡＋單」重算用（2026-11-15 Eason：按了要馬上看到結果）。
+// 下班卡組：沒選的那張若是「？–沒選」孤卡就拿掉；若是配對段的下班（07:54–17:28 而選 17:39）→ 下班改成選的那張、拿掉「？–17:39」孤卡。上班卡組對稱。
+// 只回新陣列，不改原本的 segments；送給打卡端的仍是 dup_ignore（正本在打卡端 dupIgnoreInvalid_）。
+export function segsWithDupPicks(segs, groups, picks) {
+  let out = (segs || []).map(s => Object.assign({}, s));
+  (groups || []).forEach((g, i) => {
+    const k = (picks || [])[i]; if (!k) return;
+    const keep = g.cards.find(c => c.ts === k); if (!keep) return;
+    const side = g.type === 'in' ? 'in' : 'out', other = side === 'in' ? 'out' : 'in';
+    g.cards.filter(c => c.ts !== k).forEach(c => {
+      const s = out.find(x => x[side] === c.hm); if (!s) return;
+      if (!s[other]) { out = out.filter(x => x !== s); return; }                     // 孤卡：拿掉
+      const orphan = out.find(x => x !== s && x[side] === keep.hm && !x[other]);     // 選的那張是孤卡：併進配對段
+      s[side] = keep.hm;
+      if (orphan) out = out.filter(x => x !== orphan);
+    });
+  });
+  return out;
+}
