@@ -3,7 +3,8 @@
 // 時間一律用「從工作日 00:00 起算的分鐘」：跨夜（下班卡 cross、班表或單的結束早於開始）加 1440。
 
 export const SHOW_MIN = 5;            // 少做（遲到、早退、缺勤）小於這個分鐘數不畫（差 1～4 分鐘只是雜訊）
-export const SHOW_OT_MIN = 15;        // 多做（早到、晚走）小於這個分鐘數不畫：加班照 15 分鐘一格算，早到晚走幾分鐘不算加班
+export const SHOW_OT_MIN = 15;        // 班表外的打卡（早到、晚走、加班）小於這個分鐘數不畫：核定照 15 分鐘對齊
+export const DAY_FREE_MIN = 480;      // 一天不用加班單的上限（同 core-calc.js，2026-11-16 Eason：當天滿 8 小時以上才要加班單）
 const DAY = 1440;
 
 export function toMin(t) {
@@ -73,19 +74,37 @@ export function timelineModel(o) {
   rs.forEach((r) => {
     if (!r || !['ot', 'leave', 'trip'].includes(r.kind)) return;
     const sp = span(r.start, r.end);
-    if (sp) forms.push({ a: sp.a, b: sp.b, kind: r.kind, pending: !!r.pending, label: r.kind === 'leave' ? (r.leave_type || '請假') : r.kind === 'trip' ? '出差' : '加班' });
+    if (sp) forms.push({ a: sp.a, b: sp.b, kind: r.kind, comp: r.kind === 'leave' && /補休/.test(r.leave_type || ''), pending: !!r.pending, label: r.kind === 'leave' ? (r.leave_type || '請假') : r.kind === 'trip' ? '出差' : '加班' });
   });
   const planLen = len(minus(plan, breaks));
   const allDayReq = (pend) => rs.find((r) => r && (r.kind === 'leave' || r.kind === 'trip') && !!r.pending === pend && !span(r.start, r.end) && planLen > 0 && Number(r.hours) * 60 >= planLen - 1);
   const adr = allDayReq(false) || allDayReq(true), allDayLeave = !!adr && !adr.pending, allDayPend = !!adr && !!adr.pending;
-  if (adr) plan.forEach((p) => forms.push({ a: p.a, b: p.b, kind: adr.kind, pending: allDayPend, label: (adr.kind === 'trip' ? '整天出差' : '整天請假') + (allDayPend ? '（待審）' : ''), allDay: true }));
+  if (adr) plan.forEach((p) => forms.push({ a: p.a, b: p.b, kind: adr.kind, comp: adr.kind === 'leave' && /補休/.test(adr.leave_type || ''), pending: allDayPend, label: (adr.kind === 'trip' ? '整天出差' : '整天請假') + (allDayPend ? '（待審）' : ''), allDay: true }));
   const leaveCover = forms.filter((f) => !f.pending && (f.kind === 'leave' || f.kind === 'trip'));
   const leavePend = forms.filter((f) => f.pending && (f.kind === 'leave' || f.kind === 'trip'));
   const otCover = forms.filter((f) => !f.pending && f.kind === 'ot');
 
   // 跟班表比：班表內沒打到卡＝少做（有假單蓋住＝請假）；班表外打卡＝多做（有加班單＝有單）
   const devs = [];
-  const push = (list, kind) => list.forEach((s) => { if (s.b - s.a >= (kind === 'ot' || kind === 'otok' ? SHOW_OT_MIN : SHOW_MIN)) devs.push({ a: s.a, b: s.b, kind }); });
+  const push = (list, kind) => list.forEach((s) => { if (s.b - s.a >= (kind === 'ot' || kind === 'otok' || kind === 'extra' ? SHOW_OT_MIN : SHOW_MIN)) devs.push({ a: s.a, b: s.b, kind }); });
+  // 假單蓋住的缺勤：補休一個顏色、其他請假（含出差）一個顏色（2026-11-16 Eason：一目瞭然有沒有補休）
+  const pushLeave = (list, cover, pend) => {
+    const comp = cover.filter((f) => f.comp), other = cover.filter((f) => !f.comp);
+    push(inter(list, comp), pend ? 'comppend' : 'comp');
+    push(minus(inter(list, other), comp), pend ? 'leavepend' : 'leave');
+  };
+  // 班表外的打卡：加班單蓋到＝加班（有單）；其餘照時間先後補到當天 8 小時為止＝比班表多（不用單）；再多＝加班沒單
+  const splitExtra = (extra, workedMin) => {
+    push(inter(extra, otCover), 'otok');
+    let budget = Math.max(0, DAY_FREE_MIN - workedMin);
+    const free = [], rest = [];
+    minus(extra, otCover).sort((x, y) => x.a - y.a).forEach((s) => {
+      const take = Math.min(s.b - s.a, budget); budget -= take;
+      if (take > 0) free.push({ a: s.a, b: s.a + take });
+      if (s.b - s.a > take) rest.push({ a: s.a + take, b: s.b });
+    });
+    push(free, 'extra'); push(rest, 'ot');
+  };
   if (plan.length) {
     const work = minus(plan, breaks);
     // 缺卡：少下班卡從上班卡畫到那段班表結束；少上班卡從那段班表開始畫到下班卡
@@ -96,15 +115,21 @@ export function timelineModel(o) {
     });
     push(missing, 'miss');
     const notWorked = minus(minus(work, punch), missing);
-    push(inter(notWorked, leaveCover), 'leave');
+    pushLeave(notWorked, leaveCover, false);
     const rest = minus(notWorked, leaveCover);
-    push(inter(rest, leavePend), 'leavepend');            // 假單還在待審：先畫成「待審的假」，不當成少做
+    pushLeave(rest, leavePend, true);                    // 假單還在待審：先畫成「待審的假」，不當成少做
     push(minus(rest, leavePend), 'short');
-    const extra = minus(punch, plan);
-    push(inter(extra, otCover), 'otok');
-    push(minus(extra, otCover), 'ot');
+    // 遲到那段照「開頭留班表」算在 8 小時裡（同 core-calc）
+    const first = punch.length ? Math.min(...punch.map((x) => x.a)) : null;
+    const lateHead = first != null && first > plan[0].a ? minus(inter(work, [{ a: plan[0].a, b: Math.min(first, plan[0].b) }]), punch) : [];
+    const workedMin = len(inter(work, punch)) + len(lateHead);
+    splitExtra(minus(minus(punch, plan), breaks), workedMin);
+    // 空班休息：班表兩段之間的空檔、不打卡休息帶，沒打卡的部分
+    const gaps = [];
+    for (let i = 1; i < plan.length; i++) if (plan[i].a > plan[i - 1].b) gaps.push({ a: plan[i - 1].b, b: plan[i].a });
+    push(minus(gaps.concat(breaks), punch), 'rest');
   } else {
-    // 沒排班：打卡都算多做（有加班單＝有單）；請假照畫
+    // 沒排班：打卡都算加班（有加班單＝有單；排休來上班一律要加班單）；請假照畫
     push(inter(punch, otCover), 'otok');
     push(minus(punch, otCover), 'ot');
   }

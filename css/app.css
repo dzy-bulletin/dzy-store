@@ -766,3 +766,32 @@ body.embed .dq-legend{border-color:var(--dzy-line);border-radius:var(--dzy-radiu
 .tl-axis.two{height:28px}
 .tl-axis span.tl-ax2{top:13px}
 .dq-sw.tl-lg-plan{border:0;background:#e5dccf}
+/* 2026-11-16 時間軸重新配色＋打卡時間標在條上：照班表上班＝綠、比班表多（不用單）＝藍、加班有單＝橘、加班沒單＝橘斜紋、遲到早退缺勤＝紅、缺卡＝紅斷續、空班休息＝灰斜紋、補休＝紫、請假出差＝青 */
+.tl-track{height:42px}
+.tl-plan{top:0;bottom:0;background:#ece5da}
+.tl-punch{top:22px;height:12px;background:#3f9e5f}
+.tl-dev{top:22px;height:12px}
+.tl-dot{top:19px;height:18px;background:#3f9e5f}
+.tl-short{background:#d64532}
+.tl-miss{background:repeating-linear-gradient(90deg,#d64532 0 4px,transparent 4px 8px)}
+.tl-extra{background:#4a86c5}
+.tl-otok{background:#f08c1a}
+.tl-ot{background:repeating-linear-gradient(135deg,#f08c1a 0 5px,#fbd3a7 5px 9px)}
+.tl-rest{top:22px;height:12px;background:repeating-linear-gradient(135deg,#b8c0c9 0 3px,transparent 3px 7px)}
+.tl-comp{background:#8b6cd6}
+.tl-comppend{background:repeating-linear-gradient(90deg,#8b6cd6 0 6px,#ddd3f5 6px 10px)}
+.tl-leave{background:#2fa59a}
+.tl-leavepend{background:repeating-linear-gradient(90deg,#2fa59a 0 6px,#c9ebe7 6px 10px)}
+.tl-form{top:18px;bottom:4px;border:1.5px dashed #f08c1a}
+.tl-form.tl-f-leave,.tl-form.tl-f-trip{border-color:#2fa59a}
+.tl-form.tl-f-comp{border-color:#8b6cd6}
+.tl-form.pend{border-color:#444}
+.tl-plab{position:absolute;top:3px;font-size:11px;font-weight:700;color:#2b2b2b;white-space:nowrap;line-height:1.2;font-variant-numeric:tabular-nums}
+.tl-plab.st{transform:none}
+.tl-plab.en{transform:translateX(-100%)}
+.tl-plab.mid{transform:translateX(-50%)}
+.dq-sw.tl-punch,.dq-sw.tl-rest{position:static;height:10px}
+.dq-sw.tl-lg-plan{background:#ece5da}
+.dq-sw.tl-lg-pend{border-color:#444}
+.tl-track.tl-two{height:56px}
+.tl-plab.low{top:38px}

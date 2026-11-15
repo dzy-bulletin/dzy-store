@@ -1,15 +1,18 @@
 // 核定時段照「打卡＋單」算（2026-11-14 Eason 定案「打卡＋單＝核定時數」，docs/punch-plus-req/）。純函式，不碰畫面，伺服器測試直接載入。
 // 原則（Eason 確認的 12 個例子）：
 //   1. 打卡（含已核准忘打卡單補的卡）＋已核准的單，就是核定時數；班表只拿來交叉比對與設上限。
-//   2. 時段取「打卡」和「班表＋已核准加班單」的交集：早到、晚走沒有加班單的部分不算（不用寫原因）。
+//   2. 時段取「打卡」和「班表＋已核准加班單」的交集；班表以外的打卡（早到、晚走、班表空檔來上班）照打卡算，
+//      當天加起來超過 8 小時的部分才要加班單、沒單不算（2026-11-16 Eason：「只要當天出勤滿八小時以上才需要加班單，不是依照班表的時間」，取代 11/14 的「比班表多 30 分鐘就要加班單」）。
 //   3. 遲到：開頭留班表（打卡端照標遲到 N 分、薪資照扣）；早退、中途離開照打卡算（正職不足 8 小時要假單，由打卡端檢查）。
 //   4. 忘打卡單補的時間超出班表的部分不算；加班單要有打卡涵蓋（打卡端檢查）。
 //   5. 打卡跟班表（或加班單）邊界差 15 分鐘內算對得上；其他只往少的方向取整到 15 分（上班往後、下班往前）。
 // 沒班表也沒加班單（例：排休卻來上班）：照打卡算，讓打卡端回「要有加班單」。沒打卡又有班表：照班表，讓打卡端回「要有忘打卡單」。
 
 const TOL = 15;
-/** 打卡超出班表＋已核准加班單合計達這麼多分鐘、又沒有加班單：不給一鍵核定，要補加班單或主管「自己調」確認（2026-11-14 Eason 選 B） */
+/** 超過當天 8 小時、又沒有加班單的打卡合計達這麼多分鐘：不給一鍵核定，要補加班單或主管「自己調」確認（2026-11-14 Eason 選 B；2026-11-16 起只算超過 8 小時的部分） */
 export const OVER_BLOCK_MIN = 30;
+/** 一天不用加班單的上限（分鐘）：班表內＋班表外加起來到這裡為止都照打卡算 */
+export const DAY_FREE_MIN = 480;
 const toMin = (hm) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || '')); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
 const toHm = (n) => { const x = ((n % 1440) + 1440) % 1440; return String(Math.floor(x / 60)).padStart(2, '0') + ':' + String(x % 60).padStart(2, '0'); };
 const span = (a, b) => (a == null || b == null ? null : (b <= a ? [a, b + 1440] : [a, b]));
@@ -84,34 +87,52 @@ export function corePeriods(o) {
   const bounds = [].concat(...S, ...OT, ...BRK);
   W = merge(W.map(([a, b]) => [snapIn(a, bounds), snapOut(b, bounds)]));
 
-  // 2. 上限＝班表＋已核准加班單；都沒有（排休、沒排班又沒加班單）就照打卡（打卡端回要加班單）
+  // 2. 班表＋已核准加班單裡的打卡照算；都沒有（排休、沒排班又沒加班單）就照打卡（打卡端回要加班單）
   const A = merge(S.concat(OT));
   let core = A.length ? intersect(W, A) : W.map((x) => x.slice());
-
   // 3. 遲到：開頭留班表（只看第一段：第一張上班卡比它對到的班表開頭晚）
   let late = 0;
   if (S.length && core.length && Wraw.length) {
     const firstIn = Wraw[0][0], s0 = S.find((y) => y[1] > firstIn) || S[0];
     if (firstIn > s0[0] + 0 && firstIn < s0[1] && core[0][0] > s0[0]) { late = firstIn - s0[0]; core[0][0] = s0[0]; }
   }
+  // 3b. 班表以外的打卡（S 有班表時）：當天不含加班單的時數還沒滿 8 小時，就照時間先後算進去，滿 8 小時為止；超過的部分要加班單（2026-11-16）。
+  //     放在遲到補開頭之後算：遲到的那段照「開頭留班表」算在 8 小時裡（打卡端是看核定時數超過 8 小時就要加班單）
+  let freeExtra = [];
+  if (S.length) {
+    let budget = Math.max(0, DAY_FREE_MIN - total(minus(minus(core, OT), BRK)));      // 不打卡休息帶不算上班時間
+    // 只算真的打卡（忘打卡單補的時間超出班表照舊不算，例 10），也不算照班表猜的缺卡
+    const real = merge(raw.filter((x) => x.in != null && x.out != null && !x.guess && !x.fromReq.in && !x.fromReq.out).map((x) => span(x.in, x.out)).map(([a, b]) => [snapIn(a, bounds), snapOut(b, bounds)]));
+    for (const [a, b] of minus(intersect(minus(W, A), real), BRK)) {
+      if (budget <= 0) break;
+      const take = Math.min(b - a, budget);
+      freeExtra.push([a, a + take]); budget -= take;
+    }
+    freeExtra = merge(freeExtra);
+    core = merge(core.concat(freeExtra));
+  }
+
   // 4. 不打卡休息帶：核定時段蓋過休息帶就拆開（同現在的預填）
   if (BRK.length) core = minus(core, BRK);
   core = merge(core);
   if (!core.length) return null;
 
   // 5. 給主管看的說明
-  for (const x of minus(Wraw, A.length ? A : Wraw)) if (x[1] - x[0] > TOL) notes.push(toHm(x[0]) + '–' + toHm(x[1]) + ' 沒有加班單，不算');
+  const FREE = merge(A.concat(freeExtra));
+  for (const x of minus(Wraw, FREE.length ? FREE : Wraw)) if (x[1] - x[0] > TOL) notes.push(toHm(x[0]) + '–' + toHm(x[1]) + ' 超過當天 8 小時、沒有加班單，不算');
+  const freeMin = total(freeExtra);
+  if (freeMin > 0) notes.push('比班表多 ' + Math.round(freeMin / 6) / 10 + ' 小時（當天沒滿 8 小時，不用加班單）');
   for (const x of raw) if (x.fromReq.out && S.length && x.out != null && x.out > S[S.length - 1][1] + TOL && !OT.some((y) => x.out <= y[1] + TOL)) {
-    const tail = '–' + toHm(x.out) + ' 沒有加班單，不算';
+    const tail = '–' + toHm(x.out) + ' 超過當天 8 小時、沒有加班單，不算';
     for (let i = notes.length - 1; i >= 0; i--) if (notes[i].endsWith(tail)) notes.splice(i, 1);      // 同一段改用忘打卡單的說法，不重複
     notes.push('忘打卡單 ' + toHm(x.out) + ' 超過班表，只算到 ' + toHm(S[S.length - 1][1]));
   }
-  const extra = total(minus(core, S));
+  const extra = total(minus(minus(core, S), freeExtra));
   if (S.length && extra > 0 && OT.length) notes.push('比班表多 ' + Math.round(extra / 6) / 10 + ' 小時（已核准加班單）');
   if (late > 0) notes.push('遲到 ' + late + ' 分（薪資照扣）');
 
-  // 打卡在班表＋已核准加班單以外的時段（不取整、照實際打卡）；沒班表也沒加班單時不算（打卡端會要加班單）
-  const outside = A.length ? minus(Wraw, A) : [];
+  // 超過當天 8 小時、又不在加班單裡的打卡時段（不取整、照實際打卡；小於 15 分的零頭不算）；沒班表也沒加班單時不算（打卡端會要加班單）
+  const outside = A.length ? minus(Wraw, FREE) : [];
   const over = outside.map(([a, b]) => ({ start: toHm(a), end: toHm(b) }));
   const overMin = total(outside);
   const periods = core.map(([a, b]) => ({ start: toHm(a), end: toHm(b) }));
