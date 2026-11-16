@@ -133,6 +133,22 @@ export function corePeriods(o) {
   // 只搬「當天那個時間沒有打卡對到、加一天後落在這天班表或打卡的範圍內（差 15 分內算接得上）」的單；其他照舊（2026-11-15 考勤驗收 C6-6）
   const dayEnd = Math.max(...Wraw.concat(S).map((x) => x[1]));
   const OT = merge(otRaw.map((x) => (x && dayEnd > 1440 && x[1] <= 1440 && x[0] + 1440 <= dayEnd + TOL && !total(intersect([x], Wraw)) ? [x[0] + 1440, x[1] + 1440] : x)));
+  // 1b. 班別設定的休息（break_min）：同一段班中間出去休息有打卡 → 從出去那張卡起扣滿休息分鐘；休超過的照實扣到回來那張卡（2026-11-17 Eason「照班別休息分鐘扣，超過的照實扣」）。
+  //     原本兩張卡各往內取整到 15 分，休 23 分會被扣成 45 分（陳盈如 11/2 E班 09:00–17:30 休 30：13:25 出、13:48 回 → 7.75 小時，主管手動核 13:25–13:55＝8 小時）。
+  //     做法：出去、回來那兩張卡先接成一段（不取整），最後再把休息挖掉。每段班只認第一個空檔；空檔要整個在那段班裡。
+  const RESTS = [];
+  for (const p of plan) {
+    const bm = Math.round(Number(p.break_min) || 0), sp = span(toMin(p.start), toMin(p.end));
+    if (!(bm > 0) || !sp) continue;
+    for (let i = 1; i < W.length; i++) {
+      const a = W[i - 1][1], b = W[i][0];
+      if (!(a > sp[0] && b < sp[1] && b > a)) continue;
+      RESTS.push(b - a <= bm ? [a, a + bm] : [a, b]);
+      W = merge(W.slice(0, i - 1).concat([[W[i - 1][0], W[i][1]]], W.slice(i + 1)));
+      break;
+    }
+  }
+  if (RESTS.length) notes.push('休息 ' + RESTS.map(([a, b]) => toHm(a) + '–' + toHm(b)).join('、') + '（班別休息從出去那張卡起算' + (RESTS.some(([a, b]) => b - a > 0 && plan.some((p) => Number(p.break_min) > 0 && b - a > Number(p.break_min))) ? '，休超過的照實扣' : '') + '）');
   const bounds = [].concat(...S, ...OT, ...BRK);
   W = merge(W.map(([a, b]) => [snapIn(a, bounds), snapOut(b, bounds)]));
 
@@ -149,7 +165,7 @@ export function corePeriods(o) {
   //     放在遲到補開頭之後算：遲到的那段照「開頭留班表」算在 8 小時裡（打卡端是看核定時數超過 8 小時就要加班單）
   let freeExtra = [];
   if (S.length) {
-    let budget = Math.max(0, DAY_FREE_MIN - total(minus(minus(core, OT), BRK)));      // 不打卡休息帶不算上班時間
+    let budget = Math.max(0, DAY_FREE_MIN - total(minus(minus(core, OT), BRK.concat(RESTS))));      // 班別休息也不算      // 不打卡休息帶不算上班時間
     // 只算真的打卡（忘打卡單補的時間超出班表照舊不算，例 10），也不算照班表猜的缺卡
     const real = merge(raw.filter((x) => x.in != null && x.out != null && !x.guess && !x.fromReq.in && !x.fromReq.out).map((x) => span(x.in, x.out)).map(([a, b]) => [snapIn(a, bounds), snapOut(b, bounds)]));
     for (const [a, b] of minus(intersect(minus(W, A), real), BRK)) {
@@ -163,6 +179,7 @@ export function corePeriods(o) {
 
   // 4. 不打卡休息帶：核定時段蓋過休息帶就拆開（同現在的預填）
   if (BRK.length) core = minus(core, BRK);
+  if (RESTS.length) core = minus(core, RESTS);
   core = merge(core);
   if (!core.length) return null;
 
