@@ -17,3 +17,5 @@ body.embed.ui-new th{background:#fafafa;color:var(--dzy-muted);font-weight:600;f
 body.embed.ui-new td{border-color:#e5e5ea}
 body.embed.ui-new .du-chip{border-color:#b9d4f5}
 body.embed.ui-new .du-pa{border-color:#f3d9b0}
+/* 電腦版滿版（2026-11-16）：嵌入＋新外觀時拿掉 main 的 1180px 上限，排班表、考勤用滿管理系統給的寬度 */
+@media (min-width:861px){body.embed.ui-new main, body.embed.ui-new .main-wrap main{max-width:none}}
