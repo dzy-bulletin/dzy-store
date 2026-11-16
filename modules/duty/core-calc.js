@@ -168,7 +168,9 @@ export function corePeriods(o) {
 
   // 5. 給主管看的說明
   const FREE = merge(A.concat(freeExtra));
-  for (const x of minus(Wraw, FREE.length ? FREE : Wraw)) if (x[1] - x[0] > TOL) notes.push(toHm(x[0]) + '–' + toHm(x[1]) + ' 超過當天 8 小時、沒有加班單，不算');
+  // 不打卡休息帶（央廚 12–13、總部 14–15）：中間沒打下班卡照樣是休息，不算多出來的時段（2026-11-16 Eason：吳佳宜 08:25–17:42 被要求補 12:15–12:45 加班單）
+  const WnoBrk = minus(Wraw, BRK);
+  for (const x of minus(WnoBrk, FREE.length ? FREE : WnoBrk)) if (x[1] - x[0] > TOL) notes.push(toHm(x[0]) + '–' + toHm(x[1]) + ' 超過當天 8 小時、沒有加班單，不算');
   const freeMin = total(freeExtra);
   if (freeMin > 0) notes.push('比班表多 ' + Math.round(freeMin / 6) / 10 + ' 小時（當天沒滿 8 小時，不用加班單）');
   for (const x of raw) if (x.fromReq.out && S.length && x.out != null && x.out > S[S.length - 1][1] + TOL && !OT.some((y) => x.out <= y[1] + TOL)) {
@@ -184,7 +186,7 @@ export function corePeriods(o) {
   // 2026-11-16 Eason：「時段的認定是以 15 分鐘為一單位，上班前 15 分鐘打卡跟下班後 15 分鐘打卡都不算在薪資內」
   //   → 緊接在班表或已核准加班單前後的那 15 分鐘先扣掉（「滿 8 小時」那個點不是上下班，不扣），剩下的再往內取整到 15 分，不到 15 分的整段不列。
   //   例 班表 12:00–16:00、18:00–22:15，打卡 11:58–16:19、17:54–22:20 → 0 分（原本照實際打卡算 32 分、被擋）。
-  const outside = A.length ? overUnits(minus(Wraw, FREE), A) : [];
+  const outside = A.length ? overUnits(minus(WnoBrk, FREE), A.concat(BRK)) : [];
   const over = outside.map(([a, b]) => ({ start: toHm(a), end: toHm(b) }));
   const overMin = total(outside);
   const periods = core.map(([a, b]) => ({ start: toHm(a), end: toHm(b) }));

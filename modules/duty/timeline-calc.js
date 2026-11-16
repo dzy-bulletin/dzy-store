@@ -55,9 +55,10 @@ const len = (list) => list.reduce((t, s) => t + (s.b - s.a), 0);
 export function timelineModel(o) {
   const segs = Array.isArray(o && o.segments) ? o.segments : [];
   const plan = o && o.plan && o.plan.work === true && Array.isArray(o.plan.segs) ? o.plan.segs.map((s) => span(s.start, s.end)).filter(Boolean) : [];
-  // 班表裡不打卡的休息帶（每一段班表各自看有沒有蓋到）
+  // 不打卡的休息帶：落在當天第一段班到最後一段班之間就算（班表分兩段、中間空著也是休息；2026-11-16 吳佳宜 12–13 被畫成加班）
   const bk = span(o && o.brk && o.brk.start, o && o.brk && o.brk.end);
-  const breaks = bk ? inter(plan, [bk, { a: bk.a + DAY, b: bk.b + DAY }]) : [];
+  const hull = plan.length ? [{ a: Math.min(...plan.map((p) => p.a)), b: Math.max(...plan.map((p) => p.b)) }] : [];
+  const breaks = bk ? inter(hull, [bk, { a: bk.a + DAY, b: bk.b + DAY }]) : [];
 
   // 打卡：完整段畫實心；只有上班卡或只有下班卡另外記（畫缺卡）
   const punch = [], open = [];
@@ -130,7 +131,7 @@ export function timelineModel(o) {
     // 空班休息：班表兩段之間的空檔、不打卡休息帶，沒打卡的部分
     const gaps = [];
     for (let i = 1; i < plan.length; i++) if (plan[i].a > plan[i - 1].b) gaps.push({ a: plan[i - 1].b, b: plan[i].a });
-    push(minus(gaps.concat(breaks), punch), 'rest');
+    push(minus(minus(gaps, breaks).concat(breaks), punch), 'rest');        // 空檔就是休息帶時只畫一次
   } else {
     // 沒排班：打卡都算加班（有加班單＝有單；排休來上班一律要加班單）；請假照畫
     push(inter(punch, otCover), 'otok');
