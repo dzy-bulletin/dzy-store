@@ -180,12 +180,25 @@ export function corePeriods(o) {
   if (S.length && extra > 0 && OT.length) notes.push('比班表多 ' + Math.round(extra / 6) / 10 + ' 小時（已核准加班單）');
   if (late > 0) notes.push('遲到 ' + late + ' 分（薪資照扣）');
 
-  // 超過當天 8 小時、又不在加班單裡的打卡時段（不取整、照實際打卡；小於 15 分的零頭不算）；沒班表也沒加班單時不算（打卡端會要加班單）
-  const outside = A.length ? minus(Wraw, FREE) : [];
+  // 超過當天 8 小時、又不在加班單裡的打卡時段；沒班表也沒加班單時不算（打卡端會要加班單）。
+  // 2026-11-16 Eason：「時段的認定是以 15 分鐘為一單位，上班前 15 分鐘打卡跟下班後 15 分鐘打卡都不算在薪資內」
+  //   → 緊接在班表或已核准加班單前後的那 15 分鐘先扣掉（「滿 8 小時」那個點不是上下班，不扣），剩下的再往內取整到 15 分，不到 15 分的整段不列。
+  //   例 班表 12:00–16:00、18:00–22:15，打卡 11:58–16:19、17:54–22:20 → 0 分（原本照實際打卡算 32 分、被擋）。
+  const outside = A.length ? overUnits(minus(Wraw, FREE), A) : [];
   const over = outside.map(([a, b]) => ({ start: toHm(a), end: toHm(b) }));
   const overMin = total(outside);
   const periods = core.map(([a, b]) => ({ start: toHm(a), end: toHm(b) }));
   return { periods, hours: Math.round(total(core) / 60 * 100) / 100, notes, late, over, overMin };
+}
+
+/** 超出的打卡時段 → 要加班單的時段：接在班表／加班單（bounds）後面的開頭、前面的結尾各扣 15 分寬限，再往內取整到 15 分，不到 15 分不列 */
+function overUnits(list, bounds) {
+  const ends = new Set(bounds.map((x) => x[1])), starts = new Set(bounds.map((x) => x[0])), out = [];
+  for (const [a0, b0] of list) {
+    const a = Math.ceil((ends.has(a0) ? a0 + TOL : a0) / TOL) * TOL, b = Math.floor((starts.has(b0) ? b0 - TOL : b0) / TOL) * TOL;
+    if (b - a >= TOL) out.push([a, b]);
+  }
+  return out;
 }
 
 export const _t = { toMin, toHm, merge, intersect, minus };
