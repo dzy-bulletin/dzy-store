@@ -918,3 +918,10 @@ body.embed .dq-legend{border-color:var(--dzy-line);border-radius:var(--dzy-radiu
 .tl{--tl-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
 .tl-axis span{font:500 10px/1 var(--tl-mono);color:#94a3b8}
 .dq-plantxt{font-family:inherit;font-variant-numeric:tabular-nums}      /* 姓名旁的班表用一般字（等寬字在 375 寬會把時間拆兩行） */
+/* 同一人別家店的打卡（2026-11-17）：灰藍色條，跟本店出勤（綠）分開；條下寫店名與時間 */
+.tl-track .tl-away{position:absolute;top:25px;height:8px;border-radius:2px;background:#64748b;box-shadow:0 0 0 1px #fff}
+.tl-track .tl-plab.away{color:#64748b;background:#f1f5f9;border-radius:3px;padding:0 4px}      /* 別店的時間：灰藍字＋淺灰藍底，跟本店深色字分開（2026-11-17 Eason） */
+.dq-sw.tl-away{background:#64748b}
+/* 已核定那一行：淡綠底、綠字（2026-11-17 Eason） */
+.dq-toggle.dq-donetg{background:#ecfdf5;border-color:#a7f3d0;color:#047857}
+body.embed .dq-toggle.dq-donetg{border-color:#a7f3d0}

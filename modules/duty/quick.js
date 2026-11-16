@@ -60,6 +60,7 @@ export function timelineEl(m, label) {
   m.forms.forEach((f) => box('tl-form tl-f-' + f.kind + (f.comp ? ' tl-f-comp' : '') + (f.pending ? ' pend' : ''), f.a, f.b, (f.pending ? '待審 ' : '') + f.label + ' ' + T.hhmm(f.a) + '–' + T.hhmm(f.b)));
   m.devs.filter((d) => d.kind === 'rest').forEach((d) => box('tl-dev tl-rest', d.a, d.b, '空班休息 ' + T.hhmm(d.a) + '–' + T.hhmm(d.b)));
   m.punch.forEach((s) => box('tl-punch', s.a, s.b, '打卡 ' + T.hhmm(s.a) + '–' + T.hhmm(s.b)));
+  (m.away || []).forEach((s) => box('tl-away', s.a, s.b, '在' + s.label + '打卡 ' + T.hhmm(s.a) + '–' + T.hhmm(s.b) + '（由' + s.label + '核定）'));      // 同一人別家店的打卡（2026-11-17）
   m.open.forEach((x) => { const t = x.a != null ? x.a : x.b; box('tl-dot', t, t, (x.side === 'out' ? '只有上班卡 ' : '只有下班卡 ') + T.hhmm(t)); });
   m.devs.filter((d) => d.kind !== 'rest').forEach((d) => box('tl-dev tl-' + d.kind, d.a, d.b, TL_KIND[d.kind] + ' ' + T.hhmm(d.a) + '–' + T.hhmm(d.b)));
   // 多做、少做的段落直接在條下寫分鐘數（+94、−40）；太窄放不下就不寫（滑過去看提示）
@@ -80,6 +81,7 @@ export function timelineEl(m, label) {
     else { plab(s.a, 'st', T.hhmm(s.a)); plab(s.b, 'en', T.hhmm(s.b)); }
   });
   m.open.forEach((x) => { if (x.a != null) plab(x.a, 'st', T.hhmm(x.a) + '–？'); else plab(x.b, 'en', '？–' + T.hhmm(x.b)); });
+  (m.away || []).forEach((s) => plab((s.a + s.b) / 2, 'mid away', s.label + ' ' + T.hhmm(s.a) + '–' + T.hhmm(s.b)));
   const ax = h('div', 'tl-axis');
   // 刻度：每兩小時標一次整點（班表起訖已經標在上方括號）
   void marks;
@@ -160,7 +162,7 @@ export function renderQuick(ctx) {
   }
   // 那天這個人的時間軸資料（班表、打卡、已核准與待審的單）
   function modelOf(emp, date, approved) {
-    return T.timelineModel({ segments: emp.segments, plan: emp.plan, reqs: reqsFor(emp, date, approved), brk: brkOf(emp) });
+    return T.timelineModel({ segments: emp.segments, plan: emp.plan, reqs: reqsFor(emp, date, approved), brk: brkOf(emp), elsewhere: emp.elsewhere });
   }
   // 等同仁補單（伺服器記）：這個人這天有沒有在等；等的時候有沒有新的單送來（送來了＝回到正常流程讓主管核）
   const waitOf = (key, date) => (st.waits || []).find((w) => Q.keyOf(w) === key && w.date === date) || null;
@@ -854,7 +856,7 @@ export function renderQuick(ctx) {
   // 時間軸顏色說明（2026-11-15 Eason：「班別的時段要有顏色說明，避免主管看不懂」）
   function legendEl() {
     const box = h('div', 'dq-legend', null, { id: 'dqLegend', 'aria-label': '時間軸顏色說明' });
-    [['tl-lg-plan', '班別（班表）'], ['tl-punch', '出勤'], ['tl-extra', '比班表多（沒滿 8 小時，不用單）'], ['tl-otok', '加班（有單）'], ['tl-ot', '加班沒單（要補單）'],
+    [['tl-lg-plan', '班別（班表）'], ['tl-punch', '出勤'], ['tl-away', '在別店打卡（由那家店核定）'], ['tl-extra', '比班表多（沒滿 8 小時，不用單）'], ['tl-otok', '加班（有單）'], ['tl-ot', '加班沒單（要補單）'],
       ['tl-trip', '出差'], ['tl-missok', '忘刷（有單）'], ['tl-miss', '缺卡沒單（要補忘打卡單）'], ['tl-short', '遲到、早退、缺勤'], ['tl-leave', '請假'], ['tl-comp', '補休'], ['tl-rest', '空班'], ['tl-lg-pend', '單還在審（反向斜紋）']].forEach(([cls, t]) => {
       const it = h('span', 'dq-lgi'); it.append(h('i', 'dq-sw ' + cls, null, { 'aria-hidden': 'true' }), h('span', null, t)); box.append(it);
     });
@@ -867,7 +869,7 @@ export function renderQuick(ctx) {
     tile('要你處理', (s.abnormal.length + s.blocked.length) + ' 人', 'bad');
     if (st.waits !== null) tile('等同仁補單', st.waits.length + ' 筆', 'warn');
     tile('可一鍵核定', s.ok.length + ' 人', 'ok');
-    tile('排班 → 上班＋請假', C.round2(hs.plan) + ' → ' + C.round2(hs.work) + (hs.leave ? '＋' + C.round2(hs.leave) : '') + ' 小時');
+    tile('排班工時｜實際工時｜請假時數', C.round2(hs.plan) + '｜' + C.round2(hs.work) + '｜' + C.round2(hs.leave) + ' 小時');      // 2026-11-17 Eason 改名；排班扣班內休息分鐘
     return box;
   }
   function waitSection() {
@@ -1006,7 +1008,7 @@ export function renderQuick(ctx) {
     // 已核定的人：精簡卡（時間軸＋細調可重新核定）。舊畫面「依日期查看、重新送出核定」搬到這裡
     if (s.done.length) {
       const showDone = st.detail || st.doneOpen;
-      root.append(btn('dq-toggle', null, () => { st.doneOpen = !showDone; render(); }, { id: 'dqDoneToggle' }));
+      root.append(btn('dq-toggle dq-donetg', null, () => { st.doneOpen = !showDone; render(); }, { id: 'dqDoneToggle' }));
       root.lastChild.append(h('span', null, '已核定 ' + s.done.length + ' 人：' + s.done.map((p) => p.name + ' ' + C.round2(p.hours) + ' 小時').join('、')), h('span', null, showDone ? '收起' : '›'));
       root.lastChild.disabled = false;
       if (showDone) s.done.forEach((p) => { const e = empOf(p.key), ap = e && e.approved; root.append(miniCard(p, '已核定 ' + C.round2(p.hours) + ' 小時' + (ap && ap.manager_name ? '（' + ap.manager_name + '）' : ''))); });

@@ -61,6 +61,14 @@ export function timelineModel(o) {
   const hull = plan.length ? [{ a: Math.min(...plan.map((p) => p.a)), b: Math.max(...plan.map((p) => p.b)) }] : [];
   const breaks = bk ? inter(hull, [bk, { a: bk.a + DAY, b: bk.b + DAY }]) : [];
 
+  // 同一人這天在別家店的打卡（伺服器附的 elsewhere，2026-11-17）：只畫出來，不算本店上班；落在本店班表裡的那段不算少做
+  const away = [];
+  (Array.isArray(o && o.elsewhere) ? o.elsewhere : []).forEach((x) => (Array.isArray(x && x.segs) ? x.segs : []).forEach((sg) => {
+    const a = toMin(sg && sg.in), b0 = toMin(sg && sg.out);
+    if (a == null || b0 == null) return;
+    let b = b0 + (sg.cross ? DAY : 0); if (b <= a) b += DAY;
+    away.push({ a, b, label: String(x.label || '別店') });
+  }));
   // 打卡：完整段畫實心；只有上班卡或只有下班卡另外記（畫缺卡）
   const punch = [], open = [];
   segs.forEach((s) => {
@@ -133,6 +141,7 @@ export function timelineModel(o) {
       });
     });
     if (segRest.length) { notWorked = minus(notWorked, segRest); push(segRest, 'rest'); }
+    if (away.length) notWorked = minus(notWorked, away);      // 在別家店上班的時間：不畫成本店少做
     pushLeave(notWorked, leaveCover, false);
     const rest = minus(notWorked, leaveCover);
     pushLeave(rest, leavePend, true);                    // 假單還在待審：先畫成「待審的假」，不當成少做
@@ -155,7 +164,7 @@ export function timelineModel(o) {
 
   // 時間軸範圍：所有東西的最早到最晚，前後各留到整點偶數小時，至少 8 小時
   const pts = [];
-  [plan, punch, forms, devs].forEach((l) => l.forEach((s) => { pts.push(s.a, s.b); }));
+  [plan, punch, forms, devs, away].forEach((l) => l.forEach((s) => { pts.push(s.a, s.b); }));
   open.forEach((x) => pts.push(x.a != null ? x.a : x.b));
   let from = pts.length ? Math.min(...pts) : 9 * 60, to = pts.length ? Math.max(...pts) : 18 * 60;
   from = Math.max(0, Math.floor((from - 30) / 120) * 120);
@@ -169,7 +178,9 @@ export function timelineModel(o) {
   // 時間軸下方的刻度：有班表就標班表的起訖（2026-11-15 Eason：「班表時段直接取代固定的 08–24」），沒有班表才用整點
   const planTicks = [...new Set(plan.flatMap((p) => [p.a, p.b]))].sort((x, y) => x - y);
   const leavePunch = punch.length > 0 && leaveOnly.some((f) => len(inter(punch, [f])) >= 30);
-  return { from, to, ticks, planTicks, plan, punch, open, forms, devs, breaks, leaveAllDay: allDayLeave, leavePunch };
+  // 班內休息分鐘合計（每段班最多扣到那段的長度）：排班工時要扣掉（2026-11-17 Eason）
+  const segBreakMin = planRaw.reduce((t, s) => t + Math.min(s.bm || 0, len(minus([s.sp], breaks))), 0);
+  return { from, to, ticks, planTicks, plan, punch, open, forms, devs, breaks, segBreakMin, away, leaveAllDay: allDayLeave, leavePunch };
 }
 
 // 異常排序（2026-11-15 開工確認）：缺卡 → 缺勤沒單 → 假單對不上／請假卻打卡 → 單待審 → 加班 → 遲到早退 → 其他。數字小的排前面
@@ -190,7 +201,7 @@ export function hoursSummary(models) {
   let plan = 0, work = 0, leave = 0;
   (models || []).forEach((m) => {
     if (!m) return;
-    plan += len(minus(m.plan, m.breaks));
+    plan += Math.max(0, len(minus(m.plan, m.breaks)) - (m.segBreakMin || 0));      // 排班工時：扣固定休息帶與班內休息分鐘（例 A 班 15:00–23:30 休 30 分＝8 小時）
     work += len(m.punch);
     leave += len(m.forms.filter((f) => !f.pending && (f.kind === 'leave' || f.kind === 'trip')));
   });
