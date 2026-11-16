@@ -1,7 +1,7 @@
 // 核定工時：照原系統 ~/mala-clock-in/manager.html 搬。日期列（前一天／後一天／今天）、本月待核定提醒、員工卡（收合展開、時段、
 // 核定時數即時算、休息、假別、出差、遲到分鐘）、送出核定。外觀換成營運系統風格，規則與文案不改。
 import { confirmBox } from '../../js/ui.js';
-import { S, dutyManager, call, callAll, brk, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow, canVoidRow, supportTag, rememberOne, snapLabel, tipText, checkOnce, reqShown, refreshReqBadge } from './state.js';
+import { S, dutyManager, call, callAll, brk, brkOf, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow, canVoidRow, supportTag, rememberOne, snapLabel, tipText, checkOnce, reqShown, refreshReqBadge } from './state.js';
 import { buildReqItem } from './request.js';
 import { corePeriods, OVER_BLOCK_MIN, otSuggestText, cardDiffs, cardLabel, cardReasonText } from './core-calc.js';
 import * as C from './calc.js';
@@ -404,7 +404,7 @@ export function checkCards(cards, date, current) {
 }
 const NOT_COUNT_REASONS = ['下班後私人逗留', '等人來載', '忘按下班，其實已經離開'];
 function buildCard(emp, date) {
-  const br = brk(emp.store);
+  const br = brkOf(emp);
   const readOnly = !canWriteRow('hours', emp.emp_id, emp.store);      // 不在核定工時名單（只看）：不出現送出核定，欄位不可改
   const card = h('div', 'du-card'); card.dataset.empId = rowKey(emp); if (emp.store) card.dataset.store = emp.store;
   // 改了時段、假別、遲到、原因：停手 1 秒只重算這一位（整天那次跑完 __checkOn 才開始；卡片初始化時呼叫會直接略過）

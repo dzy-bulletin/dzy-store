@@ -113,6 +113,8 @@ export function refreshReqBadge() {
 }
 
 export const brk = store => { const m = (store && S.metaBy[store]) || S.meta; return { start: m.breakStart, end: m.breakEnd }; };
+// 某一列（mgr_day 的同仁）的休息帶：伺服器在列上標了就用列上的（2026-11-16，那一列實際打卡那家店的），舊回應沒有才照店別查
+export const brkOf = emp => (emp && emp.brk && typeof emp.brk.start === 'string' && typeof emp.brk.end === 'string' ? { start: emp.brk.start, end: emp.brk.end } : brk(emp && emp.store));
 
 // 小工具：建元素（文字一律用 textContent，不拼 innerHTML）
 export function h(tag, cls, text, attrs) {

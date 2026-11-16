@@ -869,7 +869,7 @@ function dutyDo(d, action, b) {
       const f = fakeOf(r.emp_id) || { shift: ['', ''], segs: [], ref: null };
       const out = { emp_id: r.emp_id, name: r.name, segments: f.segs.map(x => ({ ...x })), reference: f.ref, attempts: f.attempts || 0,
         ...leaveOut(d.leave[date + r.emp_id]), shift_in: f.shift[0], shift_out: f.shift[1],
-        plan: (d.plans && d.plans[r.emp_id]) || null, ...(Array.isArray(d.ftEmps) ? { ft: d.ftEmps.includes(r.emp_id) } : {}) };      // ft：正職（2026-11-13，e2e 設 d.ftEmps 才有）
+        plan: (d.plans && d.plans[r.emp_id]) || null, brk: { start: d.brk[0], end: d.brk[1] }, ...(Array.isArray(d.ftEmps) ? { ft: d.ftEmps.includes(r.emp_id) } : {}) };      // ft：正職（2026-11-13，e2e 設 d.ftEmps 才有）
       if (r.no_line) out.no_line = true;                // 打卡端 mgr_day 帶的「沒綁 LINE」（2026-11-10）
       const a = d.approved[date + r.emp_id]; if (a) out.approved = { ...a };
       // 人資退回（2026-11-13）：示範後端照伺服器的 attachReturns／return_ok；d.returnOk＝true 時示範人資身分（能退回）

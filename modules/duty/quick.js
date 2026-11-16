@@ -1,7 +1,7 @@
 // 考勤管理「手機一頁核定」（核定工時分頁在手機寬度 ≤860px 的新畫面；規格 docs/duty-quick/requirements.md，2026-11-09 Eason 定案）。
 // 一頁完成：沒問題的人一鍵核定、有異常的人一人一張卡按一下完成、少打卡又沒單的人先擋住。舊畫面（approve.js）完整保留當退路。
 // 規則都在 quick-calc.js（純函式，有單元測試）；這裡只負責讀資料、畫畫面、依序呼叫既有的 mgr_approve／mgr_req_decide／mgr_req_proxy。
-import { S, call, callAll, h, failBar, failedStores, supportTag, loadLeave, staleLeave, leaveFor, canWriteRow, brk, dutyManager, dutyHours, viewNoHoursStore, snapLabel, checkOnce, reqShown, dropChecks } from './state.js';
+import { S, call, callAll, h, failBar, failedStores, supportTag, loadLeave, staleLeave, leaveFor, canWriteRow, brk, brkOf, dutyManager, dutyHours, viewNoHoursStore, snapLabel, checkOnce, reqShown, dropChecks } from './state.js';
 import * as T from './timeline-calc.js';
 import { fineCard, checkCards, pendingPanel, returnsPanel, elsewhereCards, FULL_UNTIL } from './approve.js';
 import * as C from './calc.js';
@@ -123,7 +123,7 @@ export function renderQuick(ctx) {
   function classifyAt(emp, date, approved, u) {
     const key = Q.keyOf(emp);
     u = u || {};
-    const p = Q.classify({ emp, date, today: todayNow(), nowMin: taipeiMin(), brk: brk(emp.store), LO: leaveFor(emp.store), canHours: canWriteRow('hours', emp.emp_id, emp.store),
+    const p = Q.classify({ emp, date, today: todayNow(), nowMin: taipeiMin(), brk: brkOf(emp), LO: leaveFor(emp.store), canHours: canWriteRow('hours', emp.emp_id, emp.store),
       reqs: reqsFor(emp, date, approved), skipped: !!skipGet()[skipKey(date, key)], mismatch: u.mismatch || '', person: !!(ctx.session && ctx.session.person) });
     // 薪資鎖月（2026-11-15 鎖月後不可再動）：這個月薪資鎖了就列在「現在不能核定」、不給核定鈕，寫清楚要先到薪資頁解鎖（重新載入這天會再問一次）
     if (u.locked && (p.status === 'ok' || p.status === 'abnormal')) return Object.assign(p, { status: 'blocked', tag: '薪資已鎖定', note: u.locked, actions: [] });
@@ -144,7 +144,7 @@ export function renderQuick(ctx) {
       Object.assign(p, { tag: '未符合', note: '要補齊：' + u.need, actions: [{ id: 'full', label: '到完整頁補單', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
     }
     // 列進「核定通過」的人：打卡比班表晚到、早退達 15 分鐘，名單上標橘色「遲到 N 分／早退 N 分」（只提醒不擋，同完整頁的橘色標籤；2026-11-15 考勤驗收 B2-2b-4）
-    if (p.status === 'ok') p.warn = Q.lateEarlyOf(emp, brk(emp.store)).tags;
+    if (p.status === 'ok') p.warn = Q.lateEarlyOf(emp, brkOf(emp)).tags;
     // 請假卻有打卡（2026-11-15 開工確認第 5 題）：標紅提醒、不擋。維持請假要選理由；要算上班就到細調把假單作廢
     if ((p.status === 'ok' || p.status === 'abnormal') && !emp.approved) {
       const m = modelOf(emp, date, approved);
@@ -163,7 +163,7 @@ export function renderQuick(ctx) {
   }
   // 那天這個人的時間軸資料（班表、打卡、已核准與待審的單）
   function modelOf(emp, date, approved) {
-    return T.timelineModel({ segments: emp.segments, plan: emp.plan, reqs: reqsFor(emp, date, approved), brk: brk(emp.store) });
+    return T.timelineModel({ segments: emp.segments, plan: emp.plan, reqs: reqsFor(emp, date, approved), brk: brkOf(emp) });
   }
   // 等同仁補單（伺服器記）：這個人這天有沒有在等；等的時候有沒有新的單送來（送來了＝回到正常流程讓主管核）
   const waitOf = (key, date) => (st.waits || []).find((w) => Q.keyOf(w) === key && w.date === date) || null;
@@ -333,7 +333,7 @@ export function renderQuick(ctx) {
     const by = new Map();
     list.forEach((p) => {
       const emp = empOf(p.key); if (!emp) return;
-      const core = corePeriods({ segs: emp.segments, plan: emp.plan, reqs: st.appr[p.key] || [], brk: brk(emp.store) });
+      const core = corePeriods({ segs: emp.segments, plan: emp.plan, reqs: st.appr[p.key] || [], brk: brkOf(emp) });
       const base = mainAction(p).payload || p.payload;
       // 算不出時段（沒班又沒打卡，例：排休那天只有假單）也沒有原本要送的內容：不送檢查，照原本分類（要自己核對）（2026-11-14 許芷瑄排休喪假被顯示成 bad_periods）
       if (!core && !(base && ((base.periods || []).length || (base.leaves || []).length))) return;
@@ -500,7 +500,7 @@ export function renderQuick(ctx) {
     // 檢查還沒回來就按（2026-11-14）：打卡超出班表＋加班單 30 分鐘以上的人先在這裡擋下（這條打卡系統不會擋），移到異常區
     const list = list0.filter((p) => {
       if (U(p.key).pass || e2eNoCore()) return true;
-      const emp = empOf(p.key), core = emp && corePeriods({ segs: emp.segments, plan: emp.plan, reqs: st.appr[p.key] || [], brk: brk(emp.store) });
+      const emp = empOf(p.key), core = emp && corePeriods({ segs: emp.segments, plan: emp.plan, reqs: st.appr[p.key] || [], brk: brkOf(emp) });
       if (!core || core.overMin < OVER_BLOCK_MIN) return true;
       Object.assign(U(p.key), { failed: '未符合：要補加班單 ' + otSuggestText(core.over, core.overMin), failedDiff: false, pre: true });
       return false;
