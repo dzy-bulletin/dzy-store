@@ -54,7 +54,8 @@ const len = (list) => list.reduce((t, s) => t + (s.b - s.a), 0);
  */
 export function timelineModel(o) {
   const segs = Array.isArray(o && o.segments) ? o.segments : [];
-  const plan = o && o.plan && o.plan.work === true && Array.isArray(o.plan.segs) ? o.plan.segs.map((s) => span(s.start, s.end)).filter(Boolean) : [];
+  const planRaw = o && o.plan && o.plan.work === true && Array.isArray(o.plan.segs) ? o.plan.segs.map((s) => ({ sp: span(s.start, s.end), bm: Math.max(0, Number(s.break_min) || 0) })).filter((x) => x.sp) : [];
+  const plan = planRaw.map((x) => x.sp);
   // 不打卡的休息帶：落在當天第一段班到最後一段班之間就算（班表分兩段、中間空著也是休息；2026-11-16 吳佳宜 12–13 被畫成加班）
   const bk = span(o && o.brk && o.brk.start, o && o.brk && o.brk.end);
   const hull = plan.length ? [{ a: Math.min(...plan.map((p) => p.a)), b: Math.max(...plan.map((p) => p.b)) }] : [];
@@ -118,7 +119,20 @@ export function timelineModel(o) {
     // 忘刷：有已核准的忘打卡單＝實心（單補上了），沒有＝斜紋（要補單）（2026-11-16）
     const missOk = rs.some((r) => r && r.kind === 'miss' && !r.pending);
     push(missing, missOk ? 'missok' : 'miss');
-    const notWorked = minus(minus(work, punch), missing);
+    let notWorked = minus(minus(work, punch), missing);
+    // 班別排了休息分鐘（break_min，例 A 班 15:00–23:30 休息 30 分）：同一段班中間兩段打卡之間的空檔，休息分鐘數以內畫「空班休息」，超過的才是少做
+    //   （2026-11-16 Eason：林秀縈 19:44–20:13 是休息，被畫成缺勤）。開頭、結尾沒打到卡（遲到、早退）不算休息
+    const segRest = [];
+    planRaw.forEach((s) => {
+      if (!(s.bm > 0)) return;
+      let left = s.bm;
+      inter(notWorked, [s.sp]).filter((x) => x.a > s.sp.a && x.b < s.sp.b).sort((x, y) => x.a - y.a).forEach((x) => {
+        if (left <= 0) return;
+        const take = Math.min(x.b - x.a, left); left -= take;
+        segRest.push({ a: x.a, b: x.a + take });
+      });
+    });
+    if (segRest.length) { notWorked = minus(notWorked, segRest); push(segRest, 'rest'); }
     pushLeave(notWorked, leaveCover, false);
     const rest = minus(notWorked, leaveCover);
     pushLeave(rest, leavePend, true);                    // 假單還在待審：先畫成「待審的假」，不當成少做
