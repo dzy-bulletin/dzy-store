@@ -304,11 +304,34 @@ function refreshSidebar(s) {
 }
 
 // ---------- 模組 ----------
+// 模組程式（動態 import）抓不到時等 1 秒再試一次；還是不行回 null，由 viewModule 顯示「重新整理」。
+// 瀏覽器（Chromium 實測）會記住「這個網址下載失敗」、同網址再 import 不會重抓，所以重試時網址加 ?retry=…；
+//  重試成功的那份記在 RETRIED，之後切回這個功能直接用它（不然每次都多載一份新的、模組裡的狀態會重來）。
+// 模組裡面再引用的檔案失敗時，重試仍會失敗（同樣被記住）→ 只能重新整理。
+// 頁面正要離開時中斷的下載交給 whileLeaving（永遠等下去，不顯示提示）。（2026-11-16：e2e 伺服器重設連線時畫面停在登入頁 30 秒）
+const MOD_RETRY_MS = 1000;
+const RETRIED = {};
+async function loadModule(reg) {
+  if (RETRIED[reg.id]) return RETRIED[reg.id];
+  try { return (await whileLeaving(reg.load())).default; }
+  catch (e) { console.warn(`模組 ${reg.id} 載入失敗，1 秒後再試：`, e && e.message); }
+  await new Promise(r => setTimeout(r, MOD_RETRY_MS));
+  try {
+    const m = (await whileLeaving(import(new URL(`../modules/${reg.id}/index.js?retry=${Date.now()}`, import.meta.url).href))).default;
+    return (RETRIED[reg.id] = m);
+  } catch (e) { console.warn(`模組 ${reg.id} 再試也載入失敗：`, e && e.message); return null; }
+}
 async function viewModule(s, id, tab, tok) {
   const reg = MODULES.find(m => m.id === id);
   if (!reg || !(s.features || []).includes(id) || (cardOf(id) && !cardOf(id).visible)) return go('#/');
-  const mod = (await whileLeaving(reg.load())).default;
+  const mod = await loadModule(reg);
   if (tok !== renderToken) return;
+  if (!mod) {   // 兩次都抓不到（網路斷線）：瀏覽器不會重抓下載失敗的模組，只能整頁重新整理
+    const main = frame(s, `${bannerHtml()}<div class="card" id="modLoadFail" role="alert"><h2>網路不穩，畫面沒載入完成</h2>
+      <p class="hint">請確認網路後按「重新整理」。</p><button type="button" class="btn" id="modLoadReload">重新整理</button></div>`, '', { cur: id, title: labelOf(reg) });
+    main.querySelector('#modLoadReload').onclick = () => location.reload();
+    return;
+  }
   const tabs = mod.tabsFor ? mod.tabsFor(s) : mod.tabs;   // 依角色不同分頁（出勤核定：管理者多「各店總覽」）
   const cur = tabs.some(t => t.id === tab) ? tab : tabs[0].id;
   // 補上預設分頁前先確認網址還在這個系統：模組載入期間使用者（或 e2e）已點去別的系統、hashchange 還沒觸發時，
