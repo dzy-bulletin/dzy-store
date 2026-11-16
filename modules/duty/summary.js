@@ -3,7 +3,7 @@
 // 資料：mgr_req_month {ym}（全部門市走 callAll）；換月份才重讀，其他篩選只在前端。對帳與合計的規則在 summary-calc.js（純函式）。
 import { S, call, callAll, h, tipText } from './state.js';
 import { taipeiToday, tsLabel, shortDate } from './calc.js';
-import { buildRows, filterRows, totals, empKey, defaultYm, ymAdd, ymLabel, xlsSafe, KIND_LABEL, KIND_ORDER, SLIP_TITLE, MERGED, OT_NOTE, compBankRows, compSheet } from './summary-calc.js';
+import { buildRows, filterRows, totals, empKey, defaultYm, ymAdd, ymLabel, xlsSafe, KIND_LABEL, KIND_ORDER, SLIP_TITLE, MERGED, OT_NOTE, compBankRows, compSheet, compNoneText } from './summary-calc.js';
 
 // 樣式另放 summary.css（畫面、手機卡片、列印），第一次進來才掛上（同耗損登記 loss.css 的掛法）
 export function css() {
@@ -232,14 +232,15 @@ function compView() {
   if (!c.stores || c.ym !== st.ym) return { status: 'loading', ym };
   // 名冊沒有的人（離職、全部門市名單外）用這個月申請單上的姓名（申請單載入後重畫就補上）
   const names = new Map((st.rows || []).filter(r => r.emp_id && r.name).map(r => [(r.store || '') + '|' + r.emp_id, r.name]));
-  const groups = compBankRows(c.stores.map(x => Object.assign({}, x, { names: new Map([...names].filter(([k]) => k.startsWith((S.all ? x.code : (st.rows[0] && st.rows[0].store) || '') + '|')).map(([k, v]) => [k.split('|')[1], v])) }))).filter(g => g.rows !== null);
-  return { status: groups.length ? 'ok' : 'none', ym, groups, failed: c.failed || [] };
+  const all = compBankRows(c.stores.map(x => Object.assign({}, x, { names: new Map([...names].filter(([k]) => k.startsWith((S.all ? x.code : (st.rows[0] && st.rows[0].store) || '') + '|')).map(([k, v]) => [k.split('|')[1], v])) })));
+  const groups = all.filter(g => g.rows !== null);
+  return { status: groups.length ? 'ok' : 'none', ym, groups, noneText: compNoneText(all), failed: c.failed || [] };
 }
 function compMsg(v) {
   if (v.status === 'loading') return '補休帳還在載入，請等上面的補休帳出來再按';
   if (v.status === 'updating') return '系統還在更新，補休帳暫時讀不到，請稍後再試';
   if (v.status === 'err') return '補休帳讀不到（' + ((v.err && v.err.message) || '網路或伺服器忙碌') + '），請先在上面按重新載入';
-  if (v.status === 'none') return '這裡的門市沒有補休帳（薪資沒有開補休）';
+  if (v.status === 'none') return v.noneText.replace(/。$/, '');
   return '';
 }
 const COMP_NOTE = '加班＝已核准的加班單；補休含審核中的補休單；剩／欠＝加班 − 補休，跟薪資的補休帳同一份。';
@@ -256,7 +257,7 @@ function compDraw(box) {
     b.onclick = () => { SM.comp = null; compLoad(box); };
     const f = h('div', 'du-fail'); f.append(h('span', 'du-fail-msg', '補休帳讀不到：' + (v.err.message || '網路或伺服器忙碌')), b); box.append(f); return;
   }
-  if (v.status === 'none') { box.append(h('div', 'sm-muted', '這裡的門市沒有補休帳（薪資沒有開補休）。')); return; }
+  if (v.status === 'none') { box.append(h('div', 'sm-muted', v.noneText)); return; }
   box.append(h('div', 'sm-muted sm-comp-note', COMP_NOTE + '欠的要在月底前補上加班或改請別的假。'));
   if (v.failed.length) box.append(h('div', 'sm-failed', missText(v.failed)));
   const multi = v.groups.length > 1 || S.all;

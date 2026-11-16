@@ -186,12 +186,22 @@ export function compBankRows(stores) {
       rows.push({ emp_id: String(emp), name: nm, ot_h: ot, used_h: used, balance_h: bal, active });
     }
     rows.sort((a, b) => (a.balance_h < 0) !== (b.balance_h < 0) ? (a.balance_h < 0 ? -1 : 1) : a.name.localeCompare(b.name, 'zh-Hant'));
-    return { code: st.code || '', name: st.name || '', rows: any ? rows : null };
+    // none＝為什麼沒有補休帳（2026-11-16 Eason）：nomaster＝薪資主檔沒有這家店在職的同仁（額度整份是空的，例 墨竹亭光復、六張犁、美村還沒建檔）；off＝有同仁但沒有補休假別
+    return { code: st.code || '', name: st.name || '', rows: any ? rows : null, none: any ? '' : (Object.keys(q).length ? 'off' : 'nomaster') };
   });
 }
 
 // 補休帳 Excel 分頁（2026-11-14 Eason）：groups＝compBankRows 的結果（rows 不是 null 的門市）；fallback＝單一門市的店名。
 // 數字欄放數字（不帶「小時」），剩／欠：正數＝剩、負數＝欠；文字欄照 xlsSafe（開頭 = + - @ 補單引號）。
+// 沒有補休帳時的提示（groups＝compBankRows 全部的結果，含 rows 為 null 的店）：主檔沒同仁要請會計建檔；真的沒開補休才寫「薪資沒有開補休」
+export function compNoneText(all) {
+  const list = (all || []).filter((g) => g.rows === null);
+  const nm = list.filter((g) => g.none === 'nomaster'), names = (l) => l.map((g) => g.name || g.code).filter(Boolean).join('、');
+  if (list.length && nm.length === list.length) return (list.length > 1 && names(nm) ? names(nm) + '的' : '這家店的') + '薪資主檔還沒有同仁，補休帳要等會計在「薪酬」把同仁建進員工薪資主檔才看得到。';
+  if (nm.length) return names(nm) + '的薪資主檔還沒有同仁（請會計建檔）；' + names(list.filter((g) => g.none !== 'nomaster')) + '薪資沒有開補休。';
+  return '這裡的門市沒有補休帳（薪資沒有開補休）。';
+}
+
 export function compSheet(groups, fallback) {
   const out = [['門市', '同仁', '員編', '加班', '補休', '剩／欠']];
   for (const g of groups || []) {
