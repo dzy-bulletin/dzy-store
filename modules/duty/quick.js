@@ -68,14 +68,20 @@ export function timelineEl(m, label) {
     const n = h('span', 'tl-ann' + (d.kind === 'short' ? ' neg' : ''), (d.kind === 'short' ? '−' : '+') + Math.round(d.b - d.a)); n.style.left = pct((d.a + d.b) / 2); track.append(n);
   });
   // 實際打卡時間直接標在打卡條兩端（2026-11-16 Eason：更直觀）；太短的段落合成一個標籤，少一張卡的標「?」
-  const labs = [];
-  const plab = (t, cls, txt) => {
-    const x = (t - m.from) / W * 100;
-    const low = labs.some((y) => Math.abs(y - x) < 13);      // 跟前一個標籤太近（兩段班中間空檔短）：放到條子下面
-    labs.push(x);
-    const l = h('span', 'tl-plab ' + cls + (low ? ' low' : ''), txt); l.style.left = pct(t); track.append(l);
-    if (low) track.classList.add('tl-two');
+  // 先全部放第一排；畫到畫面上之後量實際位置，真的疊到前面的標籤才放第二排（2026-11-17 Eason：13:25 往左寫、13:52 往右寫，根本不會碰到，原本用「位置差不到 13%」就往下放）
+  const plab = (t, cls, txt) => { const l = h('span', 'tl-plab ' + cls, txt); l.style.left = pct(t); track.append(l); };
+  let tries = 0;
+  const placeLabels = () => {
+    if (!track.isConnected || !track.getBoundingClientRect().width) { if (tries++ < 30) requestAnimationFrame(placeLabels); return; }
+    const ls = [...track.querySelectorAll('.tl-plab')], top = [], low = [];
+    const hit = (list, r) => list.some((p) => r.left < p.right + 4 && r.right > p.left - 4);
+    ls.forEach((l) => {
+      const r = l.getBoundingClientRect();
+      if (!hit(top, r)) top.push(r);
+      else { l.classList.add('low'); track.classList.add('tl-two'); low.push(r); }
+    });
   };
+  requestAnimationFrame(placeLabels);
   m.punch.forEach((s) => {
     if ((s.b - s.a) / W * 100 < 16) plab((s.a + s.b) / 2, 'mid', T.hhmm(s.a) + '–' + T.hhmm(s.b));
     else { plab(s.a, 'st', T.hhmm(s.a)); plab(s.b, 'en', T.hhmm(s.b)); }
