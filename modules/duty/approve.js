@@ -1128,6 +1128,17 @@ function buildCard(emp, date) {
       };
       return b;
     }
+    // 作廢回應不確定（逾時、連線中斷、打卡端說找不到這筆已核准的）：可能其實已經作廢
+    const voidUncertain = (e) => !!e && (['TIMEOUT', 'UPSTREAM', 'NETWORK', 'NOT_FOUND'].includes(e.code) || !e.code || /逾時|太久|沒有回應|連線|網路/.test(e.message || ''));
+    // 重讀那天的申請：這張已不在「已核准」裡＝已作廢（讀不到就不知道，回 false 照原本顯示失敗）
+    async function voidDone(id, date, store) {
+      try {
+        const d = await call('mgr_req_day', store ? { date, store } : { date });
+        const by = (d && d.by_emp) || {};
+        for (const list of Object.values(by)) for (const q of (Array.isArray(list) ? list : [])) if (q && String(q.id) === String(id) && q.status !== 'voided') return false;
+        return !!(d && d.by_emp);
+      } catch (e) { return false; }
+    }
     function askVoid(r, vb, row) {                  // 作廢理由（必填，同仁在 LINE「我的申請」看得到）：就地開輸入框，不用 prompt（嵌入頁的 prompt 不一定能跳）
       if (row.querySelector('.du-voidreason')) return;
       const inp = h('input', 'du-voidreason', null, { type: 'text', maxlength: '100', placeholder: '作廢理由（必填，同仁在 LINE 看得到）', 'aria-label': '作廢理由' });
@@ -1140,11 +1151,20 @@ function buildCard(emp, date) {
         if (!why) return setNote('✕ 作廢要寫理由');
         go.disabled = vb.disabled = true; setNote('作廢中…');
         try {
-          const vr = await call('mgr_req_void', { id: r.id, reason: why, date, store: emp.store });
+          let vr;
+          try { vr = await call('mgr_req_void', { id: r.id, reason: why, date, store: emp.store }); }
+          catch (e) {
+            // 逾時、連線中斷、或「找不到這筆已核准的申請」：打卡端可能其實已經作廢了（2026-11-16 墨竹亭光復：打卡端忙，40 秒逾時但已作廢，重按變「找不到」）。
+            // 重讀那天的申請確認：這張已不在已核准裡＝當作作廢成功（那天的核定可能已打回待核定，一律請主管重新載入）
+            if (!voidUncertain(e)) throw e;
+            setNote('回應太慢，確認作廢結果中…');
+            if (!(await voidDone(r.id, date, emp.store))) throw e;
+            vr = { revoked: { approved: 1, leave: 0 }, confirmed: true };
+          }
           const rv = vr && vr.revoked, revokedN = rv ? (Number(rv.approved) || 0) + (Number(rv.leave) || 0) : 0;
           if (revokedN) {                                  // 那天的核定被打回：這張卡片的內容與版本都是舊的，請主管重新載入再核定（照舊卡片送出會被「資料有變動」退回）
             rbox.remove(); delete S.dayCache[date];
-            const done = h('div', 'du-reqbox warn du-voided', '已作廢：' + r.summary + '。這天的核定已打回「待核定」，請按「重新載入這天」看最新資料，照實際打卡重新核定。');
+            const done = h('div', 'du-reqbox warn du-voided', vr.confirmed ? '已作廢：' + r.summary + '（剛才回應太慢，已向打卡系統確認作廢成功）。這天若已核定過會打回「待核定」，請按「重新載入這天」看最新資料，照實際打卡重新核定。' : '已作廢：' + r.summary + '。這天的核定已打回「待核定」，請按「重新載入這天」看最新資料，照實際打卡重新核定。');
             const rl = h('button', 'btn sm', '重新載入這天', { type: 'button' });
             rl.onclick = () => card.dispatchEvent(new CustomEvent('duty-reload-day', { bubbles: true, detail: { date, emp } }));
             done.append(' ', rl);
