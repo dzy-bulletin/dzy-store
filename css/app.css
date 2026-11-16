@@ -905,6 +905,9 @@ body.embed .dq-legend{border-color:var(--dzy-line);border-radius:var(--dzy-radiu
 .tl-ann.neg{color:#b91c1c}
 .tl-plab{top:auto;bottom:2px;font:600 11px/1 var(--tl-mono);color:#0f172a;letter-spacing:0}
 .tl-plab.low{top:auto;bottom:-12px}
+/* 兩排打卡時間（兩段打卡靠太近）：兩排都放在框內，第一排往上、第二排貼底，不壓到下面的整點刻度（2026-11-17 Eason：13:52、19:38 跟刻度重疊） */
+.tl-track.tl-two .tl-plab{bottom:15px}
+.tl-track.tl-two .tl-plab.low{bottom:2px}
 .tl-axis{height:14px;font:500 10px/1 var(--tl-mono);color:#94a3b8;margin-top:2px}
 .tl-axis.two{height:14px}
 .dq-plantxt{color:#334155;background:#e3e8f8;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-weight:600}
