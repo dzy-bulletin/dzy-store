@@ -283,7 +283,8 @@ function classifyRaw(inp) {
   if (emp.approved) {
     const otLate = canHours ? reqs.filter((r) => r.kind === 'ot' && !r.pending && r.start && r.end && !periodsCover(emp.approved.periods, r)) : [];
     if (otLate.length) return Object.assign(base, { status: 'abnormal', tag: '已核定過，加班單沒算進去', note: '核定後才核准的加班單，要重新核定', actions: [{ id: 'full', label: '到完整頁核對', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
-    if (canHours && reqs.some((r) => r.pending)) return Object.assign(base, { status: 'abnormal', tag: '已核定過，有新申請', note: '核定後又有新的申請，要重新核定', actions: [{ id: 'full', label: '到完整頁核對', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
+    // 2026-11-16 Eason：標「有待審單」；pendReq＝送出前檢查不能把他改成「核定通過」（余忠哲 11/1：先核定 8 小時、隔天才送加班單，卡片卻寫核定通過）
+    if (canHours && reqs.some((r) => r.pending)) return Object.assign(base, { status: 'abnormal', tag: '有待審單', pendReq: true, note: '核定後又送來新的申請：先審單，核准後再重新送出核定', actions: [{ id: 'full', label: '到完整頁核對', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
     return Object.assign(base, { status: 'done', hours: Number(emp.approved.approved_hours) });
   }
 

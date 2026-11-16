@@ -134,13 +134,13 @@ export function renderQuick(ctx) {
       Object.assign(p, { status: 'abnormal', tag: u.pre ? (u.failedDiff ? '要寫原因' : '未符合') : '沒核定成功', note: u.failed, actions: [main, { id: 'full', label: '到完整頁核對', primary: false }] });
     }
     // 打卡＋單＝核定時數（2026-11-14）：檢查會過＝照算好的時段核定；異常的人也移到「核定通過」；不會過＝寫出要補齊的單
-    if (u.pass && !u.failed && !e2eNoCore() && (p.status === 'ok' || p.status === 'abnormal')) {
+    if (u.pass && !u.failed && !p.pendReq && !e2eNoCore() && (p.status === 'ok' || p.status === 'abnormal')) {      // 已核定又有待審單：維持「有待審單」（2026-11-16）
       const cards = u.cards && u.cards.length ? u.cards : null;
       const act = { id: 'plan', label: '核定 ' + C.round2(u.pass.hours) + ' 小時' + (cards ? '（選原因）' : ''), primary: true, hours: u.pass.hours, payload: u.pass.payload, askReason: !!cards, cards };
       Object.assign(p, cards ? { status: 'abnormal', tag: '要選原因', note: '打卡跟核定差超過 30 分鐘：' + cards.map(cardLabel).join('、') }
         : { status: 'ok', tag: '核定通過', note: (u.pass.notes || []).join('；') },
         { hours: u.pass.hours, payload: u.pass.payload, actions: [act, { id: 'full', label: '到完整頁核對', primary: false }] });
-    } else if (u.need && !e2eNoCore() && p.status === 'abnormal') {      // 不會過：寫出要補齊的單，不再給「選原因」（2026-11-14 不再靠寫原因放行）
+    } else if (u.need && !p.pendReq && !e2eNoCore() && p.status === 'abnormal') {      // 不會過：寫出要補齊的單，不再給「選原因」（2026-11-14 不再靠寫原因放行）
       Object.assign(p, { tag: '未符合', note: '要補齊：' + u.need, actions: [{ id: 'full', label: '到完整頁補單', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
     }
     // 列進「核定通過」的人：打卡比班表晚到、早退達 15 分鐘，名單上標橘色「遲到 N 分／早退 N 分」（只提醒不擋，同完整頁的橘色標籤；2026-11-15 考勤驗收 B2-2b-4）
@@ -328,7 +328,7 @@ export function renderQuick(ctx) {
     // 打卡＋單＝核定時數（2026-11-14 Eason 定案，docs/punch-plus-req/）：「沒問題」與「有異常」的人都先照原則算好時段（core-calc.js）再只檢查——
     //   會過：異常的人移到「核定通過」一起一鍵核定；沒問題的人照算好的時段送。不會過：寫出要補齊的單（會被擋的人移到異常區）。
     //   有待審申請要先核准的人不動（照原本「核准單，核定 X 小時」）。
-    const date = st.date, list = secs().ok.concat(secs().abnormal.filter((p) => !(p.actions || []).some((a) => a.decide)));
+    const date = st.date, list = secs().ok.concat(secs().abnormal.filter((p) => !p.pendReq && !(p.actions || []).some((a) => a.decide)));
     if (!date || !list.length) return;
     const by = new Map();
     list.forEach((p) => {
