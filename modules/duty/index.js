@@ -17,7 +17,7 @@ const KEY = 'dzystore_dutyok';
 const flag = () => { try { return sessionStorage.getItem(KEY) || ''; } catch (e) { return ''; } };
 const setFlag = v => { try { if (v) sessionStorage.setItem(KEY, v); else sessionStorage.removeItem(KEY); } catch (e) {} };
 
-const TABS = [{ id: 'approve', label: '核定工時' }, { id: 'qr', label: '打卡 QR' }, { id: 'request', label: '申請審核' }, { id: 'device', label: '裝置核准' }, { id: 'roster', label: '員工名冊' }, { id: 'notice', label: '公告' }, { id: 'summary', label: '申請單彙整' }, { id: 'auditlog', label: '核定紀錄' }];
+const TABS = [{ id: 'approve', label: '核定工時' }, { id: 'request', label: '申請審核' }, { id: 'qr', label: '打卡 QR' }, { id: 'device', label: '裝置核准' }, { id: 'roster', label: '員工名冊' }, { id: 'notice', label: '公告' }, { id: 'summary', label: '申請單彙整' }, { id: 'auditlog', label: '核定紀錄' }];
 
 export default {
   id: 'duty',

@@ -217,6 +217,48 @@ export function renderQuick(ctx) {
     return { emps: Array.isArray(d.employees) ? d.employees : [], appr: apprFrom(rq), failed: [].concat((d && d.failed) || [], (rq && rq.failed) || []), elsewhere: Array.isArray(d && d.elsewhere) ? d.elsewhere : [], mirrorAt: (d && d.mirror_at) || 0 };
   }
   // Mac mini 記得的上次資料先顯示（2026-11-10 Eason）：灰色不能按，最新資料到了整份換掉。少任何一份就不顯示
+  // 都核完時列出今天的出勤名單（2026-11-16 Eason「都核完時直接列出今天的出勤名單」）：只看、不能核定（今天的班還沒結束，隔天才列入待核定）。
+  // 「都核完」的提示先畫出來，今天的名單背景再讀；讀不到只寫一行，不影響上面。
+  async function loadTodayView(tok) {
+    const date = todayNow();
+    st.todayView = { date, loading: true }; render();
+    try {
+      const day = await readDay(date);
+      if (tok !== st.tok || !live() || st.date || st.manual) return;
+      st.todayView = { date, emps: day.emps, appr: day.appr, people: peopleFor(date, day), failed: day.failed.length > 0 };
+    } catch (e) {
+      if (tok !== st.tok || !live()) return;
+      st.todayView = { date, error: true };
+    }
+    render();
+  }
+  function todaySection() {
+    const tv = st.todayView, box = h('div', 'dq-today', null, { id: 'dqToday' });
+    box.append(h('div', 'dq-sec', '今天 ' + C.shortDate(tv.date) + ' 的出勤（只看，下班後隔天再核定）'));
+    if (tv.loading) { box.append(h('div', 'dq-done', '讀取今天的出勤中…')); return box; }
+    if (tv.error) { box.append(h('div', 'dq-done', '今天的出勤暫時讀不到，可以用上方的日期選今天再看一次')); return box; }
+    const byKey = new Map(tv.emps.map((e) => [Q.keyOf(e), e]));
+    const seen = tv.people.filter((p) => { const e = byKey.get(p.key); return e && ((e.segments && e.segments.length) || p.status === 'done'); });
+    const none = tv.people.filter((p) => !seen.includes(p));
+    if (!seen.length) box.append(h('div', 'dq-done', '今天還沒有人打卡'));
+    seen.forEach((p) => {
+      const e = byKey.get(p.key), c = h('div', 'dq-card dq-mini dq-todayc', null, { 'data-key': p.key });
+      const top = h('div', 'dq-ctop'), who = h('div', 'dq-who');
+      who.append(h('div', 'dq-name', p.name));
+      const sup = supportTag(e); if (sup) who.append(sup);
+      who.append(h('span', 'dq-plantxt', p.planText ? '班表 ' + p.planText.replace(/^班表\s*/, '') : (e.plan && e.plan.work === false ? '班表 排休' : '沒有班表')));
+      const open = (e.segments || []).some((x) => x.in && !x.out);
+      top.append(who, h('div', 'dq-mright', p.status === 'done' ? '已核定 ' + C.round2(p.hours) + ' 小時' : open ? '上班中' : '已下班'));
+      c.append(top);
+      const w = h('div', 'dq-tlw');
+      w.append(timelineEl(modelOf(e, tv.date, tv.appr), p.name + ' ' + (p.planText || '') + ' ' + (p.punchText || '')));
+      c.append(w);
+      box.append(c);
+    });
+    if (none.length) box.append(h('div', 'dq-done', '今天還沒打卡 ' + none.length + ' 人：' + none.map((p) => p.name).join('、')));
+    if (tv.failed) box.append(h('div', 'dq-done', '有門市讀不到，名單可能不完整'));
+    return box;
+  }
   async function peekFirst(tok, isFresh, round1) {
     const stop = () => isFresh() || tok !== st.tok || !live();
     const [pend, rq] = await round1;
@@ -241,7 +283,7 @@ export function renderQuick(ctx) {
     if (st.busy) return;                                      // 寫入途中不換資料（含「重新載入」鈕）
     const tok = ++st.tok;
     st.loading = true; st.error = null; st.ui = {}; st.peekAt = 0; st.peekSaved = null; st.checking = false;
-    st.fine = new Set(); st.fineEls = new Map(); st.okOpen = false; st.doneOpen = false; render();
+    st.fine = new Set(); st.fineEls = new Map(); st.okOpen = false; st.doneOpen = false; st.todayView = null; render();
     dropChecks();
     const waitsP = loadWaits();
     retPanel.load();      // 重新載入這天時，人資退回一起重讀；本月待核定提醒沿用下面讀到的那份（不多問一次打卡系統）
@@ -310,6 +352,7 @@ export function renderQuick(ctx) {
       st.peekAt = 0; st.peekSaved = null;
       st.loading = false; render();
       checkOk(tok);
+      if (!selected && !st.manual && !st.capped && !st.failed.length) loadTodayView(tok);      // 都核完了：下面列出今天的出勤（只看）（2026-11-16 Eason）
     } catch (e) {
       fresh = true;
       if (tok !== st.tok || !live()) return;
@@ -976,7 +1019,7 @@ export function renderQuick(ctx) {
     // 未出勤（沒打卡、也沒排上班）：舊畫面有列，要能在細調核整天請假或出差（2026-11-15 e2e 抓到新頁漏了）
     const absent = st.people.filter((p) => p.status === 'absent');
     if (absent.length) { root.append(h('div', 'dq-sec muted', '未出勤 ' + absent.length + ' 人（沒打卡、沒排上班；要核整天請假或出差按細調）')); absent.forEach((p) => root.append(miniCard(p, '未出勤'))); }
-    if (!st.date && !st.failed.length && !st.capped) root.append(h('div', 'dq-alldone', Q.allDoneText(st.skipN)));
+    if (!st.date && !st.failed.length && !st.capped) { root.append(h('div', 'dq-alldone', Q.allDoneText(st.skipN))); if (st.todayView) root.append(todaySection()); }
     if (st.capped) root.append(h('div', 'dq-done', '還有更早的日期沒看完，按上方「前一天」繼續'));
 
     // 其他申請：沒有掛在今天卡片上的待審申請
