@@ -387,6 +387,7 @@ const sendReady = () => { try { window.parent.postMessage({ type: 'dzy-store-rea
 function installEmbed() {
   document.body.classList.add('embed');
   if (ONLY) document.body.classList.add('embed-only', `embed-${ONLY}`);   // 考勤管理／排班管理：不顯示功能列
+  if (/(?:^|[?&])ui=new(?:&|#|$)/.test(location.search)) document.body.classList.add('ui-new');   // 管理系統新外觀（2026-11-16，css/ui-new-dzy.css）
   window.addEventListener('message', e => {
     if (e.origin !== EMBED_ORIGIN || e.source !== window.parent) return;
     const m = e.data;
