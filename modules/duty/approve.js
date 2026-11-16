@@ -5,7 +5,6 @@ import { S, dutyManager, call, callAll, brk, brkOf, h, failBar, failedStores, lo
 import { buildReqItem } from './request.js';
 import { corePeriods, OVER_BLOCK_MIN, otSuggestText, cardDiffs, cardLabel, cardReasonText } from './core-calc.js';
 import * as C from './calc.js';
-import { qrButton } from './qr.js';
 import { api } from '../../js/api.js';
 import { planFlags, REASONS } from './quick-calc.js';
 import { ssoSwitch, setSession, toSession } from '../../js/auth.js';
@@ -19,14 +18,13 @@ export const fullAllowed = (ctx) => !!S.dqFull && !!(ctx && ctx.session && ctx.s
 export function renderApprove(ctx) {
   if (!fullAllowed(ctx)) return renderQuick(ctx);
   const el = ctx.el;
-  el.innerHTML = `<div id="duQrSlot"></div><div class="du-datebar"><button type="button" class="btn ghost du-nav" id="duPrev" aria-label="前一天">‹</button>
+  el.innerHTML = `<div class="du-datebar"><button type="button" class="btn ghost du-nav" id="duPrev" aria-label="前一天">‹</button>
     <input type="date" id="duDate" aria-label="日期"><button type="button" class="btn ghost du-nav" id="duNext" aria-label="後一天">›</button>
     <button type="button" class="btn ghost" id="duToday">今天</button></div>
     <div id="duBg"></div><div id="duRet"></div><div id="duPend"></div><div id="duDayBox"></div>`;
   const dateIn = el.querySelector('#duDate'), pendEl = el.querySelector('#duPend'), box = el.querySelector('#duDayBox'), retEl = el.querySelector('#duRet');
   const live = () => el.isConnected;
   el.insertBefore(backBar(ctx), el.firstChild);      // 舊畫面（管理員緊急備用）：上面一顆「回到新畫面」
-  if (dutyManager(ctx.session) && !S.all) el.querySelector('#duQrSlot').append(qrButton(el));      // 打卡 QR（同仁定位抓不到時給他掃），日期列上方
   // 考勤副本（2026-11-14）：背景送出被打卡系統退回的，列在最上面；點了跳到那天那位
   el.querySelector('#duBg').append(rejectBar((date, empId) => { S.focusEmp = rowKey({ emp_id: empId }); delete S.dayCache[date]; loadDay(date); }));
   refreshJobs();

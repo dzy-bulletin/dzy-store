@@ -6,7 +6,6 @@ import * as T from './timeline-calc.js';
 import { fineCard, checkCards, pendingPanel, returnsPanel, elsewhereCards, FULL_UNTIL } from './approve.js';
 import * as C from './calc.js';
 import * as Q from './quick-calc.js';
-import { qrButton } from './qr.js';
 import { canBg, watchJob, refreshJobs, rejectBar } from './bg.js';
 import { corePeriods, OVER_BLOCK_MIN, otSuggestText, cardDiffs, cardLabel, cardReasonText } from './core-calc.js';
 import { MOCK } from '../../js/config.js';
@@ -97,8 +96,6 @@ export function renderQuick(ctx) {
   const el = ctx.el;
   const root = h('div', 'dq');
   el.innerHTML = ''; el.append(root);
-  // 打卡 QR 只建一次、面板掛在 el（root 每次重畫會清空）：背景「先檢查」跑完重畫時，主管開給同仁掃的 QR 不會被關掉（2026-11-14）
-  const qrBtn = dutyManager(ctx.session) ? qrButton(el) : null;
   const live = () => el.isConnected;
   const todayNow = () => C.taipeiToday();      // 每次用都重算（頁面開過午夜也不會差一天）
   const skipKey = (date, key) => ((ctx.session && ctx.session.code) || '') + '|' + ((S.meta && S.meta.clockStore) || '') + '|' + date + '|' + key;      // 加店別：同一分頁換店，別家同員編的人不會被跳過
@@ -992,7 +989,6 @@ export function renderQuick(ctx) {
     if (st.showReq) { if (!others.length) root.append(h('div', 'dq-done', '目前沒有其他待審申請')); others.forEach((it) => root.append(otherReqEl(it))); }
 
     const foot = h('div', 'dq-foot');
-    if (qrBtn && !S.all) foot.append(qrBtn);
     // 舊畫面只留系統管理員當緊急備用，到 FULL_UNTIL 為止（2026-11-15 Eason 定 14 天）
     if (ctx.session && ctx.session.role === 'admin' && todayNow() <= FULL_UNTIL) {
       const fl = h('button', 'dq-fulllink', '舊畫面（管理員緊急備用，' + C.shortDate(FULL_UNTIL) + ' 下架）', { type: 'button', id: 'dqFullLink' });
