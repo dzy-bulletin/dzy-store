@@ -215,6 +215,11 @@ export function checkPeriod(ctx) {
     }
     const e = st.emp_id, who = st.name;
     const mine = ctx.days[e] || {};
+    // 本店自己的同仁、其中幾天被別家排了支援這家店的班（st.extDays，2026-11-17）：照本店同仁檢查，只提醒同一天兩邊都排的那幾天
+    if (Array.isArray(st.extDays)) {
+      const both = st.extDays.filter(d => mine[d] && mine[d].shift_id);
+      if (both.length) add('X1', 'warn', e, both[0], `${who} ${both.slice(0, 4).map(md).join('、')}${both.length > 4 ? ' 等' : ''} 被別家排了支援這家店的班，這裡同一天也排了班，請把這裡那${both.length > 1 ? '幾' : ''}格改成「清空」，不然會重複算人數`);
+    }
     const inPeriod = dates.filter(d => employed(st, d));
     // 制度別看「這期在職第一天」的身分：期中才報到、身分從報到日起算時，期首那天沒有身分，不能因此整段跳過檢查（2026-10-11 審查）
     const t0 = inPeriod.length ? termAt(ctx.terms, e, inPeriod[0]) : null;

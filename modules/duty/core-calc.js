@@ -101,6 +101,9 @@ export function corePeriods(o) {
   const otRaw = reqs.filter((r) => r.kind === 'ot').map((r) => span(toMin(r.start), toMin(r.end)));
   const brkS = toMin(o.brk && o.brk.start), brkE = toMin(o.brk && o.brk.end);
   const BRK = brkS != null && brkE != null && brkE > brkS ? [[brkS, brkE]] : [];
+  // 半天班（2026-11-17 Eason）：班表從第一段開始到最後一段結束沒有整段蓋過休息帶（例 央廚 09:00–12:30、總部 14:15–22:15）→ 班表裡的時間不扣休息帶。
+  // 沒班表、或班表整段蓋過（含兩段班中間剛好空著休息帶）照舊扣。班表以外多出來的打卡仍照休息帶算（BRK）。
+  const BRKcut = BRK.length && S.length && !(S[0][0] <= BRK[0][0] && S[S.length - 1][1] >= BRK[0][1]) ? [] : BRK;
   const notes = [];
 
   // 1. 打卡段（忘打卡單補上缺的那張；補的時間超出班表的部分不算，見下面交集）
@@ -125,7 +128,7 @@ export function corePeriods(o) {
     if (!S.length) return null;                                  // 沒打卡也沒班：沒得算
     // 沒打卡、有已核准整天的假單／出差單（沒填時段，時數合計蓋滿班表或滿 8 小時）＝整天請假：不照班表填時段（2026-11-15 游家輝事假 8 小時被要求補 4 張忘打卡單）
     const noTime = reqs.filter((r) => (r.kind === 'leave' || r.kind === 'trip') && !r.start).reduce((a, r) => a + (Number(r.hours) || 0), 0);
-    if (noTime > 0 && (noTime >= total(S) / 60 - 0.01 || noTime >= 8)) return null;
+    if (noTime > 0 && (noTime >= total(minus(S, BRKcut)) / 60 - 0.01 || noTime >= 8)) return null;      // 班表時數要扣不打卡休息帶（央廚 09–17＝7 小時，事假 7 小時就是整天）
     W = S.map((x) => x.slice());                                 // 沒打卡但有班：照班表（打卡端回要忘打卡單）
   }
   const Wraw = W.map((x) => x.slice());
@@ -159,13 +162,15 @@ export function corePeriods(o) {
   let late = 0;
   if (S.length && core.length && Wraw.length) {
     const firstIn = Wraw[0][0], s0 = S.find((y) => y[1] > firstIn) || S[0];
-    if (firstIn > s0[0] + 0 && firstIn < s0[1] && core[0][0] > s0[0]) { late = firstIn - s0[0]; core[0][0] = s0[0]; }
+    // 只補「第一張上班卡那段打卡」的開頭：那段取整後還在、而且就在這段班裡（2026-11-17 Eason）。
+    // 第一段打卡短到取整後消失（09:31–09:44）、或第一張卡在這段班快結束才打（兩段班 13:51），core[0] 是後面別段打卡 → 不補，中間沒打卡的不算。
+    if (firstIn > s0[0] + 0 && firstIn < s0[1] && core[0][0] > s0[0] && core[0][0] < s0[1] && core[0][0] <= snapIn(firstIn, bounds)) { late = firstIn - s0[0]; core[0][0] = s0[0]; }
   }
   // 3b. 班表以外的打卡（S 有班表時）：當天不含加班單的時數還沒滿 8 小時，就照時間先後算進去，滿 8 小時為止；超過的部分要加班單（2026-11-16）。
   //     放在遲到補開頭之後算：遲到的那段照「開頭留班表」算在 8 小時裡（打卡端是看核定時數超過 8 小時就要加班單）
   let freeExtra = [];
   if (S.length) {
-    let budget = Math.max(0, DAY_FREE_MIN - total(minus(minus(core, OT), BRK.concat(RESTS))));      // 班別休息也不算      // 不打卡休息帶不算上班時間
+    let budget = Math.max(0, DAY_FREE_MIN - total(minus(minus(core, OT), BRKcut.concat(RESTS))));      // 班別休息也不算      // 不打卡休息帶不算上班時間
     // 只算真的打卡（忘打卡單補的時間超出班表照舊不算，例 10），也不算照班表猜的缺卡
     const real = merge(raw.filter((x) => x.in != null && x.out != null && !x.guess && !x.fromReq.in && !x.fromReq.out).map((x) => span(x.in, x.out)).map(([a, b]) => [snapIn(a, bounds), snapOut(b, bounds)]));
     for (const [a, b] of minus(intersect(minus(W, A), real), BRK)) {
@@ -178,7 +183,8 @@ export function corePeriods(o) {
   }
 
   // 4. 不打卡休息帶：核定時段蓋過休息帶就拆開（同現在的預填）
-  if (BRK.length) core = minus(core, BRK);
+  if (BRKcut.length) core = minus(core, BRKcut);
+  else if (BRK.length) core = merge(intersect(core, S).concat(minus(minus(core, S), BRK)));      // 半天班：班表裡不扣，班表外多出來的照扣
   if (RESTS.length) core = minus(core, RESTS);
   core = merge(core);
   if (!core.length) return null;

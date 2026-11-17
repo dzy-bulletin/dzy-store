@@ -27,6 +27,21 @@ const staffRow = (ctx, e) => ctx.staff.find(s => s.emp_id === e) || {};
 const prioOf = (ctx, e) => { const p = staffRow(ctx, e).prio; return p == null ? Infinity : p; };
 const prefOf = (ctx, e) => staffRow(ctx, e).pref_shift || null;
 const pinOf = (ctx, e, d) => ((ctx.pins || {})[e] || {})[d] || null;
+/** 這個人那天在別家店已經有班（同名，T02 起伺服器給 ctx.elsewhere／elsewhereMin）：本店那天不排他（2026-11-17 Eason）。
+ *  做法：當成一筆「指定休假」（標 elsewhere），本店那格排成休假；但他那天其實在上班 → 連續上班照算、也不佔他該休的天數（elseDay）。
+ *  那天已經有指定（休假／上班／班別）或本店已有格子的不動（店長自己排的，規則檢查照舊會擋跨店超過 10 小時）。 */
+function withElsewhere(ctx) {
+  const src = [ctx.elsewhere || {}, ctx.elsewhereMin || {}];
+  if (!src.some(o => Object.keys(o).length)) return ctx;
+  const dates = new Set(periodDates(ctx.period)), pins = Object.assign({}, ctx.pins || {});
+  let n = 0;
+  for (const o of src) for (const e of Object.keys(o)) for (const d of Object.keys(o[e] || {})) {
+    if (!dates.has(d) || !o[e][d] || (pins[e] && pins[e][d]) || ((ctx.days || {})[e] || {})[d]) continue;
+    pins[e] = Object.assign({}, pins[e]); pins[e][d] = { kind: 'off', elsewhere: true }; n++;
+  }
+  return n ? Object.assign({}, ctx, { pins }) : ctx;
+}
+const elseDay = (ctx, e, d) => !!(pinOf(ctx, e, d) || {}).elsewhere;
 const needOf = (ctx, d) => (ctx.autoDemand || ctx.demand || {})[d] || {};      // autoDemand＝扣掉總部支援後門市自己要排的人數（lessSupport）；規則檢查照原 demand＋支援人數算
 
 /** 0. 輸入檢查：回傳問題清單（有問題就不排） */
@@ -155,7 +170,8 @@ function planOffDays(ctx, dates, fixed, guoSkip) {
       const need = quota ? quota[w] : wk.length === 7 ? offsPerWeek(ctx, e, wk[0]) : Math.round(offsPerWeek(ctx, e, wk[0]) * wk.length / 7);
       // 這週已經手動排好的例假／休息日（沒排班）要扣掉，只補不足的天數（2026-10-11 Codex 審查：原本會再多排兩天休）
       const fixedOff = wk.filter(d => fixed[e][d] && (fixed[e][d].day_type === 'R' || fixed[e][d].day_type === 'H') && !fixed[e][d].shift_id).length;
-      const k = Math.max(need - fixedOff, pinnedOff.length);
+      const elseN = pinnedOff.filter(d => elseDay(ctx, e, d)).length;      // 在別家店上班的日子：本店排休，但不算他該休的天數
+      const k = Math.max(need - fixedOff, pinnedOff.length - elseN) + elseN;
       const cand = free.filter(d => !mustWork.has(d) && !pinnedOff.includes(d));
       // 下一週開頭「一定要上班」的天數（固定的班、指定上班、正職國定假日）：這週結尾連上的天數要留空間給它們，
       //   不然下一週再怎麼挑都會超過連上上限（2026-10-31 光復徐佑昕：11/20、11/21 指定休湊滿第 3 週休假，11/11–11/17 被排成連上 7 天）
@@ -166,7 +182,7 @@ function planOffDays(ctx, dates, fixed, guoSkip) {
         for (const d of dates.slice(w * 7 + 7, w * 7 + 14)) {
           const c = fixed[e][d], p = pinOf(ctx, e, d);
           const ftD = (termAt(ctx.terms, e, d) || {}).kind === 'ft';
-          nextForced.push(c ? !!c.shift_id : (employed(st, d) && ((p && p.kind !== 'off') || (!p && ftD && isHoliday(ctx.holidays, d)))));
+          nextForced.push(c ? !!c.shift_id : (employed(st, d) && ((p && (p.kind !== 'off' || p.elsewhere)) || (!p && ftD && isHoliday(ctx.holidays, d)))));
         }
       }
       let lead = 0;
@@ -179,7 +195,7 @@ function planOffDays(ctx, dates, fixed, guoSkip) {
           const wkWorks = [];
           for (const d of dates.slice(w * 7, w * 7 + 7)) {
             const c = fixed[e][d];
-            const works = c ? !!c.shift_id : (employed(st, d) && !offs.has(d) && !bkDay(ctx, e, d));
+            const works = c ? !!c.shift_id : (employed(st, d) && (elseDay(ctx, e, d) || (!offs.has(d) && !bkDay(ctx, e, d))));
             wkWorks.push(works);
             r = works ? r + 1 : 0;
             if (r > limit) { okRun = false; break; }
@@ -212,8 +228,8 @@ function planOffDays(ctx, dates, fixed, guoSkip) {
         else plan[e][d] = 'work';
       }
       run = bestRun;
-      if (!best.size) { let r = run; for (const d of dates.slice(w * 7, w * 7 + 7)) { const c = fixed[e][d]; r = (c ? !!c.shift_id : plan[e][d] === 'work') ? r + 1 : 0; } run = r; }
-      if (ptWin) hist = hist.concat(dates.slice(w * 7, w * 7 + 7).map(d => { const c = fixed[e][d]; return c ? !!c.shift_id : plan[e][d] === 'work'; })).slice(-(PT_WIN_DAYS - 1));
+      if (!best.size) { let r = run; for (const d of dates.slice(w * 7, w * 7 + 7)) { const c = fixed[e][d]; r = (c ? !!c.shift_id : (plan[e][d] === 'work' || elseDay(ctx, e, d))) ? r + 1 : 0; } run = r; }
+      if (ptWin) hist = hist.concat(dates.slice(w * 7, w * 7 + 7).map(d => { const c = fixed[e][d]; return c ? !!c.shift_id : (plan[e][d] === 'work' || elseDay(ctx, e, d)); })).slice(-(PT_WIN_DAYS - 1));
     }
     // 正職國定假日假（Eason 2026-10-12）：本期每一天國定假日各補一天，排在離那天最近的一週（同週優先）、同一週不排兩天，
     //   再挑人手最寬裕的上班日（不挑國定假日、指定過的日子）。手動排好的國定假日假先抵掉最早的國定假日。
@@ -467,7 +483,7 @@ function lessSupport(ctx) {
 /** 國定假日假不能逼出休息日加班（加班費比國定假日出勤的雙倍薪資貴；Eason 2026-10-12）：
  *  先照常排；若比「完全不排國定假日假」多出休息日加班，就逐一讓正職這期不排國定假日假（留 C8 提醒雙倍薪資），直到不多為止 */
 export function autoSchedule(ctx, opts) {
-  ctx = lessSupport(ctx);
+  ctx = withElsewhere(lessSupport(ctx));
   const dates = periodDates(ctx.period);
   const r0 = scheduleOnce(ctx, opts, null);
   if (!r0.ok || !dates.some(d => isHoliday(ctx.holidays, d)) || !otCells(r0.days)) return r0;

@@ -170,11 +170,13 @@ export function readToken(tok, shifts) {
   const t = norm(tok);
   if (!t) return 'CLEAR';
   if (/^支援/.test(t)) return 'KEEP';                       // 下載範本裡「支援 光復C」：支援別家門市的班，匯入不動
+  const one = (x) => { const m = shiftsMatching(x, shifts); return m.length === 1 ? m[0].id : null; };
+  // 班別代號剛好是 H 或 R（「H班」「R班」）：英文字母 H／R 讀成那個班別，休息日、例假請寫「休」「例」（2026-11-17：原本範本原樣匯回，上 H班 的格子被改成休息日）
+  if ((t === 'H' || t === 'R') && one(t)) return 'S:' + one(t);
   if (REST_R.has(t)) return 'R';
   if (REST_H.has(t)) return 'H';
   if (GUO.has(t)) return 'L:國';
   for (const [c, l] of LEAVES) if (t === c || t === l || t === l.replace(/假$/, '') || t === c + '假') return 'L:' + c;
-  const one = (x) => { const m = shiftsMatching(x, shifts); return m.length === 1 ? m[0].id : null; };
   const ot = /^(?:休加|休息日加班|加班)(.+)$/.exec(t) || /^(.+?)[(（]?(?:休加|休息日加班)[)）]?$/.exec(t);
   if (ot) {
     const id = one(ot[1]); if (id) return 'O:' + id;
@@ -296,7 +298,8 @@ export function buildPlan(D, parsed, picks) {
       const oldText = tokenOfCell(old, shiftMap).replace('+', '＋');
       let v = Object.prototype.hasOwnProperty.call(P.tokens, tok) && tok ? P.tokens[tok] : readToken(tok, D.shifts || []);
       // 範本原樣傳回：寫法跟現在的格子一樣（例：已停用的班別代號）就不動（2026-11-13 排班挑錯低）
-      if (v === null && old && tok && tok === norm(tokenOfCell(old, shiftMap))) v = 'KEEP';
+      //   2026-11-17：不只讀不懂的時候——已停用的舊「A班」跟新的 A班 同代號時，原樣匯回會被換成新班別，所以寫法跟現在一樣一律不動
+      if (old && tok && tok === norm(tokenOfCell(old, shiftMap))) v = 'KEEP';
       const put = (status, extra) => { row.cells[d] = Object.assign({ status, tok: String(raw === undefined ? '' : raw), oldText }, extra); };
       if (!haveDates.has(d)) { counts.same++; put('same', { text: oldText }); continue; }
       if (v === null) {

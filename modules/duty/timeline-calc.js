@@ -121,8 +121,9 @@ export function timelineModel(o) {
     // 缺卡：少下班卡從上班卡畫到那段班表結束；少上班卡從那段班表開始畫到下班卡
     const missing = [];
     open.forEach((x) => {
-      if (x.side === 'out') { const end = Math.max(...plan.filter((p) => p.b > x.a).map((p) => p.b), x.a); if (end > x.a) missing.push({ a: x.a, b: end }); }
-      else { const st = Math.min(...plan.filter((p) => p.a < x.b).map((p) => p.a), x.b); if (x.b > st) missing.push({ a: st, b: x.b }); }
+      // 只畫缺卡的那一段班：少下班卡→上班卡之後最先結束的那段；少上班卡→下班卡之前最晚開始的那段（2026-11-17：兩段班原本取所有段的最大／最小，斜紋蓋掉整天）
+      if (x.side === 'out') { const ends = plan.filter((p) => p.b > x.a).map((p) => p.b); const end = ends.length ? Math.min(...ends) : x.a; if (end > x.a) missing.push({ a: x.a, b: end }); }
+      else { const sts = plan.filter((p) => p.a < x.b).map((p) => p.a); const st = sts.length ? Math.max(...sts) : x.b; if (x.b > st) missing.push({ a: st, b: x.b }); }
     });
     // 忘刷：有已核准的忘打卡單＝實心（單補上了），沒有＝斜紋（要補單）（2026-11-16）
     const missOk = rs.some((r) => r && r.kind === 'miss' && !r.pending);
