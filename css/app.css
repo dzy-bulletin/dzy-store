@@ -618,6 +618,9 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
 .dq-done{font-size:13px;color:var(--muted);padding:0 2px;overflow-wrap:anywhere}
 .dq-alldone{background:#e3f2e9;color:var(--ok);border-radius:14px;padding:26px 16px;text-align:center;font-size:20px;font-weight:900}
 .dq-today{margin-top:14px}
+.dq-todayh{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.dq-todayh .dq-sec{flex:1 1 220px;min-width:0}
+.dq-todaygo{flex:0 0 auto}
 .dq-toggle{font:inherit;min-height:50px;border:1px solid var(--line);border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 14px;font-weight:700;margin-top:4px;cursor:pointer}
 .dq-rq{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
 .dq-rtop{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}

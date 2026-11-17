@@ -242,9 +242,13 @@ export function renderQuick(ctx) {
   }
   function todaySection() {
     const tv = st.todayView, box = h('div', 'dq-today', null, { id: 'dqToday' });
-    box.append(h('div', 'dq-sec', '今天 ' + C.shortDate(tv.date) + ' 的出勤（只看，下班後隔天再核定）'));
+    // 「核定今天」（2026-11-17 Eason）：都核完時上方日期欄本來就顯示今天，再選一次今天瀏覽器不會送出變更、「後一天」也是灰的＝進不了今天；這顆直接切到今天
+    const head = h('div', 'dq-todayh');
+    head.append(h('div', 'dq-sec', '今天 ' + C.shortDate(tv.date) + ' 的出勤（這裡只看；已下班的要先核定，按「核定今天」）'));
+    const go = btn('dq-navb dq-todaygo', '核定今天', () => gotoDate(tv.date), { id: 'dqTodayGo' }); go.disabled = !!st.busy;
+    head.append(go); box.append(head);
     if (tv.loading) { box.append(h('div', 'dq-done', '讀取今天的出勤中…')); return box; }
-    if (tv.error) { box.append(h('div', 'dq-done', '今天的出勤暫時讀不到，可以用上方的日期選今天再看一次')); return box; }
+    if (tv.error) { box.append(h('div', 'dq-done', '今天的出勤暫時讀不到，可以按「核定今天」再讀一次')); return box; }
     const byKey = new Map(tv.emps.map((e) => [Q.keyOf(e), e]));
     const seen = tv.people.filter((p) => { const e = byKey.get(p.key); return e && ((e.segments && e.segments.length) || p.status === 'done'); });
     const none = tv.people.filter((p) => !seen.includes(p));
