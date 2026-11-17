@@ -291,6 +291,9 @@ export function returnsPanel(retEl, onPick, onCancel, live) {
 // 打卡系統 mgr_approve_check：用「送出核定」同一套檢查跑到寫入前就停，回每個人會不會被擋、被擋的原因。
 // 一天打開時整批算一次（每家店一次），之後主管改了某人的時段或假別，停手 1 秒只重算那一位（buildCard 的 queueCheck）。
 // 讀不到（舊版打卡、連不上）就不標：畫面照舊，按送出才知道。
+// 出差地點下拉（與打卡 req-line.js TRIP_PLACES 同一份，2026-11-17）
+const TRIP_PLACES = ['總部辦公室', '新竹光復', '新竹金山', '台北六張犁', '台北瑞光', '台中美村'];
+const TRIP_OTHER = '其他';
 const CHECK_MAX = 40;
 function runChecks(box, date, current) {
   const cards = [].filter.call(box.querySelectorAll('.du-card'), c => c.__checkItem);
@@ -862,13 +865,16 @@ function buildCard(emp, date) {
     const firstLeave = body.querySelector('.du-leave');
     [...(firstLeave ? firstLeave.options : [])].filter(o => o.value && o.value !== '出差').forEach(o => lt.append(h('option', null, o.value, { value: o.value })));
     const hr = h('input', 'du-proxy-h', null, { type: 'number', step: '0.25', min: '0.25', max: '24', placeholder: '時數', 'aria-label': '時數' });
-    const pl = h('input', 'du-proxy-pl', null, { type: 'text', maxlength: '40', placeholder: '出差地點', 'aria-label': '出差地點' });
+    // 出差地點（2026-11-17）：跟 LINE 申請頁同一份下拉，薪資照地點決定給不給出差餐費（六個地點不給、其他地點給 100）
+    const plPick = h('select', 'du-proxy-plpick', null, { 'aria-label': '出差地點' });
+    [['', '出差地點'], ...TRIP_PLACES.map(v => [v, v]), [TRIP_OTHER, '其他（自己填）']].forEach(([v, t]) => plPick.append(h('option', null, t, { value: v })));
+    const pl = h('input', 'du-proxy-pl', null, { type: 'text', maxlength: '40', placeholder: '其他地點（例如：廠商）', 'aria-label': '其他出差地點' });
     const la = h('span', 'du-proxy-la'), lb = h('span', 'du-proxy-lb');
     const why = h('input', 'du-proxy-why', null, { type: 'text', maxlength: '100', placeholder: '原因（必填）' });
     const go = h('button', 'btn', '送出代開（送總監層級審核）', { type: 'button' });
     const sync = () => {
       const k = kind.value, ot = k === 'ot', miss = k === 'miss', m = mt.value;
-      mt.hidden = !miss; lt.hidden = k !== 'leave'; hr.hidden = k !== 'leave' && k !== 'trip'; pl.hidden = k !== 'trip';
+      mt.hidden = !miss; lt.hidden = k !== 'leave'; hr.hidden = k !== 'leave' && k !== 'trip'; plPick.hidden = k !== 'trip'; pl.hidden = k !== 'trip' || plPick.value !== TRIP_OTHER;
       la.textContent = ot ? '加班開始' : m === 'break' ? '回來上班' : '實際上班';
       lb.textContent = ot ? '加班結束' : m === 'break' ? '休息開始（下班）' : '實際下班';
       la.hidden = a.hidden = !(ot || miss) || (miss && m === 'out');
@@ -881,14 +887,14 @@ function buildCard(emp, date) {
       if ([...lt.options].some(o => o.value === '補休')) lt.value = '補休';
       hr.value = String(C.ft8Round(Number(gapM[1])));
     }
-    kind.onchange = mt.onchange = sync; sync();
+    kind.onchange = mt.onchange = plPick.onchange = sync; sync();
     go.onclick = async () => {
       const k = kind.value;
       const p = { store: emp.store, emp_id: emp.emp_id, date: d, kind: k, reason: why.value.trim() };
       if (k === 'miss') p.miss_type = mt.value;
       if (k === 'leave') { if (!lt.value) { say('bad', '✕ 請選假別'); return; } p.leave_type = lt.value; }
       if (k === 'leave' || k === 'trip') { if (!(Number(hr.value) > 0)) { say('bad', '✕ 請填時數'); return; } p.hours = Number(hr.value); }
-      if (k === 'trip') { if (!pl.value.trim()) { say('bad', '✕ 請填出差地點'); return; } p.place = pl.value.trim(); p.why = p.reason; }
+      if (k === 'trip') { const place = plPick.value === TRIP_OTHER ? pl.value.trim() : plPick.value; if (!plPick.value) { say('bad', '✕ 請選出差地點'); return; } if (!place) { say('bad', '✕ 請填出差地點'); return; } p.place = place; p.why = p.reason; }
       if (!a.hidden) p.start = a.value;
       if (!b.hidden) p.end = b.value;
       if ((!a.hidden && !a.value) || (!b.hidden && !b.value)) { say('bad', '✕ 請填時間'); return; }
@@ -902,7 +908,7 @@ function buildCard(emp, date) {
     };
     proxyBox.append(h('div', 'du-proxy-lead', (noLine ? '這位同仁沒綁 LINE，自己補不了單。' : '這天已超過 ' + PROXY_AFTER_DAYS + ' 天，同仁自己補不了單。') + '可以替同仁代開，代開的單要由總監層級（品牌總監／廚藝總監；總部是人資主管）核准。'),
       h('div', 'du-proxy-row', null), why, go);
-    proxyBox.children[1].append(kind, mt, lt, hr, pl, la, a, lb, b);
+    proxyBox.children[1].append(kind, mt, lt, hr, plPick, pl, la, a, lb, b);
     result.after(proxyBox);
   };
 
