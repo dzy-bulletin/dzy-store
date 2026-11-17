@@ -531,12 +531,71 @@ export function ft8Summary(emp, workH, leaves) {
   if (!emp || emp.ft !== true || !emp.plan || emp.plan.day_type !== 'W') return null;
   const trip = tripHoursOfList(leaves || []);
   const leave = round2((leaves || []).reduce((a, x) => a + (x && x.type && x.type !== '出差' ? Number(x.hours) || 0 : 0), 0));
-  const work = round2(Number(workH) || 0), sum = round2(work + trip + leave);
-  return { work, trip, leave, sum, gap: sum >= FT8_H - 0.005 ? 0 : round2(FT8_H - sum) };
+  // 同一天在同一單位別家店上班的時數也算進 8 小時（同打卡端跨店相加；2026-11-18 張淳 總部 6.75＋金山 2 被寫「還差 1.25 小時」）
+  const others = elsewhereHours(emp), other = round2(others.reduce((a, x) => a + x.h, 0));
+  const work = round2(Number(workH) || 0), sum = round2(work + trip + leave + other);
+  const out = { work, trip, leave, sum, gap: sum >= FT8_H - 0.005 ? 0 : round2(FT8_H - sum) };
+  return others.length ? Object.assign(out, { other, others }) : out;
 }
 export function ft8Text(s) {
   if (!s) return '';
-  return '正職上班日：上班 ' + s.work + '＋出差 ' + s.trip + '＋假單 ' + s.leave + '＝' + s.sum + '／' + FT8_H + ' 小時' + (s.gap ? '，還差 ' + s.gap + ' 小時，要有已核准的假單或補休單' : '');
+  const oth = (s.others || []).map((x) => '＋' + x.label + ' ' + x.h).join('');
+  return '正職上班日：上班 ' + s.work + '＋出差 ' + s.trip + '＋假單 ' + s.leave + oth + '＝' + s.sum + '／' + FT8_H + ' 小時' + (s.gap ? '，還差 ' + s.gap + ' 小時，要有已核准的假單或補休單' : '');
+}
+
+/* ── 跨店加班歸屬（2026-11-18 Eason；同打卡端 Requests.gs reqFt8Split_）──
+   同一天在原單位和支援單位都上班（同一單位才相加：墨竹亭↔總部、總部↔小辛辣；小辛辣↔墨竹亭不算），合計超過 8 小時的加班算支援單位，
+   最多到那家自己上班的時數，超過的留原單位；支援兩家以上只在支援單位之間比，時數長的吸收，一樣長算後上班那家。
+   這裡只產生卡片提醒，擋不擋看打卡端。別家還沒核定時照打卡估（上班卡往後、下班卡往前取到 15 分）。 */
+const q15up = (m) => Math.ceil(m / 15) * 15, q15dn = (m) => Math.floor(m / 15) * 15;
+const hmMinL = (t) => { const m = /^(\d{1,2}):(\d{2})/.exec(String(t || '')); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+/** emp.elsewhere 裡同一單位、有上班的店 → [{label, code, h, est, fs}] */
+export function elsewhereHours(emp) {
+  return (Array.isArray(emp && emp.elsewhere) ? emp.elsewhere : []).filter((x) => x && x.unit !== false).map((x) => {
+    const segs = Array.isArray(x.segs) ? x.segs : [];
+    let fs = null, est = 0;
+    segs.forEach((sg) => {
+      const a = hmMinL(sg && sg.in); let b = hmMinL(sg && sg.out);
+      if (a != null && (fs == null || a < fs)) fs = a;
+      if (a == null || b == null) return;
+      if (sg.cross || b <= a) b += 1440;
+      const qa = q15up(a), qb = q15dn(b);
+      if (qb > qa) est += qb - qa;
+    });
+    const ap = x.approved != null && isFinite(Number(x.approved)) ? Number(x.approved) : null;
+    return { label: String(x.label || '別店'), code: String(x.code || ''), h: round2(ap != null ? ap : est / 60), est: ap == null, fs };
+  }).filter((x) => x.h > 0);
+}
+/** 卡片提醒：{text, comb, need, absLabel, atSup, here}；不是正職上班日、沒有同一單位別家的上班 → null。ownH＝這家要核定的時數、ownFs＝這家最早開始（分鐘，可省） */
+export function crossOt(emp, ownH, ownFs) {
+  if (!emp || emp.ft !== true || !emp.plan || emp.plan.day_type !== 'W') return null;
+  const others = elsewhereHours(emp);
+  if (!others.length) return null;
+  const own = round2(Number(ownH) || 0);
+  const comb = round2(own + others.reduce((a, x) => a + x.h, 0)), need = Math.max(0, round2(comb - FT8_H));
+  const role = (emp && emp.cross_role) || {}, support = role.support === true, home = String(role.home || '');
+  const sups = support ? [{ label: '這家', self: true, h: own, fs: ownFs == null ? null : ownFs }].concat(home ? others.filter((x) => x.code !== home) : []) : others.slice();
+  let abs = null;
+  sups.forEach((x) => {
+    if (!(x.h > 0)) return;
+    if (!abs || x.h > abs.h + 0.005) { abs = x; return; }
+    if (Math.abs(x.h - abs.h) <= 0.005 && x.fs != null && (abs.fs == null || x.fs > abs.fs)) abs = x;
+  });
+  const atSup = abs ? round2(Math.min(need, abs.h)) : 0, atHome = round2(need - atSup);
+  const here = abs && abs.self ? atSup : (support ? 0 : atHome);
+  const est = others.some((x) => x.est);
+  let text = '今天也在' + others.map((x) => x.label + '上班 ' + x.h + ' 小時').join('、') + (est ? '（那邊還沒核定，照打卡估）' : '') + '，合計 ' + comb + ' 小時';
+  if (need <= 0.005) text += '，沒超過 ' + FT8_H + ' 小時，不用加班單';
+  else if (abs && abs.self) text += '；超過 ' + FT8_H + ' 小時的 ' + atSup + ' 小時算這家的加班，要有 ' + atSup + ' 小時加班單' + (atHome > 0.005 ? '（另外 ' + atHome + ' 小時算原單位）' : '');
+  else if (abs) text += '；' + abs.label + '的 ' + abs.h + ' 小時裡有 ' + atSup + ' 小時是加班，加班單開在' + abs.label + (here > 0.005 ? '；這家另外要開 ' + here + ' 小時加班單' : '，這家不用開');
+  return { text, comb, need, absLabel: abs ? abs.label : '', atSup, here };
+}
+/** 核定說明：有跨店提醒時，拿掉只看本店的「比班表多…不用加班單」，換成跨店那句 */
+export function crossNotes(emp, notes, ownH, ownFs) {
+  const list = Array.isArray(notes) ? notes.slice() : [];
+  const x = crossOt(emp, ownH, ownFs);
+  if (!x) return list;
+  return list.filter((n) => !/不用加班單）$/.test(String(n))).concat([x.text]);
 }
 /** 代開假單預填時數：還差的時數往上取到半小時（LINE 申請最小 0.5 小時） */
 export const ft8Round = (gap) => Math.max(0.5, Math.ceil((Number(gap) || 0) * 2 - 1e-9) / 2);

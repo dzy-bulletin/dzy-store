@@ -116,6 +116,7 @@ export function renderQuick(ctx) {
   const U = (k) => st.ui[k] || (st.ui[k] = {});
   const empOf = (key) => st.emps.find((e) => Q.keyOf(e) === key);
   const emp0 = (p) => empOf(p.key) || {};
+  const firstStart = (pay) => { const ps = pay && Array.isArray(pay.periods) ? pay.periods : []; let m = null; ps.forEach((x) => { const r = /^(\d{1,2}):(\d{2})/.exec(String(x && x.start || '')); if (r) { const v = Number(r[1]) * 60 + Number(r[2]); if (m == null || v < m) m = v; } }); return m; };
 
   // ---------- 資料 ----------
   function reqsFor(emp, date, approved) {
@@ -143,7 +144,7 @@ export function renderQuick(ctx) {
       const cards = u.cards && u.cards.length ? u.cards : null;
       const act = { id: 'plan', label: '核定 ' + C.round2(u.pass.hours) + ' 小時' + (cards ? '（選原因）' : ''), primary: true, hours: u.pass.hours, payload: u.pass.payload, askReason: !!cards, cards };
       Object.assign(p, cards ? { status: 'abnormal', tag: '要選原因', note: '打卡跟核定差超過 30 分鐘：' + cards.map(cardLabel).join('、') }
-        : { status: 'ok', tag: '核定通過', note: (u.pass.notes || []).join('；') },
+        : { status: 'ok', tag: '核定通過', note: C.crossNotes(emp, u.pass.notes, u.pass.hours, firstStart(u.pass.payload)).join('；') },
         { hours: u.pass.hours, payload: u.pass.payload, actions: [act, { id: 'full', label: '手動修改', primary: false }] });
     } else if (u.need && !p.pendReq && !e2eNoCore() && p.status === 'abnormal') {      // 不會過：寫出要補齊的單，不再給「選原因」（2026-11-14 不再靠寫原因放行）
       Object.assign(p, { tag: '還不能核定', note: '要補齊：' + u.need, actions: [{ id: 'full', label: '手動修改（幫同仁開單或改單）', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
@@ -160,6 +161,12 @@ export function renderQuick(ctx) {
         acts.push({ id: 'full', label: '手動修改（要算上班：作廢假單）', primary: !acts.length });
         Object.assign(p, { status: 'abnormal', tag: '請假卻有打卡', note: '核准的假單時段裡有打卡。要算上班：按手動修改把假單作廢；維持請假：選理由後核定。', actions: acts });
       }
+    }
+    // 跨店加班歸屬提醒（2026-11-18 Eason：總部不擋，但要寫出在金山上幾小時、其中幾小時是加班、單開在哪家）
+    if ((p.status === 'ok' || p.status === 'abnormal') && !emp.approved && !/今天也在/.test(p.note || '')) {
+      const base = (Array.isArray(p.actions) && p.actions.length ? mainAction(p) : null) || p;
+      const x = C.crossOt(emp, base.hours != null ? base.hours : p.hours, firstStart(base.payload || p.payload));
+      if (x) p.note = (p.note ? p.note + '；' : '') + x.text;
     }
     // 在等同仁補單、還沒有新的單送來：不列在要處理的人裡（列在「等同仁補單」），不算「還剩幾人」；單送來了就回到原本的分類
     const w = waitOf(key, date);

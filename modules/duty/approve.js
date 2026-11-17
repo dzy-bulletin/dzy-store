@@ -771,7 +771,7 @@ function buildCard(emp, date) {
       mini.className = 'du-mini ok'; mini.textContent = '核定通過';
       verdict.className = 'du-verdict ok';
       verdict.append(h('div', 'du-verdict-t', '✓ 核定通過：' + (ps || '整天請假') + '＝' + ck.approved_hours + ' 小時'));
-      (pr && !editOpen ? pr.notes : []).forEach(n => verdict.append(h('div', 'du-verdict-n', n)));
+      C.crossNotes(emp, pr && !editOpen ? pr.notes : [], ck.approved_hours).forEach(n => verdict.append(h('div', 'du-verdict-n', n)));   // 跨店加班歸屬提醒（2026-11-18）
       const acts = h('div', 'du-pre-acts');
       const go = h('button', 'btn du-verdict-go', '核定 ' + ck.approved_hours + ' 小時', { type: 'button' });
       go.onclick = () => { card.__noConfirm = true; submit.onclick(); };
