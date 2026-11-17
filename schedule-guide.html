@@ -37,7 +37,7 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
 <header><h1>第一次排班圖解</h1><p>管理系統 › 人資部門 › 排班管理（門市排班）</p></header>
 <div class="wrap">
 <nav class="toc" aria-label="目錄"><b>依序做這 8 步</b>
-  <a href="#sg-1">1 建班別</a><a href="#sg-2">2 設同仁</a><a href="#sg-3">3 每班人數</a><a href="#sg-4">4 指定休假</a><a href="#sg-5">5 工作站</a><a href="#sg-6">6 自動排班</a><a href="#sg-7">7 備註</a><a href="#sg-8">8 鎖定並發布</a>
+  <a href="#sg-1">1 建班別</a><a href="#sg-2">2 設同仁</a><a href="#sg-3">3 每班人數</a><a href="#sg-4">4 指定休假</a><a href="#sg-5">5 工作站</a><a href="#sg-6">6 自動排班</a><a href="#sg-7">7 備註</a><a href="#sg-8">8 確定班表並傳給同仁</a>
   <br><b>總部同仁</b> <a href="#sg-hq">出差＋去門市上班</a>
   <br><b>門市互相支援</b> <a href="#sg-store-support">排別家門市的班</a>
 </nav>
@@ -46,14 +46,14 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
   <h2>先看班表最上面的檢查清單</h2>
   <p>打開「班表」，最上面會列出排班前要設好的項目，系統自己打勾。<b>紅字</b>是一定要設的，沒設好「自動排班」按不下去；<b>黃字</b>建議設；灰字是選填。點「去設定 ›」直接跳到那一頁；營業額那一項是「去填寫 ›」，會移到同一頁上方的營業額欄。</p>
   <figure class="shot"><img src="img/guide/sg-00-checklist.jpg" width="780" height="1688" alt="班表最上面的排班前檢查清單，每一項前面有打勾"><figcaption>全部設好會收成一行「排班前設定都完成了」</figcaption></figure>
-  <div class="tip"><b>班表是改一格存一格</b>：點格子選好按 <span class="btn">套用</span> 就存好了，沒有整頁的儲存鈕。工作站另外有 <span class="btn">儲存站別</span>，只按套用不會存到站別。存好不等於同仁看得到，要按 <span class="btn">鎖定並發布</span>，同仁的 LINE 才會出現班表。</div>
+  <div class="tip"><b>班表是改一格存一格</b>：點格子選好按 <span class="btn">套用</span> 就存好了，沒有整頁的儲存鈕。工作站另外有 <span class="btn">儲存站別</span>，只按套用不會存到站別。存好不等於同仁看得到，要按 <span class="btn">確定班表並傳給同仁</span>，同仁的 LINE 才會出現班表。</div>
 </section>
 
 <section id="sg-1">
   <h2><span class="step">第 1 步</span>建班別</h2>
-  <p>到「班別與設定」，把店裡會用到的班都建起來：名稱、上班、下班、休息幾分鐘。例：早班 10:00–19:00、休息 60 分。</p>
+  <p>到「班別和工作站設定」，把店裡會用到的班都建起來：名稱、上班、下班、休息幾分鐘。例：早班 10:00–19:00、休息 60 分。</p>
   <ul><li>一個班沒排休息最多 6 小時，超過要排至少 30 分鐘休息才存得進去。</li><li>不用的班把「使用中」的勾拿掉再按儲存（班別不能刪，已排過的班表才不會亂掉）。</li></ul>
-  <figure class="shot"><img src="img/guide/sg-01-shifts.jpg" width="780" height="1688" alt="班別與設定頁的班別欄位：名稱、上班、下班、休息"><figcaption>班別與設定</figcaption></figure>
+  <figure class="shot"><img src="img/guide/sg-01-shifts.jpg" width="780" height="1688" alt="班別和工作站設定頁的班別欄位：名稱、上班、下班、休息"><figcaption>班別和工作站設定</figcaption></figure>
 </section>
 
 <section id="sg-2">
@@ -65,9 +65,9 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
 
 <section id="sg-3">
   <h2><span class="step">第 3 步</span>設每天每班要幾個人</h2>
-  <p>到「指定與需求」，平日、週六、週日各填一組「每班最少幾人、最多幾人」。自動排班會照這個人數排。</p>
+  <p>到「指定休假和人力需求」，平日、週六、週日各填一組「每班最少幾人、最多幾人」。自動排班會照這個人數排。</p>
   <p>遇到活動、國定假日這種特別的日子，選那一天另外調人數，只影響那一天。</p>
-  <figure class="shot"><img src="img/guide/sg-03-needs.jpg" width="780" height="1688" alt="指定與需求頁：平日、週六、週日每班人數"><figcaption>指定與需求：每班人數</figcaption></figure>
+  <figure class="shot"><img src="img/guide/sg-03-needs.jpg" width="780" height="1688" alt="指定休假和人力需求頁：平日、週六、週日每班人數"><figcaption>指定休假和人力需求：每班人數</figcaption></figure>
 </section>
 
 <section id="sg-4">
@@ -78,8 +78,8 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
 
 <section id="sg-5">
   <h2><span class="step">第 5 步</span>工作站與各站人數<span class="opt">有用站別的店</span></h2>
-  <p>店裡要分炒鍋、外場、收銀這類站別的，先在「班別與設定」建工作站，再到「指定與需求」填每站最少幾人。沒用站別的店跳過這一步。</p>
-  <figure class="shot"><img src="img/guide/sg-05-stations.jpg" width="780" height="1688" alt="班別與設定頁下方的工作站清單"><figcaption>工作站設定</figcaption></figure>
+  <p>店裡要分炒鍋、外場、收銀這類站別的，先在「班別和工作站設定」建工作站，再到「指定休假和人力需求」填每站最少幾人。沒用站別的店跳過這一步。</p>
+  <figure class="shot"><img src="img/guide/sg-05-stations.jpg" width="780" height="1688" alt="班別和工作站設定頁下方的工作站清單"><figcaption>工作站設定</figcaption></figure>
 </section>
 
 <section id="sg-6">
@@ -93,7 +93,7 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
   <li>改好後按 <span class="btn">匯入 Excel</span> 選檔，先跳出預覽：綠色是新寫入、黃色是會改掉原本的班（下面小字是原本的）、紅色是不會匯入的格子，原因寫在下方。</li>
   <li>格子可以寫：班別代號（A、A班）、班別名稱、時間（10-19，要跟現有班別一樣）、例、休、休加A（休息日加班）、特休／病假等假別、國定、A+C（一天兩班）。<b>空白格會清空</b>。</li>
   <li>Excel 寫法或姓名對不上時，預覽會請你選它是什麼；選過的這支手機或電腦會記住，下次自動套用。Excel 裡沒有的同仁，班表維持原樣。</li>
-  <li>按 <span class="btn">確認匯入</span> 才會寫進班表。已鎖定的期要先解除鎖定。匯入後照平常看提醒、再鎖定並發布。</li></ul>
+  <li>按 <span class="btn">確認匯入</span> 才會寫進班表。已鎖定的期要先解除鎖定。匯入後照平常看提醒、再確定班表並傳給同仁。</li></ul>
   <figure class="shot"><img src="img/guide/sg-06c-import.jpg" width="780" height="1688" alt="匯入 Excel 的預覽視窗：上方是會寫入幾格，表格標出改掉的格子，下方請你選對不上的寫法"><figcaption>匯入 Excel 的預覽：確認後才寫入</figcaption></figure>
 </section>
 
@@ -105,10 +105,10 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
 </section>
 
 <section id="sg-8">
-  <h2><span class="step">第 8 步</span>鎖定並發布</h2>
-  <p>沒有紅色「要修正」之後，按 <span class="btn">鎖定並發布</span>。同仁在 LINE「鼎兆元打卡」的出勤班表就看得到這一期的班。</p>
+  <h2><span class="step">第 8 步</span>確定班表並傳給同仁</h2>
+  <p>沒有紅色「要修正」之後，按 <span class="btn">確定班表並傳給同仁</span>。同仁在 LINE「鼎兆元打卡」的出勤班表就看得到這一期的班。</p>
   <ul><li>鎖定後要改班，先按「解除鎖定」，改好再鎖定一次；解除期間同仁暫時看不到這一期。</li><li>只改工作站或備註<b>不用解除鎖定</b>：鎖定中點格子就能改站別，存了會自動重送到 LINE。</li><li>「送 LINE 失敗」時按「立即重送」，系統也會每 5 分鐘自動再試。</li><li>誰在什麼時候鎖定、解除鎖定，都記在頁頂「鎖定紀錄」分頁，可以依期別、動作、操作人查；紀錄永久保留、不能修改。</li></ul>
-  <figure class="shot"><img src="img/guide/sg-08-lock.jpg" width="780" height="1240" alt="班表上方的鎖定並發布按鈕"><figcaption>鎖定並發布</figcaption></figure>
+  <figure class="shot"><img src="img/guide/sg-08-lock.jpg" width="780" height="1240" alt="班表上方的確定班表並傳給同仁按鈕"><figcaption>確定班表並傳給同仁</figcaption></figure>
 </section>
 
 <section id="sg-hq">
@@ -132,7 +132,7 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:20px}
   <p>同仁去同品牌的別家門市支援時，由<b>同仁原本門市的店長</b>排。支援的門市不用按同意，請兩店事前先講好。</p>
   <ul>
     <li><b>怎麼排</b>：在班表點那一格，班別選單往下找「支援 ○○店」，選對方門市的班和工作站，按「套用」。一天兩段也可以，用「＋第二班」。</li>
-    <li><b>班別要對方有</b>：選的是對方門市現有的班別，時間跟著對方的設定。要其他時間，請對方先到「班別與設定」新增。</li>
+    <li><b>班別要對方有</b>：選的是對方門市現有的班別，時間跟著對方的設定。要其他時間，請對方先到「班別和工作站設定」新增。</li>
     <li><b>原店班表</b>：格子顯示對方門市＋班別（例如「金山C」）。支援的班算進同仁個人工時、一例一休和連續上班天數，不算原店當天人數。</li>
     <li><b>支援店班表</b>：最下面「門市支援」列出這位同仁，只能看、不能改，會算進當天人數，按「自動排班」時那班會少排。標「原店還沒鎖定」代表對方還可能調整。</li>
     <li><b>支援店已鎖定、原店才改</b>：原店照樣能改，支援店人數自動更新，管理系統首頁會提醒「門市支援有變動」。店長打開那一期班表或再次鎖定後，提醒就消失。</li>

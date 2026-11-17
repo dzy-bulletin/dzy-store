@@ -197,18 +197,18 @@ export function compBankRows(stores) {
 export function compNoneText(all) {
   const list = (all || []).filter((g) => g.rows === null);
   const nm = list.filter((g) => g.none === 'nomaster'), names = (l) => l.map((g) => g.name || g.code).filter(Boolean).join('、');
-  if (list.length && nm.length === list.length) return (list.length > 1 && names(nm) ? names(nm) + '的' : '這家店的') + '薪資主檔還沒有同仁，補休帳要等會計在「薪酬」把同仁建進員工薪資主檔才看得到。';
+  if (list.length && nm.length === list.length) return (list.length > 1 && names(nm) ? names(nm) + '的' : '這家店的') + '薪資主檔還沒有同仁，補休明細要等會計在「薪酬」把同仁建進員工薪資主檔才看得到。';
   if (nm.length) return names(nm) + '的薪資主檔還沒有同仁（請會計建檔）；' + names(list.filter((g) => g.none !== 'nomaster')) + '薪資沒有開補休。';
-  return '這裡的門市沒有補休帳（薪資沒有開補休）。';
+  return '這裡的門市沒有補休明細（薪資沒有開補休）。';
 }
 
 export function compSheet(groups, fallback) {
-  const out = [['門市', '同仁', '員編', '加班', '補休', '剩／欠']];
+  const out = [['門市', '同仁', '員編', '加班', '補休', '補休還剩／還欠']];
   for (const g of groups || []) {
     const st = g.name || fallback || g.code || '';
     for (const r of g.rows || []) out.push([xlsSafe(st), xlsSafe(r.name + (r.active ? '' : '（離職）')), xlsSafe(r.emp_id), r.ot_h, r.used_h, r.balance_h]);
   }
   if (out.length === 1) out.push(['本月沒有正職同仁的加班或補休']);
-  out.push([], ['單位：小時。剩／欠＝加班 − 補休，負數＝欠；補休含審核中的補休單，跟薪資的補休帳同一份。']);
+  out.push([], ['單位：小時。補休還剩／還欠＝加班 − 補休，負數＝欠；補休含審核中的補休單，跟薪資的補休明細同一份。']);
   return out;
 }

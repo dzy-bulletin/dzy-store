@@ -153,7 +153,7 @@ function drawFixed(ctx) {
 /** 正職／計時勾選（2026-11-13 Eason：正職上班日滿 8 小時）。兩個框擇一；再點已勾的那個＝清掉（未設）。總部 self.js 也用。 */
 export function kindBox(st, canEdit, pre) {
   const box = (v, label) => `<label class="sc-kind"><input type="checkbox" class="${pre}-kind" data-emp="${esc(st.emp_id)}" value="${v}" ${st.emp_kind === v ? 'checked' : ''} ${canEdit ? '' : 'disabled'} aria-label="${esc(st.name)} ${label}">${label}</label>`;
-  return `<span class="sc-kinds">${box('ft', '正職')}${box('pt', '計時')}</span>`;
+  return `<span class="sc-kinds">${box('ft', '正職')}${box('pt', '兼職（計時）')}</span>`;
 }
 export function bindKind(el, pre, action, ctx, cb2) {
   el.querySelectorAll('input.' + pre + '-kind').forEach((cb) => {

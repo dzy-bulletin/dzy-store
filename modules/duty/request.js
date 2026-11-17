@@ -24,7 +24,7 @@ export function renderRequest(ctx) {
         if (!mine.length) return null;
         const c = h('div', 'du-rq-mine');
         c.append(h('div', 'du-rq-title', '我自己送出的（' + mine.length + ' 筆）'), h('div', 'du-rq-mine-hint', '值班主管本人的申請由上層主管（區督導或總監）審核，這裡只給你看進度。'));
-        if (mine.some(it => it.upper_kind === 'director' || !!it.proxy_by)) c.append(h('div', 'du-rq-mine-hint', '主管替你代開的單也列在這裡，同樣不能自己審，由上層主管或系統管理員審核。'));
+        if (mine.some(it => it.upper_kind === 'director' || !!it.proxy_by)) c.append(h('div', 'du-rq-mine-hint', '主管幫你開的單也列在這裡，同樣不能自己審，由上層主管或系統管理員審核。'));
         mine.forEach(it => c.append(buildMine(it)));
         return c;
       };
@@ -126,7 +126,7 @@ function buildMine(it) {
   const acts = h('div', 'du-rq-acts du-rq-acts-self');
   const ok = h('button', 'du-rq-ok btn', '核准', { type: 'button' }), no = h('button', 'du-rq-no btn ghost', '退回', { type: 'button' });
   ok.disabled = no.disabled = true;
-  acts.append(h('span', 'du-rq-upper', '送上層審核中'), ok, no);
+  acts.append(h('span', 'du-rq-upper', '等上一層主管審核'), ok, no);
   el.append(acts);
   return el;
 }
@@ -136,7 +136,7 @@ function upperLabel(it) { return it.upper_kind === 'director' || it.proxy_by ? p
 // 這天在別家打卡（伺服器 markElsewhere 附 elsewhere）：本店那天沒打卡、別家有 → 紅字提醒、核准前再確認（2026-11-15）
 function elsewhereText(it) { return it && Array.isArray(it.elsewhere) && it.elsewhere.length ? it.name + ' 這天沒有在本店打卡，在' + it.elsewhere.map(x => x.store + '（' + x.punch + '）').join('、') + '打卡。這張可能送錯店，要送到打卡那家才對' : ''; }
 // 代開標籤顯示代開人姓名（2026-11-14 Eason：不顯示職稱）：proxy_by 是「姓名（工號）」，只取姓名；舊資料沒有才退回「主管代開」
-function proxyLabel(it) { const n = String(it.proxy_by || '').replace(/（[^（）]*）\s*$/, '').trim(); return (n || '主管') + '代開'; }
+function proxyLabel(it) { const n = String(it.proxy_by || '').replace(/（[^（）]*）\s*$/, '').trim(); return (n || '主管') + '幫開'; }
 
 // 核定工時卡片裡審申請（2026-11-14 考勤管理好上手第 2 項）：同一個元件，不放勾選（批次留在申請審核分頁），核准／退回完成後通知卡片
 export function buildReqItem(it, onDone) { return buildItem(it, null, null, onDone); }
@@ -165,7 +165,7 @@ function buildItem(it, card, title, onDone) {
   const qBlock = canDecide ? reqQuotaBlock(leaveFor(it.store), it) : '';      // 生理假／家庭照顧假額度用完不能核准（2026-11-10 Eason）；事假不擋
   el.__quotaBlock = qBlock;
   if (qBlock) { ok.disabled = true; ok.title = qBlock; acts.append(h('span', 'du-rq-upper du-rq-quota', qBlock)); }
-  if (canDecide) acts.append(ok, no); else acts.append(h('span', 'du-ro', upOn ? (isProxy ? '送總監層級審核中' : upperIsDept(it) ? '原單位主管審核中' + (it.support_from ? '（' + it.support_from + '）' : '') : '送上層審核中') : '唯讀'));
+  if (canDecide) acts.append(ok, no); else acts.append(h('span', 'du-ro', upOn ? (isProxy ? '等總監審核' : upperIsDept(it) ? '原單位主管審核中' + (it.support_from ? '（' + it.support_from + '）' : '') : '等上一層主管審核') : '唯讀'));
   if (it.attach_id && canDecide) {
     const at = h('button', 'du-rq-att btn ghost', '看附件', { type: 'button' });
     at.onclick = async () => {

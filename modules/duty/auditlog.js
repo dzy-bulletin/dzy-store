@@ -5,10 +5,10 @@ import { taipeiToday, tsLabel, shortDate } from './calc.js';
 import { defaultYm, ymAdd, ymLabel, xlsSafe } from './summary-calc.js';
 import { css, loadXlsx } from './summary.js';
 
-export const ACTION_LABEL = { hours: '工時核定', rehours: '工時重核', recheck: '系統重算', submit: '申請送出', approve: '申請核准', reject: '申請退回',
+export const ACTION_LABEL = { hours: '工時核定', rehours: '工時重新核定', recheck: '系統自動重新計算', submit: '申請送出', approve: '申請核准', reject: '申請退回',
   cancel: '申請取消', void: '申請作廢', device_ok: '裝置核准', device_no: '裝置拒絕' };
 // 篩選用的分組
-export const GROUPS = [['', '全部動作'], ['hours', '工時核定（含重核）'], ['approve', '申請核准'], ['reject', '申請退回'], ['void', '申請作廢'], ['submit', '申請送出／取消'], ['device', '裝置核准／拒絕']];
+export const GROUPS = [['', '全部動作'], ['hours', '工時核定（含重新核定）'], ['approve', '申請核准'], ['reject', '申請退回'], ['void', '申請作廢'], ['submit', '申請送出／取消'], ['device', '裝置核准／拒絕']];
 const GROUP_OF = { hours: 'hours', rehours: 'hours', recheck: 'hours', approve: 'approve', reject: 'reject', void: 'void', submit: 'submit', cancel: 'submit', device_ok: 'device', device_no: 'device' };
 
 export const contentOf = e => {
@@ -17,7 +17,7 @@ export const contentOf = e => {
   if (e.kind === 'req') return [d.summary, d.reason ? '原因：' + d.reason : ''].filter(Boolean).join('・');
   return '';
 };
-export const byText = e => (e.by || '—') + (e.system ? '（系統重算）' : '');
+export const byText = e => (e.by || '—') + (e.system ? '（系統自動重新計算）' : '');
 export function filterLog(log, f) {
   const emp = String(f.emp || '').trim().toLowerCase(), by = String(f.by || '').trim().toLowerCase();
   return log.filter(e => (!f.stores || f.stores.indexOf(e.store) >= 0) && (!f.group || GROUP_OF[e.action] === f.group)
@@ -64,7 +64,7 @@ function drawBar(bar, out) {
   const st = AL;
   bar.innerHTML = '';
   bar.append(h('h2', 'sm-h', '核定紀錄'));
-  { const t = h('p', 'hint'); t.append(tipText('誰、什麼時候核定或審了什麼（只能看、匯出）', '包含工時核定（含重核）、申請的送出、核准、退回、取消、作廢，以及裝置核准。申請單的紀錄看得到的範圍和「申請單彙整」一樣；裝置核准從 11/4 起才開始記。')); bar.append(t); }
+  { const t = h('p', 'hint'); t.append(tipText('誰、什麼時候核定或審了什麼（只能看、匯出）', '包含工時核定（含重新核定）、申請的送出、核准、退回、取消、作廢，以及裝置核准。申請單的紀錄看得到的範圍和「申請單總表」一樣；裝置核准從 11/4 起才開始記。')); bar.append(t); }
   const g = h('div', 'sm-filters');
   const fm = h('div', 'fld sm-f'); fm.append(h('label', null, '月份', { for: 'alYm' }));
   const ym = h('select', null, null, { id: 'alYm' });

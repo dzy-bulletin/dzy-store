@@ -40,7 +40,7 @@ export function renderNeeds(ctx) {
     ${shifts.length ? `<div class="scroll"><table class="sc-tbl"><thead><tr><th>班別</th>${KINDS.map(([, l]) => `<th>${l}最少</th><th>${l}最多</th>`).join('')}</tr></thead><tbody>
     ${shifts.map((s) => `<tr><th scope="row">${esc(shiftCode(s.name))}</th>${KINDS.map(([k]) => `<td><input type="number" min="0" max="99" class="sc-n" data-k="${k}" data-s="${esc(s.id)}" data-f="min" value="${tplV(k, s.id, 'min')}" aria-label="${esc(s.name)} 最少"></td><td><input type="number" min="0" max="99" class="sc-n" data-k="${k}" data-s="${esc(s.id)}" data-f="max" value="${tplV(k, s.id, 'max')}" aria-label="${esc(s.name)} 最多"></td>`).join('')}</tr>`).join('')}
     </tbody></table></div>
-    <div class="row mt"><button type="button" class="btn" id="ndTplSave">儲存人數範本</button></div>` : '<p class="hint">請先到「班別與設定」新增班別。</p>'}
+    <div class="row mt"><button type="button" class="btn" id="ndTplSave">儲存人數範本</button></div>` : '<p class="hint">請先到「班別和工作站設定」新增班別。</p>'}
     <div id="ndTplMsg" class="okmsg" role="status">${esc(tplMsg)}</div></div>
 
   <div class="card"><h2>個別日期另外設人數</h2>

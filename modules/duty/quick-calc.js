@@ -284,22 +284,22 @@ function classifyRaw(inp) {
   if (pv.mode === 'plan' && emp.plan && (emp.plan.day_type === 'H' || emp.plan.day_type === 'R')) base.planText += '（' + (emp.plan.day_type === 'R' ? '例假出勤' : '休息日加班') + '：整天算加班，要有加班單）';
   if (emp.approved) {
     const otLate = canHours ? reqs.filter((r) => r.kind === 'ot' && !r.pending && r.start && r.end && !periodsCover(emp.approved.periods, r)) : [];
-    if (otLate.length) return Object.assign(base, { status: 'abnormal', tag: '已核定過，加班單沒算進去', note: '核定後才核准的加班單，要重新核定', actions: [{ id: 'full', label: '到完整頁核對', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
+    if (otLate.length) return Object.assign(base, { status: 'abnormal', tag: '已核定過，加班單沒算進去', note: '核定後才核准的加班單，要重新核定', actions: [{ id: 'full', label: '手動修改', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
     // 2026-11-16 Eason：標「有待審單」；pendReq＝送出前檢查不能把他改成「核定通過」（余忠哲 11/1：先核定 8 小時、隔天才送加班單，卡片卻寫核定通過）
-    if (canHours && reqs.some((r) => r.pending)) return Object.assign(base, { status: 'abnormal', tag: '有待審單', pendReq: true, note: '核定後又送來新的申請：先審單，核准後再重新送出核定', actions: [{ id: 'full', label: '到完整頁核對', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
+    if (canHours && reqs.some((r) => r.pending)) return Object.assign(base, { status: 'abnormal', tag: '有待審單', pendReq: true, note: '核定後又送來新的申請：先審單，核准後再重新送出核定', actions: [{ id: 'full', label: '手動修改', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
     return Object.assign(base, { status: 'done', hours: Number(emp.approved.approved_hours) });
   }
 
   const segs = segsOf(emp);
   const hasPunch = !!(emp.segments && emp.segments.length) || emp.attempts > 0;
   const absent = !hasPunch && pv.mode !== 'plan';
-  base.punchText = segs.length ? segs.map(C.segmentText).join('、') : (emp.attempts > 0 ? '沒有入帳的打卡' : '沒有打卡');
+  base.punchText = segs.length ? segs.map(C.segmentText).join('、') : (emp.attempts > 0 ? '打卡沒成功' : '沒有打卡');
   if (absent && !reqs.length) return Object.assign(base, { status: 'absent' });
   if (!canHours) return Object.assign(base, { status: 'readonly' });
 
-  const full = (tag, note) => Object.assign(base, { status: 'abnormal', tag, note: note || '', actions: [{ id: 'full', label: '到完整頁核對', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });      // 手機上做不完的人可以先跳過，不擋更早的日子（2026-11-09 Eason）
+  const full = (tag, note) => Object.assign(base, { status: 'abnormal', tag, note: note || '', actions: [{ id: 'full', label: '手動修改', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });      // 手機上做不完的人可以先跳過，不擋更早的日子（2026-11-09 Eason）
   const skip = (label) => ({ id: 'skip', label: label || '先跳過', primary: false });
-  const fullAct = { id: 'full', label: '到完整頁核對', primary: false };
+  const fullAct = { id: 'full', label: '手動修改', primary: false };
   const payloadOf = (periods, leaves) => ({ periods, leaves: leaves || [], late_min: '' });
 
   if ((emp.dup_groups || []).length) return full('重複打卡', '有重複打卡，要選以哪張為準');
@@ -313,21 +313,21 @@ function classifyRaw(inp) {
   const br = brk;
   const openOrMissing = segs.some(isOpenSeg);
   const complete = segs.length > 0 && !openOrMissing;
-  const missTag = () => (!segs.length ? '沒有打卡' : segs.some((s) => !s.out) && segs.some((s) => !s.in) ? '少打卡' : segs.some((s) => !s.out) ? '少下班卡' : '少上班卡');
+  const missTag = () => (!segs.length ? '沒有打卡' : segs.some((s) => !s.out) && segs.some((s) => !s.in) ? '忘打卡' : segs.some((s) => !s.out) ? '少下班卡' : '少上班卡');
   const planPeriods = periodsOfPrefill(pv);
   const planHours = hoursOf(planPeriods);
   if (date === today && pv.mode === 'plan' && inp.nowMin != null) {                      // 今天：最後一段班表結束前一律不核定；跨夜班今天還結束不了
     const ps = emp.plan.segs, st0 = hm(ps[0].start), en0 = hm(ps[ps.length - 1].end);
     if (st0 != null && en0 != null && (en0 <= st0 || inp.nowMin < en0)) return Object.assign(base, { status: 'blocked', tag: '今天還沒下班', note: '班表還沒結束，下班後再核定', actions: [skip('先跳過，下班後再核')] });
   }
-  if (pv.mode === 'plan' && splitBreak(emp.plan, brk)) return full('分段班碰到休息帶', '其中一段班蓋過休息時間，照班表會多算休息，請到完整頁核對');
+  if (pv.mode === 'plan' && splitBreak(emp.plan, brk)) return full('分段班碰到休息時間', '其中一段班蓋過休息時間，照班表會多算休息，請按「手動修改」核對');
 
 
   // ================= 有一張申請 =================
   if (reqs.length === 1) {
     const r = reqs[0], line = reqLine(r);
     base.note = line; base.reqId = r.id;
-    if (r.pending && !r.attach_id && r.has_attach) return full('有附件但看不到', '同仁附了證明，打卡系統還沒更新，要到完整頁看');
+    if (r.pending && !r.attach_id && r.has_attach) return full('有附件但看不到', '同仁附了證明，打卡系統還沒更新，要按「手動修改」看');
     const reqAct = (hours, extra) => {
       const label = (r.pending ? '核准單，核定 ' : '核定 ') + fmtH(hours) + ' 小時';
       return Object.assign({ id: 'req', label, primary: true, hours, decide: r.pending ? { id: r.id, store: r.store || emp.store || '' } : null }, extra);
@@ -343,8 +343,8 @@ function classifyRaw(inp) {
       // 班表休假日＋沒打卡＋一張整天假單（有時數）：照假單核定，可一鍵（2026-11-14 Eason：許芷瑄排休那天請喪假 8 小時；班表沒有喪假可排，只能排休）
       const offLeave = pv.mode === 'off' && !emp.plan.away && r.kind === 'leave' && !r.start && Number(r.hours) > 0;
       if (pv.mode !== 'plan' && !offLeave) return full('排休或沒班表又有' + (r.kind === 'trip' ? '出差單' : '假單'), '這天不是上班日，要自己核對');
-      if (r.kind === 'trip' && !(Number(r.hours) > 0)) return full('出差單沒有時數', '整天出差要填時數，到完整頁處理');
-      if (r.kind === 'leave' && !r.start && !(Number(r.hours) > 0)) return full('假單沒有時數', '假單時數空白或 0，到完整頁核對');      // 比照出差（2026-11-17）：原本時數空白或 0 也能一鍵「核定通過」0 小時
+      if (r.kind === 'trip' && !(Number(r.hours) > 0)) return full('出差單沒有時數', '整天出差要填時數，請按「手動修改」處理');
+      if (r.kind === 'leave' && !r.start && !(Number(r.hours) > 0)) return full('假單沒有時數', '假單時數空白或 0，請按「手動修改」核對');      // 比照出差（2026-11-17）：原本時數空白或 0 也能一鍵「核定通過」0 小時
       if (r.start) return full('部分時段' + (r.kind === 'trip' ? '出差' : '請假'), '有填時段，要自己核對時數');
       if (segs.length || emp.attempts > 0) return full('有打卡又有' + (r.kind === 'trip' ? '出差單' : '假單'), '整天的單，當天卻有打卡');
       leaves = C.reqLeaveLines([r]).map((x) => ({ type: x.type, hours: (x.hours === 0 || x.hours) ? String(x.hours) : '' }));      // 舊卡片從輸入框送字串
@@ -385,7 +385,7 @@ function classifyRaw(inp) {
       const total = hoursOf(periods);
       const rawP = rawPunchMinutes(segs, br);
       if (rawP == null || Math.abs(rawP - total * 60) >= DIFF_MIN) return full('打卡和核定時段差太多', '打卡 ' + segs[0].in + '–' + segs[segs.length - 1].out + '（扣休息 ' + fmtH((rawP || 0) / 60) + ' 小時）和要核定的 ' + fmtH(total) + ' 小時差 30 分鐘以上，不算涵蓋');
-      if (!offDay && edgeShift(emp.plan, br)) return full('班表貼著休息帶', '半天班剛好碰到休息帶，要自己判斷扣不扣休息');
+      if (!offDay && edgeShift(emp.plan, br)) return full('班表碰到休息時間', '半天班剛好碰到休息時間，要自己判斷扣不扣休息');
       tag = offDay ? '排休有打卡' : '超過班表，有加班單';
       Object.assign(base, { status: 'abnormal', tag, hours: total, payload: payloadOf(periods), chk: '打卡 ' + segs[0].in + '–' + segs[segs.length - 1].out + '，涵蓋加班單' });
       base.actions = [reqAct(total), ...rejectAct];
@@ -396,14 +396,14 @@ function classifyRaw(inp) {
       if (!segs.length && pv.mode !== 'plan' && r.miss_type !== 'both') return mismatch('沒有打卡可以接');
       const mp = C.missPeriods(emp.segments, r, emp.plan && emp.plan.work ? emp.plan.segs : null);
       const nOpen = segs.filter(isOpenSeg).length;
-      if ((r.miss_type === 'in' || r.miss_type === 'out') ? nOpen > 1 : nOpen > 0) return full('還有別段沒打卡', '一張忘打卡單只補一段，其他段還缺卡');
+      if ((r.miss_type === 'in' || r.miss_type === 'out') ? nOpen > 1 : nOpen > 0) return full('還有別段沒打卡', '一張忘打卡單只補一段，其他段還是忘打卡');
       if (!mp.length || !missUsed(mp, r)) return mismatch('打卡 ' + (segs.length ? segs.map(C.segmentText).join('、') : '沒有') + '，和忘打卡單對不上');
       const hasNoIn = segs.some((x) => !x.in && x.out), hasNoOut = segs.some((x) => x.in && !x.out);
       if (pv.mode === 'off') return full('排休日有忘打卡單', '排休日要有加班單，不能用忘打卡單增加工時');
-      if (r.miss_type === 'in' && !(hasNoIn && nOpen === 1)) return full('忘打卡單和缺卡對不上', '單子補上班，但打卡不是缺上班卡');
-      if (r.miss_type === 'out' && !(hasNoOut && nOpen === 1)) return full('忘打卡單和缺卡對不上', '單子補下班，但打卡不是缺下班卡');
-      if (r.miss_type === 'both' && !(pv.mode === 'plan' && segs.length === 0)) return full('忘打卡單和缺卡對不上', '補上班＋下班只能用在有班表、整天沒打卡的人');
-      if (r.miss_type === 'break' && (pv.mode !== 'plan' || nOpen !== 0)) return full('忘打卡單和缺卡對不上', '補中間休息只能用在有班表、打卡齊全的人');
+      if (r.miss_type === 'in' && !(hasNoIn && nOpen === 1)) return full('忘打卡單和沒打的卡對不上', '單子補上班，但打卡不是缺上班卡');
+      if (r.miss_type === 'out' && !(hasNoOut && nOpen === 1)) return full('忘打卡單和沒打的卡對不上', '單子補下班，但打卡不是缺下班卡');
+      if (r.miss_type === 'both' && !(pv.mode === 'plan' && segs.length === 0)) return full('忘打卡單和沒打的卡對不上', '補上班＋下班只能用在有班表、整天沒打卡的人');
+      if (r.miss_type === 'break' && (pv.mode !== 'plan' || nOpen !== 0)) return full('忘打卡單和沒打的卡對不上', '補中間休息只能用在有班表、打卡齊全的人');
       if (realOverlap(mp)) return full('補完後時段重疊', '補完忘打卡後時段重疊，要自己核對');
       const total = hoursOf(mp);
       if (total > OK_MAX_H || (pv.mode === 'plan' && total > planHours + 0.25)) return full('補完後超過班表', '補完忘打卡後共 ' + fmtH(total) + ' 小時，比班表 ' + fmtH(planHours) + ' 小時多，沒有加班單');
@@ -430,15 +430,15 @@ function classifyRaw(inp) {
     const ps = pv.mode === 'plan' ? emp.plan.segs : null;
     const noLine = !!emp.no_line && date <= today;            // 沒綁 LINE（打卡端 mgr_day 帶）：7 天內也能代開（2026-11-10）
     const canProxy = old || noLine;
-    Object.assign(base, { status: 'blocked', tag, note: old ? '超過 ' + PROXY_AFTER_DAYS + ' 天，同仁自己補不了單，可以由主管代開' : noLine ? '同仁沒綁 LINE，自己補不了單，可以由主管代開' : '請同仁到 LINE 補忘打卡單' });
+    Object.assign(base, { status: 'blocked', tag, note: old ? '超過 ' + PROXY_AFTER_DAYS + ' 天，同仁自己補不了單，可以由主管幫同仁開單' : noLine ? '同仁沒綁 LINE，自己補不了單，可以由主管幫同仁開單' : '請同仁到 LINE 補忘打卡單' });
     if (canProxy && proxy && !inp.person) {
-      base.note = (old ? '超過 ' + PROXY_AFTER_DAYS + ' 天' : '同仁沒綁 LINE') + '；代開要用個人帳號登入（門市帳號不能代開）';
+      base.note = (old ? '超過 ' + PROXY_AFTER_DAYS + ' 天' : '同仁沒綁 LINE') + '；幫同仁開單要用個人帳號登入（門市帳號不能開）';
       base.actions = [fullAct, skip('先跳過')];
     } else if (canProxy && proxy) {
-      base.actions = [{ id: 'proxy', label: '主管代開忘打卡單', primary: true, missType: proxy, defStart: ps ? ps[0].start : '', defEnd: ps ? ps[ps.length - 1].end : '' }, skip('先跳過')];
+      base.actions = [{ id: 'proxy', label: '主管幫同仁開忘打卡單', primary: true, missType: proxy, defStart: ps ? ps[0].start : '', defEnd: ps ? ps[ps.length - 1].end : '' }, skip('先跳過')];
     } else if (canProxy) base.actions = [fullAct, skip('先跳過')];
     else {
-      if (inp.person) base.note = '請同仁到 LINE 補忘打卡單；同仁沒綁 LINE，請到完整頁代開';      // 這裡不知道誰沒綁，完整頁送出時打卡端會判斷（2026-11-09）
+      if (inp.person) base.note = '請同仁到 LINE 補忘打卡單；同仁沒綁 LINE，請按「手動修改」幫同仁開單';      // 這裡不知道誰沒綁，完整頁送出時打卡端會判斷（2026-11-09）
       base.actions = inp.person ? [skip('先跳過，等同仁補單'), fullAct] : [skip('先跳過，等同仁補單')];
     }
     return base;
@@ -448,7 +448,7 @@ function classifyRaw(inp) {
   }
   if (pv.mode !== 'plan') return full('沒有班表', '沒有排這天的班，要自己核對');
 
-  if (edgeShift(emp.plan, br)) return full('班表貼著休息帶', '半天班剛好碰到休息帶，要自己判斷扣不扣休息');
+  if (edgeShift(emp.plan, br)) return full('班表碰到休息時間', '半天班剛好碰到休息時間，要自己判斷扣不扣休息');
   const cp = comparePlan(comparePlanOf(emp.plan), emp.segments, { past: true, brk: br });
   const fl = parseFlags(cp ? cp.flags : []);
   const nPlanSegs = emp.plan.segs.length;
@@ -494,7 +494,7 @@ export function classify(inp) {
   const hs = [res.hours].concat((res.actions || []).map((a) => a.hours)).filter((h) => h != null);
   const bad = sends.some((x) => !periodsOk(x.periods)) || hs.some((h) => !isFinite(h) || h < 0 || h > MAX_SEND_H);
   if (bad && (res.status === 'ok' || res.status === 'abnormal')) {
-    return Object.assign(res, { status: 'abnormal', tag: '時數要核對', note: '算出來的時段或時數不合理', chk: '', hours: null, payload: null, actions: [{ id: 'full', label: '到完整頁核對', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
+    return Object.assign(res, { status: 'abnormal', tag: '時數要核對', note: '算出來的時段或時數不合理', chk: '', hours: null, payload: null, actions: [{ id: 'full', label: '手動修改', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
   }
   // 正職上班日滿 8 小時（2026-11-13 Eason）：任何一顆按鈕送出的上班＋出差＋假單不滿 8 小時 → 只能到完整頁（要補假單或跨店相加）
   if (res.status === 'ok' || res.status === 'abnormal') {
@@ -502,7 +502,7 @@ export function classify(inp) {
     if (gaps.length) {
       const g = gaps[0];
       return Object.assign(res, { over: false, status: 'abnormal', tag: '正職未滿 8 小時', note: '上班 ' + g.work + '＋出差 ' + g.trip + '＋假單 ' + g.leave + '＝' + g.sum + ' 小時，還差 ' + g.gap + ' 小時，要有已核准的假單或補休單', chk: '', hours: null, payload: null,
-        actions: [{ id: 'full', label: '到完整頁核對', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
+        actions: [{ id: 'full', label: '手動修改', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
     }
   }
   if ((res.status === 'ok' || res.status === 'abnormal') && hs.some((h) => C.overDay(h))) res.over = true;      // 超過單日 10 小時：照實核定、卡片標紅（需求 2；2026-11-15）

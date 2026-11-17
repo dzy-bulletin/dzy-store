@@ -164,7 +164,7 @@ export function renderBoard(ctx) {
     <div class="row sc-acts">
       ${locked || !canLock ? '' : `<button type="button" class="btn" id="scAuto"${ck.blockers.length ? ' disabled' : ''}>${ck.blockers.length ? `自動排班（先完成：${esc(ck.blockers.join('、'))}）` : '自動排班'}</button><label class="sc-chk"><input type="checkbox" id="scAll"> 連手動改過的也重排</label><button type="button" class="btn ghost" id="scClear">清空這一期</button>`}
       ${importButtons(locked, canLock)}
-      ${canLock ? `<button type="button" class="btn ${locked ? 'ghost' : ''}" id="scLock">${locked ? '解除鎖定' : '鎖定並發布'}</button>` : ''}
+      ${canLock ? `<button type="button" class="btn ${locked ? 'ghost' : ''}" id="scLock" title="${locked ? '解除後同仁在 LINE 會暫時看不到這一期班表，改好要再確定一次' : '確定後同仁在 LINE 看得到這一期班表；要再改得先解除鎖定'}">${locked ? '解除鎖定' : '確定班表並傳給同仁'}</button>` : ''}
       ${canLock && pub && (pub.status === 'failed' || pub.status === 'pending') ? '<button type="button" class="btn ghost" id="scResend">立即重送</button>' : ''}
       <button type="button" class="btn ghost" id="scPdf">匯出 PDF</button>
       ${stList.length ? stToggleHtml('scStToggle') : ''}
@@ -226,7 +226,7 @@ export function renderBoard(ctx) {
     const legend = legendSh.length || legendExt.length ? `<div class="sc-legend" id="scLegend">${legendSh.map((s) => `<span><b>${esc(shiftCode(s.name))}</b>：${esc(timeText(s))}</span>`).join('')}${legendExt.map((s) => `<span class="sc-legx"><b>${esc(extCode(s))}</b>：${esc(s.name)} ${esc(timeText(s))}</span>`).join('')}</div>` : '';
     body = `<div class="card sc-gridcard"><div class="scroll"><table class="sc-grid">
       <thead><tr><th class="sc-name">同仁</th>${th}<th class="sc-offh">休假<small>天數</small></th><th class="sc-hrh">排班<small>時數</small></th></tr></thead>
-      <tbody>${noteRows}${rows}${supRows}${cnt}${stRows}</tbody></table></div>${legend}</div>`;
+      <tbody>${noteRows}${rows}${supRows}${cnt}${stRows}</tbody></table></div>${legend}<p class="hint">例假：一週一天，不能排班。休息日：可以排加班（算休息日加班）。排休：店裡排的休假。</p></div>`;
   } else {
     const d = S.day, hol = D.holidays.days[d];
     const chips = D.dates.map((x) => `<button type="button" class="sc-daychip${x === d ? ' on' : ''}${isWe(x) ? ' we' : ''}${(byDay[x] || []).length ? ' warn' : ''}" data-day="${x}">${md(x)}<small>${WD[weekday(x)]}</small></button>`).join('');
@@ -292,7 +292,7 @@ export function renderBoard(ctx) {
       // 休息日加班只能改回休息日或換一個休息日出勤的班（伺服器同樣擋，Eason 2026-10-11）
       const opts = c.day_type === 'H' && c.shift_id ? otOpts + xH + '<option value="H">休息日</option>'
         : activeShifts.map((s) => `<option value="S:${esc(s.id)}">${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('') + xW + otOpts + xH
-        + '<option value="R">例假</option><option value="H">休息日</option>' + LEAVES.map(([k, l]) => `<option value="L:${k}">${l}</option>`).join('')
+        + '<option value="R">例假（一週一天，不能排班）</option><option value="H">休息日（可以加班）</option>' + LEAVES.map(([k, l]) => `<option value="L:${k}">${l}</option>`).join('')
         + (guoOk ? '<option value="L:國">國定假日假</option>' : '') + '<option value="CLEAR">清空</option>';
       // 第二班（2026-11-07 Eason：同一天可再選一個既有班別；只能手動加，自動排班不會排）：第一格選了班別才能選
       const firstIsShift = cur.startsWith('S:');
@@ -437,7 +437,7 @@ export function renderBoard(ctx) {
       cells.push({ emp_id: st.emp_id, date: d });
     }
     if (!cells.length) { say('這一期已經是空白的'); return rerender(); }
-    if (!(await confirmBox(`把 ${S.period} 這一期全部清空？請假（包含在「指定與需求」頁點的特休、事假）和休息日加班也會一起清掉，指定休假會保留；清完再按「自動排班」或自己排。`, '全部清空'))) return;
+    if (!(await confirmBox(`把 ${S.period} 這一期全部清空？請假（包含在「指定休假和人力需求」頁點的特休、事假）和休息日加班也會一起清掉，指定休假會保留；清完再按「自動排班」或自己排。`, '全部清空'))) return;
     try {
       if (ot.length) await mutate('saveDays', { cells: ot.map((c) => Object.assign({ day_type: 'H' }, c)) });
       await mutate('saveDays', { cells: cells.map((c) => Object.assign({ clear: true }, c)), reason: 'clearPeriod' });

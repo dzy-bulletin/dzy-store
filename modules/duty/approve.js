@@ -267,7 +267,7 @@ export function returnsPanel(retEl, onPick, onCancel, live) {
     if (!items.length) return;
     const card = h('div', 'du-pa du-hrret-list');
     card.append(h('div', 'du-pa-title', '人資退回 ' + items.length + ' 筆，請重新核定'));
-    card.append(h('div', 'du-pa-sub', '點名字跳到那天，核對後重新送出核定就結案；原本的核定在重核前照舊算'));
+    card.append(h('div', 'du-pa-sub', '點名字跳到那天，核對後重新送出核定就結案；原本的核定在重新核定前照舊算'));
     items.slice().sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))).forEach(it => {
       const row = h('div', 'du-pa-group');
       row.append(h('div', 'du-pa-date', C.weekdayLabel(it.date)));
@@ -333,7 +333,7 @@ function renderEmployees(box, date, employees, failed, retry) {
   const recount = () => {      // 送出前檢查的結果也算進來：「送出會被擋 N 人・可以送出 N 人」
     const pend = [].filter.call(list.querySelectorAll('.du-card'), c => c.__pending && !c.__absent);
     const bad = pend.filter(c => c.__check && c.__check.ok === false).length, good = pend.filter(c => c.__check && c.__check.ok === true).length;
-    count.innerHTML = '共 ' + employees.length + ' 人・待核定 <b>' + pend.length + '</b> 人' + (good ? '・<b class="du-cok">核定通過 ' + good + ' 人</b>' : '') + (bad ? '・<b class="du-cbad">未符合 ' + bad + ' 人</b>' : '');
+    count.innerHTML = '共 ' + employees.length + ' 人・待核定 <b>' + pend.length + '</b> 人' + (good ? '・<b class="du-cok">核定通過 ' + good + ' 人</b>' : '') + (bad ? '・<b class="du-cbad">還不能核定 ' + bad + ' 人</b>' : '');
   };
   recount();
   list.addEventListener('emp-checked', recount);
@@ -438,10 +438,10 @@ function buildCard(emp, date) {
     const dupIgn = (emp.approved && emp.approved.dup_ignore) || [];  // 已認定重複的卡：打卡段已由打卡後端拿掉，這裡註明是哪幾張（2026-11-06）
     const dupNote = dupIgn.length ? '（' + dupIgn.map(t => String(t).slice(11, 16)).sort().join('、') + ' 重複）' : '';
     const capSys = emp.cap_sys || [];                             // 單日滿 10 小時系統代打的下班卡（2026-11-14，打卡 Cap10.gs）
-    const capNote = capSys.length ? '（' + capSys.join('、') + ' 系統代打）' : '';
+    const capNote = capSys.length ? '（' + capSys.join('、') + ' 系統自動補的卡）' : '';
     punchEl.textContent = '打卡：' + emp.segments.map(C.segmentText).join('、') + dupNote + capNote + '　' + ref;
-    if (capSys.length) nameEl.append(h('span', 'du-capsys', '滿 10 小時・系統代打下班', { title: '這天的下班卡是系統在滿 10 小時時代打的，請照同仁實際離開的時間核定' }));
-  } else if (emp.attempts > 0) punchEl.textContent = '今天沒有入帳的打卡（有 ' + emp.attempts + ' 筆未入帳嘗試）';
+    if (capSys.length) nameEl.append(h('span', 'du-capsys', '滿 10 小時・系統自動打下班卡', { title: '這天的下班卡是系統在滿 10 小時時代打的，請照同仁實際離開的時間核定' }));
+  } else if (emp.attempts > 0) punchEl.textContent = '今天沒有打卡成功（試了 ' + emp.attempts + ' 次沒成功）';
   else punchEl.textContent = '今天沒有打卡紀錄';
   const mini = h('span', 'du-mini'), chev = h('span', 'du-chev', '▼');
   const head = h('div', 'du-head', null, { role: 'button', tabindex: '0', 'aria-expanded': 'false' });
@@ -464,10 +464,10 @@ function buildCard(emp, date) {
   // ---- 人資退回待重核（2026-11-13）：店長看到理由；人資（return_ok）可以退回已核定的這天 ----
   if (emp.hr_return) {
     nameEl.append(h('span', 'du-hrret-tag', '人資退回'));
-    body.append(h('div', 'du-hrret', '人資退回待重核：' + emp.hr_return.reason + '（' + emp.hr_return.by_name + '）。請核對後重新送出核定，送出就結案。'));
+    body.append(h('div', 'du-hrret', '人資退回，要重新核定：' + emp.hr_return.reason + '（' + emp.hr_return.by_name + '）。請核對後重新送出核定，送出就結案。'));
   } else if (emp.return_ok) {
     const rb = h('div', 'du-hrret-box');
-    const btn = h('button', 'btn sm ghost du-hrretbtn', '退回給店長重核', { type: 'button' });
+    const btn = h('button', 'btn sm ghost du-hrretbtn', '退回給店長重新核定', { type: 'button' });
     btn.onclick = () => {
       btn.hidden = true;
       const inp = h('input', 'du-voidreason', null, { type: 'text', maxlength: '200', placeholder: '退回理由（必填，店長看得到，同仁看不到）', 'aria-label': '退回理由' });
@@ -479,7 +479,7 @@ function buildCard(emp, date) {
         go.disabled = true; msg.textContent = '送出中…';
         call('hr_return_create', { store: emp.store, emp_id: emp.emp_id, date, reason: why }).then(r => {
           delete S.dayCache[date];
-          rb.replaceChildren(h('div', 'du-hrret', '已退回給店長重核：' + why + (r && r.lock_unknown ? '（沒辦法確認這個月薪資有沒有鎖定，請自己確認）' : '')));
+          rb.replaceChildren(h('div', 'du-hrret', '已退回給店長重新核定：' + why + (r && r.lock_unknown ? '（沒辦法確認這個月薪資有沒有鎖定，請自己確認）' : '')));
           card.dispatchEvent(new CustomEvent('hr-returned', { bubbles: true }));
         }, e => { go.disabled = false; msg.textContent = '✕ ' + (e.message || '退回失敗'); });
       };
@@ -493,14 +493,14 @@ function buildCard(emp, date) {
   // ---- 防呆：有打卡段還沒配對（有上班沒下班），現在核定會核不到那段（manager.html:1003–1012）----
   const dupGroups = emp.dup_groups || [];                     // 重複打卡（2026-11-06）：重複上班卡組前面那張配不到下班卡不是「還在上班」
   const hasOpenSeg = C.hasOpenSegExceptDup(emp.segments, dupGroups);
-  if (hasOpenSeg) body.append(h('div', 'du-openwarn', '⚠ 有打卡段還沒打下班卡（可能還在上班或跨夜還沒打完），現在核定會核不到這段、且之後補打卡也不會自動更新。請同仁立即打卡避免忘刷卡。'));
+  if (hasOpenSeg) body.append(h('div', 'du-openwarn', '⚠ 有打卡段還沒打下班卡（可能還在上班或跨夜還沒打完），現在核定會核不到這段、且之後補打卡也不會自動更新。請同仁立即打卡避免忘打卡。'));
 
   // ---- 重複打卡：同一天同型兩張卡相隔 60 分鐘內，店長選以哪張為準（2026-11-06 Eason）。不選＝照系統原判定（算 1 次忘刷），不擋送出 ----
   const dupPicks = C.dupInitialPicks(dupGroups, emp.approved && emp.approved.dup_ignore);
   dupGroups.forEach((g, gi) => {
     const box = h('div', 'du-dupbox');
     box.append(h('div', 'du-duptitle', '⧉ ' + C.dupGroupTitle(g)),
-      (() => { const t = h('div', 'du-duphint'); t.append(tipText('重複打卡就選一張為準', '另一張不算忘刷卡，遲到也照選的那張比。不選＝照系統原判定（算 1 次忘刷）。')); return t; })());
+      (() => { const t = h('div', 'du-duphint'); t.append(tipText('重複打卡就選一張為準', '另一張不算忘打卡，遲到也照選的那張比。不選＝照系統原判定（算 1 次忘打卡）。')); return t; })());
     const opts = h('div', 'du-dupopts');
     const btns = [{ ts: '', label: '不處理' }].concat(g.cards.map(c => ({ ts: c.ts, label: '以 ' + c.hm + ' 為準' }))).map(o => {
       const b = h('button', 'btn sm ghost du-dupopt', o.label, { type: 'button', 'data-ts': o.ts });
@@ -723,8 +723,8 @@ function buildCard(emp, date) {
     const ck = card.__check;
     if (!ck) { setBadge(null, initLeaves); setEdit(true); card.dispatchEvent(new CustomEvent('emp-checked', { bubbles: true })); return; }
     if (e2eNoCore()) {      // 示範模式舊測試：只標右上角、照舊可以送出
-      mini.className = 'du-mini ' + (ck.ok ? 'ok' : 'bad'); mini.textContent = ck.ok ? '核定通過' : '未符合';
-      if (!ck.ok) { preBox.className = 'du-pre bad'; preBox.hidden = false; preBox.append(h('b', null, '未符合規定：' + String(ck.message || ck.error || '').replace(/^這天還不能核定：/, ''))); }
+      mini.className = 'du-mini ' + (ck.ok ? 'ok' : 'bad'); mini.textContent = ck.ok ? '核定通過' : '還不能核定';
+      if (!ck.ok) { preBox.className = 'du-pre bad'; preBox.hidden = false; preBox.append(h('b', null, '還不能核定：' + String(ck.message || ck.error || '').replace(/^這天還不能核定：/, ''))); }
       card.dispatchEvent(new CustomEvent('emp-checked', { bubbles: true })); return;
     }
     const pr = card.__prop;
@@ -734,19 +734,19 @@ function buildCard(emp, date) {
     const overBlock = ck.ok && pr && pr.overMin >= OVER_BLOCK_MIN;
     if (overBlock) {
       const noLine = false, canProxy = proxyOpen(date);
-      mini.className = 'du-mini bad'; mini.textContent = '未符合';
+      mini.className = 'du-mini bad'; mini.textContent = '還不能核定';
       verdict.className = 'du-verdict gray du-verdict-over';
-      verdict.append(h('div', 'du-verdict-t', '未符合規定：要補加班單'));
+      verdict.append(h('div', 'du-verdict-t', '還不能核定：要補加班單'));
       verdict.append(h('div', 'du-needk', '要補齊：'));
       const ul = h('ul', 'du-needs'), li = h('li');
       li.append(h('span', 'du-need-t', '☐ 加班單 ' + otSuggestText(pr.over, pr.overMin)));
-      if (canProxy) { const b = h('button', 'btn sm ghost du-preproxy', '替他代開', { type: 'button' }); b.onclick = () => proxyForm(date, noLine, '打卡比班表多，沒有加班單'); li.append(b); }
+      if (canProxy) { const b = h('button', 'btn sm ghost du-preproxy', '幫同仁開單', { type: 'button' }); b.onclick = () => proxyForm(date, noLine, '打卡比班表多，沒有加班單'); li.append(b); }
       ul.append(li); verdict.append(ul);
-      verdict.append(h('div', 'du-verdict-n', (canProxy ? '' : '有加班：請同仁在 LINE「加班請假」補申請，核准後這裡會自動重算。') + '沒有加班（例：提早到、晚打卡）：按「自己調」確認後照班表送出 ' + ck.approved_hours + ' 小時，多出的時段不算。'));
+      verdict.append(h('div', 'du-verdict-n', (canProxy ? '' : '有加班：請同仁在 LINE「加班請假」補申請，核准後這裡會自動重算。') + '沒有加班（例：提早到、晚打卡）：按「手動改時段」確認後照班表送出 ' + ck.approved_hours + ' 小時，多出的時段不算。'));
       const acts = h('div', 'du-pre-acts');
       // 只留一條路（2026-11-15 Eason：同一天兩顆核定鈕會混淆）：沒按「自己調」＝灰色「補齊後才能按」；按了「自己調」＝灰色收起，
       // 下面送出鈕改成「確認沒加班，照班表核定 N 小時」（送出前照舊確認框）
-      const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '自己調', { type: 'button' });
+      const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '手動改時段', { type: 'button' });
       adj.onclick = () => { setEdit(!editOpen); card.__setCheck(card.__check); };
       if (!editOpen) { const go = h('button', 'btn du-verdict-go', '核定通過（補齊後才能按）', { type: 'button' }); go.disabled = true; acts.append(go); }
       acts.append(adj); verdict.append(acts);
@@ -755,14 +755,14 @@ function buildCard(emp, date) {
         submit.textContent = '確認沒加班，照班表核定 ' + ck.approved_hours + ' 小時';
         // 多做的時段不認列要選理由（2026-11-15 開工確認第 2 題）：理由寫進核定紀錄（diff_reason），不通知同仁
         const nc = h('div', 'du-notcount');
-        nc.append(h('div', 'du-needk', '不認列的理由（必選，會留在核定紀錄）'));
-        const sel = h('select', 'du-nc-sel', null, { 'aria-label': '不認列的理由' });
+        nc.append(h('div', 'du-needk', '不算工時的原因（必選，會留在核定紀錄）'));
+        const sel = h('select', 'du-nc-sel', null, { 'aria-label': '不算工時的原因' });
         ['', ...NOT_COUNT_REASONS, '其他'].forEach((t) => sel.append(h('option', null, t || '請選一個', { value: t })));
         const other = h('input', 'du-nc-other', null, { type: 'text', maxlength: '80', placeholder: '其他理由（必填）', 'aria-label': '其他理由' });
         const cur = String(diffIn.value || '').replace(/^不認列：/, '');
         if (/^不認列：/.test(diffIn.value || '')) { if (NOT_COUNT_REASONS.includes(cur)) sel.value = cur; else { sel.value = '其他'; other.value = cur; } }
         other.hidden = sel.value !== '其他';
-        const put = () => { other.hidden = sel.value !== '其他'; const t = sel.value === '其他' ? other.value.trim() : sel.value; card.__notCount = t; diffIn.value = t ? '不認列：' + t : ''; };
+        const put = () => { other.hidden = sel.value !== '其他'; const t = sel.value === '其他' ? other.value.trim() : sel.value; card.__notCount = t; diffIn.value = t ? '不算工時：' + t : ''; };
         sel.onchange = put; other.oninput = put; put();
         nc.append(sel, other);
         verdict.append(nc);
@@ -775,8 +775,8 @@ function buildCard(emp, date) {
       const acts = h('div', 'du-pre-acts');
       const go = h('button', 'btn du-verdict-go', '核定 ' + ck.approved_hours + ' 小時', { type: 'button' });
       go.onclick = () => { card.__noConfirm = true; submit.onclick(); };
-      const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '自己調', { type: 'button' });
-      adj.onclick = () => { setEdit(!editOpen); adj.textContent = editOpen ? '收起' : '自己調'; };
+      const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '手動改時段', { type: 'button' });
+      adj.onclick = () => { setEdit(!editOpen); adj.textContent = editOpen ? '收起' : '手動改時段'; };
       acts.append(go, adj); verdict.append(acts);
       setEdit(editOpen);
     } else if (ck.error === 'need_diff_reason') {
@@ -804,8 +804,8 @@ function buildCard(emp, date) {
       verdict.append(box);
       const acts = h('div', 'du-pre-acts');
       const go = h('button', 'btn du-verdict-go', '核定（每張卡選好原因後）', { type: 'button' }); go.disabled = true;
-      const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '自己調', { type: 'button' });
-      adj.onclick = () => { setEdit(!editOpen); adj.textContent = editOpen ? '收起' : '自己調'; };
+      const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '手動改時段', { type: 'button' });
+      adj.onclick = () => { setEdit(!editOpen); adj.textContent = editOpen ? '收起' : '手動改時段'; };
       acts.append(go, adj); verdict.append(acts);
       submit.disabled = true; submit.title = '每張卡選好原因才能送出';
       setEdit(editOpen);
@@ -813,9 +813,9 @@ function buildCard(emp, date) {
       const msg = String(ck.message || CHECK_ERR[ck.error] || ck.error || '打卡系統不接受');
       const probs = Array.isArray(ck.probs) ? ck.probs : [];
       const payLock = ck.error === 'pay_locked';      // 薪資鎖月（2026-11-15）：不是缺單，寫清楚是鎖月、要到薪資頁解鎖
-      mini.className = 'du-mini bad'; mini.textContent = '未符合';
+      mini.className = 'du-mini bad'; mini.textContent = '還不能核定';
       verdict.className = 'du-verdict gray';
-      verdict.append(h('div', 'du-verdict-t', payLock ? '這個月薪資已鎖定，不能核定' : '未符合規定' + (ps ? '（照打卡＋單算：' + ps + '）' : '')));
+      verdict.append(h('div', 'du-verdict-t', payLock ? '這個月薪資已鎖定，不能核定' : '還不能核定' + (ps ? '（照打卡＋單算：' + ps + '）' : '')));
       if (probs.length) {
         const docs = probs.filter(DOC_RULES), fixes = probs.filter(p => !DOC_RULES(p));
         const noLine = /沒綁 LINE/.test(msg), canProxy = noLine || proxyOpen(date);
@@ -824,7 +824,7 @@ function buildCard(emp, date) {
           const ul = h('ul', 'du-needs');
           docs.forEach(p => {
             const li = h('li'); li.append(h('span', 'du-need-t', '☐ ' + NEED_LABEL(p, ck.need)));
-            if (canProxy) { const b = h('button', 'btn sm ghost du-preproxy', '替他代開', { type: 'button' }); b.onclick = () => proxyForm(date, noLine, msg); li.append(b); }
+            if (canProxy) { const b = h('button', 'btn sm ghost du-preproxy', '幫同仁開單', { type: 'button' }); b.onclick = () => proxyForm(date, noLine, msg); li.append(b); }
             ul.append(li);
           });
           verdict.append(ul);
@@ -839,10 +839,10 @@ function buildCard(emp, date) {
       } else verdict.append(h('div', 'du-verdict-n', msg.replace(/^這天還不能核定：/, '')));
       const acts = h('div', 'du-pre-acts');
       const go = h('button', 'btn du-verdict-go', payLock ? '核定（解鎖後才能按）' : '核定通過（補齊後才能按）', { type: 'button' }); go.disabled = true;
-      const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '自己調', { type: 'button' });
-      adj.onclick = () => { setEdit(!editOpen); adj.textContent = editOpen ? '收起' : '自己調'; };
+      const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '手動改時段', { type: 'button' });
+      adj.onclick = () => { setEdit(!editOpen); adj.textContent = editOpen ? '收起' : '手動改時段'; };
       acts.append(go, adj); verdict.append(acts);
-      submit.disabled = true; submit.title = payLock ? '這個月薪資已鎖定：先到薪資頁解鎖才能送出' : '未符合規定：補齊後才能送出';      // Eason 定：灰底不能按（自己調也一樣）
+      submit.disabled = true; submit.title = payLock ? '這個月薪資已鎖定：先到薪資頁解鎖才能送出' : '還不能核定：補齊後才能送出';      // Eason 定：灰底不能按（自己調也一樣）
       setEdit(editOpen);
     }
     card.dispatchEvent(new CustomEvent('emp-checked', { bubbles: true }));
@@ -871,7 +871,7 @@ function buildCard(emp, date) {
     const pl = h('input', 'du-proxy-pl', null, { type: 'text', maxlength: '40', placeholder: '其他地點（例如：廠商）', 'aria-label': '其他出差地點' });
     const la = h('span', 'du-proxy-la'), lb = h('span', 'du-proxy-lb');
     const why = h('input', 'du-proxy-why', null, { type: 'text', maxlength: '100', placeholder: '原因（必填）' });
-    const go = h('button', 'btn', '送出代開（送總監層級審核）', { type: 'button' });
+    const go = h('button', 'btn', '送出（幫同仁開單，等總監審核）', { type: 'button' });
     const sync = () => {
       const k = kind.value, ot = k === 'ot', miss = k === 'miss', m = mt.value;
       mt.hidden = !miss; lt.hidden = k !== 'leave'; hr.hidden = k !== 'leave' && k !== 'trip'; plPick.hidden = k !== 'trip'; pl.hidden = k !== 'trip' || plPick.value !== TRIP_OTHER;
@@ -898,15 +898,15 @@ function buildCard(emp, date) {
       if (!a.hidden) p.start = a.value;
       if (!b.hidden) p.end = b.value;
       if ((!a.hidden && !a.value) || (!b.hidden && !b.value)) { say('bad', '✕ 請填時間'); return; }
-      if (!p.reason) { say('bad', '✕ 代開要寫原因'); return; }
+      if (!p.reason) { say('bad', '✕ 幫同仁開單要寫原因'); return; }
       go.disabled = true; go.textContent = '送出中…';
       try {
         const res = await call('mgr_req_proxy', p);
-        say('ok', '✓ 已代開：' + res.summary + '。等總監層級在「申請審核」核准後，再回來送出核定。還缺別張單的話，再按一次「送出核定」就能繼續代開。' + (k === 'leave' ? '需要附證明的假別，請同仁在 LINE「我的申請」補附。' : ''));
+        say('ok', '✓ 已幫同仁開單：' + res.summary + '。等總監在「申請審核」核准後，再回來送出核定。還缺別張單的話，再按一次「送出核定」就能繼續幫同仁開單。' + (k === 'leave' ? '需要附證明的假別，請同仁在 LINE「我的申請」補附。' : ''));
         proxyBox.remove(); proxyBox = null;
-      } catch (e) { say('bad', '✕ 代開失敗：' + e.message); go.disabled = false; go.textContent = '送出代開（送總監層級審核）'; }
+      } catch (e) { say('bad', '✕ 開單失敗：' + e.message); go.disabled = false; go.textContent = '送出（幫同仁開單，等總監審核）'; }
     };
-    proxyBox.append(h('div', 'du-proxy-lead', (noLine ? '這位同仁沒綁 LINE，自己補不了單。' : '這天已超過 ' + PROXY_AFTER_DAYS + ' 天，同仁自己補不了單。') + '可以替同仁代開，代開的單要由總監層級（品牌總監／廚藝總監；總部是人資主管）核准。'),
+    proxyBox.append(h('div', 'du-proxy-lead', (noLine ? '這位同仁沒綁 LINE，自己補不了單。' : '這天已超過 ' + PROXY_AFTER_DAYS + ' 天，同仁自己補不了單。') + '可以幫同仁開單，幫同仁開的單要由總監（品牌總監／廚藝總監；總部是人資主管）核准。'),
       h('div', 'du-proxy-row', null), why, go);
     proxyBox.children[1].append(kind, mt, lt, hr, plPick, pl, la, a, lb, b);
     result.after(proxyBox);
@@ -959,7 +959,7 @@ function buildCard(emp, date) {
   }
 
   submit.onclick = async () => {
-    if (/^確認沒加班/.test(submit.textContent) && !card.__notCount) return say('bad', '✕ 請先選不認列的理由（會留在核定紀錄）');
+    if (/^確認沒加班/.test(submit.textContent) && !card.__notCount) return say('bad', '✕ 請先選不算工時的原因（會留在核定紀錄）');
     // 硬擋（Eason 2026-08-22「硬擋，不給送出」，manager.html:1296–1320）：額度用完、期限過了的假別不給送出。
     // 下拉的 disabled 只擋滑鼠，程式指定仍設得進去，所以送出前用同一份資料再判一次；原本就選著這個假別的既有紀錄放行，否則已超額的人連重送核定都做不了
     const lv = leaveList();
@@ -995,7 +995,7 @@ function buildCard(emp, date) {
       } else if (!await confirmBox('整天請假：' + emp.name + '\n' + lvText + '\n核定時數 0 小時（整天沒上班）\n\n確定送出?', '送出')) return;
     } else {                                        // 送出前把總時數與提醒攤開給主管看過（manager.html:1367–1415）
       const { segs, totalH, warnings } = C.analyzePeriods(periods), t2 = tripH();
-      if (hasOpenSeg) warnings.push('・這天有打卡段還沒打下班卡，現在核定可能會核不到那一段，且之後補打卡不會自動重算——請同仁立即打卡避免忘刷卡。');
+      if (hasOpenSeg) warnings.push('・這天有打卡段還沒打下班卡，現在核定可能會核不到那一段，且之後補打卡不會自動重算——請同仁立即打卡避免忘打卡。');
       let msg = '即將核定 ' + emp.name + '：\n' + segs.map(s => s.start + '–' + s.end).join('、')
         + (t2 ? '\n上班 ' + totalH + ' 小時＋出差 ' + t2 + ' 小時\n核定時數共 ' + C.round2(totalH + t2) + ' 小時' : '\n核定時數共 ' + totalH + ' 小時');
       if (C.overDay(totalH + t2)) msg += '\n⚠ 超過一天 ' + C.DAY_MAX_H + ' 小時上限（照實核定，會列進每日通知）';
@@ -1100,10 +1100,10 @@ function buildCard(emp, date) {
       if (r.attach_id) acts.append(proofButton(r, row));
       else if (r.has_attach) row.append(h('div', 'du-reqproof', '📎 有附證明（打卡系統還沒更新，暫時打不開）'));
       if (canVoid) {
-        const vb = h('button', 'btn sm ghost du-reqvoid', '作廢', { type: 'button' });
+        const vb = h('button', 'btn sm ghost du-reqvoid', '作廢', { type: 'button', title: '作廢＝這張單不算' });
         // 伺服器有給 void_ok（個人登入）就照它；沒有（門市登入、舊伺服器）就保守：值班主管本人與自己的單停用（2026-10-29 Fable 審查第 1 條）
-        if (r.void_ok === false && readOnly && !canWriteRow('req', emp.emp_id, emp.store)) { vb.disabled = true; vb.textContent = '不能作廢'; vb.title = '自己的單、主管代開的單不能作廢'; }      // 考勤作廢的唯讀者（2026-11-13 審查 7）
-        else if (r.void_ok === false || (r.void_ok === undefined && (r.upper === true || r.self === true))) { vb.disabled = true; vb.textContent = '送上層處理'; vb.title = '值班主管本人的申請，由上層主管在申請審核處理'; }
+        if (r.void_ok === false && readOnly && !canWriteRow('req', emp.emp_id, emp.store)) { vb.disabled = true; vb.textContent = '不能作廢'; vb.title = '自己的單、主管幫同仁開的單不能作廢'; }      // 考勤作廢的唯讀者（2026-11-13 審查 7）
+        else if (r.void_ok === false || (r.void_ok === undefined && (r.upper === true || r.self === true))) { vb.disabled = true; vb.textContent = '交給上一層主管處理'; vb.title = '值班主管本人的申請，由上層主管在申請審核處理'; }
         else vb.onclick = () => askVoid(r, vb, row);
         acts.append(vb);
       }

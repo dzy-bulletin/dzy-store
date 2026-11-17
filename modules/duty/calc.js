@@ -187,7 +187,7 @@ export const contBreakText = w => '連續上班 ' + w.h + ' 小時沒休息 30 �
 // 申請的黃字提醒（2026-11-06，打卡 Requests.gs reqWarns_／miss_n）：舊打卡後端沒有這兩欄＝不顯示
 export function reqWarnLines(it) {
   const out = (it && Array.isArray(it.warns) ? it.warns : []).slice();
-  if (it && it.kind === 'miss' && it.miss_n) out.unshift('本月第 ' + it.miss_n + ' 天忘刷' + (it.miss_n >= 3 ? '（第 3 天起出勤紀錄表會標記）' : ''));
+  if (it && it.kind === 'miss' && it.miss_n) out.unshift('本月第 ' + it.miss_n + ' 天忘打卡' + (it.miss_n >= 3 ? '（第 3 天起出勤紀錄表會標記）' : ''));
   return out;
 }
 
@@ -376,7 +376,7 @@ export function compBalanceNote(opts, it) {
   const def = leaveDefOf(opts, '補休'), q = def ? quotaOf(opts, String(it.emp_id), def.code) : null;
   if (!q || !q.comp) return '';
   if (!q.allowed) return '\n補休：計時同仁沒有補休';
-  return '\n本月補休帳：加班 ' + (Number(q.ot_h) || 0) + ' − 補休 ' + (Number(q.used_h) || 0) + ' ＝ ' + compBalWord(q)
+  return '\n本月補休明細：加班 ' + (Number(q.ot_h) || 0) + ' − 補休 ' + (Number(q.used_h) || 0) + ' ＝ ' + compBalWord(q)
     + (Number(q.balance_h) < 0 ? '（當月要用加班補平）' : '');
 }
 
@@ -513,7 +513,7 @@ export function dupConfirmLine(groups, picks) {
   (groups || []).forEach((g, i) => {
     const k = (picks || [])[i]; if (!k) return;
     const keep = g.cards.find(c => c.ts === k), rest = g.cards.filter(c => c.ts !== k).map(c => c.hm);
-    if (keep) parts.push('以 ' + keep.hm + ' 為準（' + rest.join('、') + ' 不算忘刷）');
+    if (keep) parts.push('以 ' + keep.hm + ' 為準（' + rest.join('、') + ' 不算忘打卡）');
   });
   return parts.length ? '重複打卡：' + parts.join('；') : '';
 }

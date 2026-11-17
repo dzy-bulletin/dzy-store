@@ -230,7 +230,7 @@ export function checkPeriod(ctx) {
     if (inPeriod.some(d => !termAt(ctx.terms, e, d))) { add('S1', 'block', e, start, `${who} 還沒設定正職或計時`); continue; }
     const fullPeriod = inPeriod.length === 28;
     const kinds = new Set(inPeriod.map(d => (termAt(ctx.terms, e, d) || {}).kind));
-    if (kinds.size > 1) { add('S2', 'block', e, start, `${who} 這期中間從${t0 && t0.kind === 'pt' ? '計時' : '正職'}改了身分，身分變更請從某一期的第一天開始生效`); continue; }
+    if (kinds.size > 1) { add('S2', 'block', e, start, `${who} 這期中間從${t0 && t0.kind === 'pt' ? '兼職（計時）' : '正職'}改了身分，身分變更請從某一期的第一天開始生效`); continue; }
     const mins = minutesOf(ctx, e, dates);
 
     // 合法組合、到職離職、班別存在、日別沒填（沒排的天數每人只列一條，從第一天標起）
@@ -391,10 +391,10 @@ export function checkPeriod(ctx) {
 
     // 備援這期被自動叫來補的日子（手動排、指定上班／班別的不算）：放進提醒清單，重新整理也看得到（2026-10-28）
     const bkDays = dates.filter(d => mine[d] && mine[d].shift_id && backupAt(ctx.terms, e, d) && mine[d].source !== 'manual' && mine[d].source !== 'pin' && ((ctx.pins && ctx.pins[e] || {})[d] || {}).kind !== 'work');   // 手動排、指定的不算補位
-    if (bkDays.length) add('B1', 'info', e, null, `備援 ${who} 這期排了 ${bkDays.length} 天（${bkDays.map(md).join('、')}），是其他同仁排不開時補的`);
+    if (bkDays.length) add('B1', 'info', e, null, `候補 ${who} 這期排了 ${bkDays.length} 天（${bkDays.map(md).join('、')}），是其他同仁排不開時補的`);
   }
 
-  if (noPrior.length) add('N0', 'info', null, null, `${noPrior.length === ctx.staff.length ? '全部同仁' : noPrior.join('、')}沒有前期出勤資料，連續上班天數與換班間隔從本期第 1 天開始算`);
+  if (noPrior.length) add('N0', 'info', null, null, `${noPrior.length === ctx.staff.length ? '全部同仁' : noPrior.join('、')}沒有前期出勤資料，連續上班天數與兩班之間的休息時間從本期第 1 天開始算`);
 
   // 人力需求、不同班配對
   for (const d of dates) {

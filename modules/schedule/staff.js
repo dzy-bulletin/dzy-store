@@ -33,9 +33,9 @@ export function renderStaff(ctx) {
     const lv = st.hire_date ? leaveOf(t, st.hire_date, D.today) : null;
     const lvTxt = !lv ? '填報到日期後顯示' : lv.days == null ? `${lv.hours} 小時（照工時比例）` : `${lv.days} 天`;
     const allowed = t.allowed_shifts || [], allowedHol = t.allowed_shifts_hol || [];
-    const termLabel = (x) => `${x.from_date <= '2026-10-04' ? '一開始' : x.from_date + ' 起'}：${x.kind === 'ft' ? '正職' : '計時'}${x.kind === 'pt' && x.backup ? '・備援' : ''}${(x.allowed_shifts || []).length ? '・平日限班' : ''}${(x.allowed_shifts_hol || []).length ? '・假日限班' : ''}`;
+    const termLabel = (x) => `${x.from_date <= '2026-10-04' ? '一開始' : x.from_date + ' 起'}：${x.kind === 'ft' ? '正職' : '兼職（計時）'}${x.kind === 'pt' && x.backup ? '・候補（排不開才排）' : ''}${(x.allowed_shifts || []).length ? '・平日只上指定班別' : ''}${(x.allowed_shifts_hol || []).length ? '・假日只上指定班別' : ''}`;
     const hist = list.length ? `<div class="fld"><label>身分設定（依日期生效，選一筆來看或修改）</label><div class="row"><select class="f-term">${list.map((x) => `<option value="${esc(x.from_date)}" ${x.from_date === sel ? 'selected' : ''}>${esc(termLabel(x))}${x === eff ? '（這期生效）' : ''}</option>`).join('')}<option value="__new" ${isNew ? 'selected' : ''}>＋ 從某天起改設定（新增一筆）</option></select>${list.length > 1 && !isNew && sel !== list[0].from_date ? '<button type="button" class="btn sm ghost f-tdel">刪除這筆</button>' : ''}</div>${isNew ? '<p class="hint">新增一筆：請在「身分從哪天開始」填日期，那天起改用下面的設定，之前照舊。</p>' : ''}</div>` : '';
-    return `<div class="card sc-staff" data-emp="${esc(st.emp_id)}"><div class="row"><h3>${esc(st.name)}</h3><span class="hint">${esc(st.emp_id)}</span>${st.leave_date ? `<span class="tag">${esc(st.leave_date)} 離職</span>` : ''}${!eff.kind ? '<span class="tag bad">還沒設正職或計時</span>' : ''}${!st.hire_date && !st.leave_date ? '<span class="tag bad">還沒填報到日期</span>' : ''}${eff.kind === 'pt' && eff.backup ? '<span class="tag">備援</span>' : ''}</div>
+    return `<div class="card sc-staff" data-emp="${esc(st.emp_id)}"><div class="row"><h3>${esc(st.name)}</h3><span class="hint">${esc(st.emp_id)}</span>${st.leave_date ? `<span class="tag">${esc(st.leave_date)} 離職</span>` : ''}${!eff.kind ? '<span class="tag bad">還沒設正職或計時</span>' : ''}${!st.hire_date && !st.leave_date ? '<span class="tag bad">還沒填報到日期</span>' : ''}${eff.kind === 'pt' && eff.backup ? '<span class="tag">候補</span>' : ''}</div>
       ${hist}
       <div class="grid2">
         <div class="fld"><label>身分</label><select class="f-kind"><option value="">請選擇</option><option value="ft" ${t.kind === 'ft' ? 'selected' : ''}>正職（四週變形）</option><option value="pt" ${t.kind === 'pt' ? 'selected' : ''}>計時（每週一例一休）</option></select></div>
@@ -48,7 +48,7 @@ export function renderStaff(ctx) {
         <div class="fld"><label>手機</label><input type="tel" class="f-phone" value="${esc(st.phone || '')}" maxlength="20"></div>
       </div>
       <label class="sc-chk"><input type="checkbox" class="f-same" ${t.same_days ? 'checked' : ''}> 計時但每週上班天數跟正職一樣（特休給完整天數）</label>
-      <label class="sc-chk f-bkbox"${t.kind === 'pt' ? '' : ' hidden'}><input type="checkbox" class="f-bk" ${t.kind === 'pt' && t.backup ? 'checked' : ''}> 備援：其他同仁都排不開才排他（只限計時；自動排班先不排他，哪天缺人才叫他補）</label>
+      <label class="sc-chk f-bkbox"${t.kind === 'pt' ? '' : ' hidden'}><input type="checkbox" class="f-bk" ${t.kind === 'pt' && t.backup ? 'checked' : ''}> 候補：其他同仁都排不開才排他（只限計時；自動排班先不排他，哪天缺人才叫他補）</label>
       <div class="fld mt"><label>平日只能上的班（都不勾＝每班都能上）</label><div class="row">${pick(allowed).map((s) => chk('f-al', s, allowed)).join('')}</div>${deadNote(allowed)}</div>
       <div class="fld mt"><label>假日只能上的班（六日、國定假日、補假；都不勾＝跟平日一樣）</label><div class="row">${pick(allowedHol).map((s) => chk('f-alh', s, allowedHol)).join('')}</div>${deadNote(allowedHol)}</div>
       ${stations.length ? `<div class="fld mt"><label>預設站別（新排的上班日自動帶入，班表上可以再改）</label><select class="f-dst"><option value="">不設</option>${
@@ -94,7 +94,7 @@ export function renderStaff(ctx) {
       <div class="fld"><label for="hiPhone">手機</label><input type="tel" id="hiPhone" maxlength="20"></div>
     </div>
     <label class="sc-chk"><input type="checkbox" id="hiSame"> 計時但每週上班天數跟正職一樣（特休給完整天數）</label>
-    <label class="sc-chk" id="hiBkBox" hidden><input type="checkbox" id="hiBk"> 備援：其他同仁都排不開才排他（只限計時）</label>
+    <label class="sc-chk" id="hiBkBox" hidden><input type="checkbox" id="hiBk"> 候補：其他同仁都排不開才排他（只限計時）</label>
     <div class="fld mt"><label>平日只能上的班（都不勾＝每班都能上）</label><div class="row">${shifts.map((s) => `<label class="sc-chk"><input type="checkbox" class="hi-al" value="${esc(s.id)}"> ${esc(shiftCode(s.name))}</label>`).join('')}</div></div>
     <div class="fld mt"><label>假日只能上的班（六日、國定假日、補假；都不勾＝跟平日一樣）</label><div class="row">${shifts.map((s) => `<label class="sc-chk"><input type="checkbox" class="hi-alh" value="${esc(s.id)}"> ${esc(shiftCode(s.name))}</label>`).join('')}</div></div>
     <div class="row mt"><button type="button" class="btn" id="hiAdd">新增同仁</button></div>

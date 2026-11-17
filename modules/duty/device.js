@@ -26,7 +26,7 @@ function buildCard(g) {
   const range = g.count > 1 ? tsLabel(g.first_ts) + ' ～ ' + tsLabel(g.last_ts) : tsLabel(g.first_ts);
   card.append(h('div', 'du-dev-meta', g.count + ' 筆待核准打卡・' + range + '　最遠 ' + g.max_distance_m + ' 公尺\n裝置碼 …' + String(g.device_id).slice(-6)));
   // 全部都在範圍內＝人確實在店裡打的，可安心核准；有超出範圍的要主管自己判斷
-  if (!g.all_within_range) card.append(h('div', 'du-dev-warn', '有打卡超出門市範圍。核准只會解除「裝置」這一關，超出範圍的那幾筆仍然不會入帳。'));
+  if (!g.all_within_range) card.append(h('div', 'du-dev-warn', '有打卡超出門市範圍。核准只會解除「裝置」這一關，超出範圍的那幾筆仍然不會算進打卡。'));
   const ok = h('button', 'btn du-dev-ok', '核准', { type: 'button' }), no = h('button', 'btn ghost du-dev-no', '拒絕', { type: 'button' });
   const actions = h('div', 'row'); actions.append(ok, no);
   const result = h('div', 'du-dev-result'); result.setAttribute('role', 'status');

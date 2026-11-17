@@ -456,7 +456,7 @@ function buildDays(ctx, dates, fixed, plan) {
     }
     for (const e of unassigned) {
       out[e][d] = { day_type: 'H', shift_id: null, leave: null, source: 'auto' };
-      problems.push(`${nm(e)} ${md(d)} 沒有能上的班（${capLeft[e] !== undefined && ownIds(ctx).every(s => shiftMinutes(ctx.shifts[s]) > capLeft[e]) ? '這期時數已經排滿' : '換班間隔或可上班別限制'}），改排休息日`);
+      problems.push(`${nm(e)} ${md(d)} 沒有能上的班（${capLeft[e] !== undefined && ownIds(ctx).every(s => shiftMinutes(ctx.shifts[s]) > capLeft[e]) ? '這期時數已經排滿' : '兩班之間要休 11 小時或只能上某些班別'}），改排休息日`);
     }
     for (const st of ctx.staff) { const c = out[st.emp_id][d]; prevShift[st.emp_id] = cellShift(ctx.shifts, c); }
   }

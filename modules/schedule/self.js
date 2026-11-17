@@ -239,7 +239,7 @@ function drawApprove(ctx) {
   if (who) {
     // 正職／計時（2026-11-13 Eason A）：只有人資主管、管理員能改；沒勾＝正職（上班日要滿 8 小時才能核定）
     const kindRow = D.canSetKind ? `<p class="mt" id="hqKind">${kindBox(who, true, 'hq')} <small class="hint">沒勾＝正職</small></p>`
-      : `<p class="hint mt" id="hqKind">${who.emp_kind === 'pt' ? '計時' : '正職'}</p>`;
+      : `<p class="hint mt" id="hqKind">${who.emp_kind === 'pt' ? '兼職（計時）' : '正職'}</p>`;
     el.insertAdjacentHTML('beforeend', `<div class="card" id="hqDetail"><h2>${esc(who.name)}　已填 ${who.filled}／${who.days} 天</h2>${kindRow}
       ${resultsHtml(D.results, who.emp_id).replace('class="card sc-sum" id="hqSum"', 'class="sc-sum" id="hqSum"')}
       <div class="hq-calcard mt">${calHtml(periodDates(H.period), D.cells[who.emp_id] || {}, shiftMap, D.holidays, { editable: false, issue: issueMap(D.results, who.emp_id) })}</div></div>`);
