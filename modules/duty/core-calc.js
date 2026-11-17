@@ -171,13 +171,25 @@ export function corePeriods(o) {
   // 2. 班表＋已核准加班單裡的打卡照算；都沒有（排休、沒排班又沒加班單）就照打卡（打卡端回要加班單）
   const A = merge(S.concat(OT));
   let core = A.length ? intersect(W, A) : W.map((x) => x.slice());
-  // 3. 遲到：開頭留班表（只看第一段：第一張上班卡比它對到的班表開頭晚）
+  // 3. 遲到：開頭留班表。
+  //    當天第一張上班卡那段班：比班表開頭晚 → 核定從班表開頭起、標遲到（原本的規則）。
+  //    後面的班段（兩段班的第二段）：只有「那段的打卡不完整、靠忘打卡單或班表邊界補上」時才照班表開頭填
+  //    （2026-11-17 Eason：六張犁兩段班 09–13／18–22，打卡 09:05–?、19:52–?＋忘打卡單 →「照班表時段填入，有需要更改的話主管自行更改上下班時間」）。
+  //    後面的班段打卡完整就照打卡算——11 月正式資料重放：每段都留班表開頭會讓 54 人天預填變動、14 筆離主管實核更遠（墨竹亭兩段班晚上常晚到，主管都照實核）。
+  //    共同條件：只補「那張上班卡那段打卡」的開頭，那段取整後還在、而且就在這段班裡。打卡短到取整後消失（09:31–09:44）、或那張卡在這段班快結束才打（兩段班 13:51）→ 不補。
   let late = 0;
   if (S.length && core.length && Wraw.length) {
-    const firstIn = Wraw[0][0], s0 = S.find((y) => y[1] > firstIn) || S[0];
-    // 只補「第一張上班卡那段打卡」的開頭：那段取整後還在、而且就在這段班裡（2026-11-17 Eason）。
-    // 第一段打卡短到取整後消失（09:31–09:44）、或第一張卡在這段班快結束才打（兩段班 13:51），core[0] 是後面別段打卡 → 不補，中間沒打卡的不算。
-    if (firstIn > s0[0] + 0 && firstIn < s0[1] && core[0][0] > s0[0] && core[0][0] < s0[1] && core[0][0] <= snapIn(firstIn, bounds)) { late = firstIn - s0[0]; core[0][0] = s0[0]; }
+    for (const s0 of S) {
+      const ins = Wraw.filter((w) => w[0] > s0[0] && w[0] < s0[1]).map((w) => w[0]);
+      if (!ins.length) continue;
+      const firstIn = Math.min(...ins);
+      if (Wraw.some((w) => w[0] <= s0[0] && w[1] > s0[0])) continue;
+      if (s0 !== S.find((y) => y[1] > Wraw[0][0]) && !raw.some((x) => (x.guess || x.fromReq.in || x.fromReq.out) && x.in != null && x.out != null && x.in < s0[1] && (x.cross ? x.out + 1440 : (x.out <= x.in ? x.out + 1440 : x.out)) > s0[0])) continue;      // 這段班開頭已經有打卡蓋到（早到、或前一段打卡接過來）：不是遲到
+      const c = core.find((x) => x[0] > s0[0] && x[0] < s0[1]);
+      if (!c || core.some((x) => x !== c && x[0] < c[0] && x[1] > s0[0])) continue;
+      if (c[0] <= snapIn(firstIn, bounds)) { late += firstIn - s0[0]; c[0] = s0[0]; }
+    }
+    core = merge(core);
   }
   // 3b. 班表以外的打卡（S 有班表時）：當天不含加班單的時數還沒滿 8 小時，就照時間先後算進去，滿 8 小時為止；超過的部分要加班單（2026-11-16）。
   //     放在遲到補開頭之後算：遲到的那段照「開頭留班表」算在 8 小時裡（打卡端是看核定時數超過 8 小時就要加班單）
