@@ -5,7 +5,7 @@ import { S, mutate, md, WD } from './state.js';
 import { weekday, addDays } from './period.js';
 import { LEAVES } from './rules.js';
 import { shiftCode, timeText, isExtId } from './hours.js';
-import { norm, parseSheet, pickSheet, buildPlan, templateAoa, legendAoa, fileKind, decodeCsv } from './importx.js';
+import { norm, parseSheet, pickSheet, buildPlan, templateAoa, legendAoa, fileKind, decodeCsv, validPicks } from './importx.js';
 
 let xlsxP = null;
 function loadXlsx() {
@@ -136,12 +136,7 @@ function parse(D) {
   IMP.parsed = parseSheet(IMP.sheets[IMP.sheetI].aoa, D.dates, names);
 }
 
-function validPicks(D, m) {
-  const act = new Set(D.shifts.filter((s) => s.active && !isExtId(s.id)).map((s) => s.id));
-  const ok = (v) => { const ids = /^[SO]:/.test(v) ? v.slice(2).split('+') : []; return ids.every((id) => act.has(id)); };
-  const emp = new Set(D.staff.map((s) => s.emp_id));
-  return { tokens: Object.fromEntries(Object.entries(m.tokens).filter(([, v]) => typeof v === 'string' && ok(v))), names: Object.fromEntries(Object.entries(m.names).filter(([, v]) => v === 'SKIP' || emp.has(v))) };
-}
+// 讀回記住的挑選：validPicks 在 importx.js（只留認得的值，2026-11-17：原本只檢查 S:／O: 開頭的，其他壞掉的值會讓預覽丟例外）
 
 /** 綁定按鈕；say(訊息, 是否錯誤)、rerender() 是班表看板給的 */
 export function bindImport(root, ses, say, rerender) {

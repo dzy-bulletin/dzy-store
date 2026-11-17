@@ -19,8 +19,10 @@ export const DAY_FREE_MIN = 480;
 export const CARD_DIFF_MIN = 30;
 export const CARD_REASON_FROM = '2026-11-17';
 export function cardDiffs(segs, periods) {
-  const ps = (periods || []).map((p) => span(toMin(p.start), toMin(p.end))).filter(Boolean);
-  if (!ps.length) return [];
+  const ps0 = (periods || []).map((p) => span(toMin(p.start), toMin(p.end))).filter(Boolean);
+  if (!ps0.length) return [];
+  // 核定時段只有時鐘時間：跨夜的核定被拆成兩段（22:00–01:00、01:30–06:00）時，午夜後那段其實是隔天 → 多放一份「加一天」的再比（2026-11-17；原本誤報下班卡差 300 分）
+  const ps = ps0.concat(ps0.filter((p) => p[1] <= 1440).map((p) => [p[0] + 1440, p[1] + 1440]));
   const near = (t, i) => ps.reduce((a, p) => (a == null || Math.abs(p[i] - t) < Math.abs(a - t) ? p[i] : a), null);
   const out = [];
   for (const g of segs || []) {
@@ -39,7 +41,8 @@ export function cardDiffs(segs, periods) {
 }
 /** 「上班卡 08:20（核定 09:00，早 40 分）」 */
 export function cardLabel(c) {
-  const early = c.side === 'in' ? toMin(c.card) < toMin(c.core) : toMin(c.card) < toMin(c.core);
+  // 兩個時鐘時間的差取最近的那個方向（[-720, 720)）：下班卡 00:10、核定 23:30＝晚 40 分，不是早（2026-11-17）
+  const early = ((toMin(c.card) - toMin(c.core) + 720) % 1440 + 1440) % 1440 - 720 < 0;
   return (c.side === 'in' ? '上班卡 ' : '下班卡 ') + c.card + '（核定 ' + c.core + '，' + (early ? '早 ' : '晚 ') + c.min + ' 分）';
 }
 /** 每張卡的原因合成一句存進 diff_reason：「上班卡 08:20：臨時調班；下班卡 17:45：主管同意」 */
@@ -107,12 +110,19 @@ export function corePeriods(o) {
   const notes = [];
 
   // 1. 打卡段（忘打卡單補上缺的那張；補的時間超出班表的部分不算，見下面交集）
-  const raw = (Array.isArray(o.segs) ? o.segs : []).map((x) => ({ in: toMin(x.in), out: toMin(x.out), cross: !!x.cross, fromReq: {} }));
+  // 同一分鐘的上班＋下班卡（誤按）＝0 分鐘，當成沒這段；原本被當成跨夜 24 小時（2026-11-17）。真的跨夜（cross、或下班早於上班）不受影響
+  const all = (Array.isArray(o.segs) ? o.segs : []).map((x) => ({ in: toMin(x.in), out: toMin(x.out), cross: !!x.cross, fromReq: {} }));
+  const raw = all.filter((x) => !(x.in != null && x.in === x.out && !x.cross));
+  const zeroOnly = all.length > 0 && !raw.some((x) => x.in != null || x.out != null);
+  // 忘打卡單補的那張卡接到哪一段（2026-11-17）：補上去之後上班早於下班、而且兩張卡最接近的那段；原本只找第一個缺卡的段、不看時間
+  //   （打卡 12:48–16:01、?–17:23、?–21:30＋補上班 17:30 被接成 17:30→隔天 17:23）。下班在午夜後（跨夜）＝隔天，12 小時內才算接得上；都接不上就不接。
+  const gapOf = (i, t, cross) => { const d = t + (cross ? 1440 : 0) - i; return d > 0 ? d : (d + 1440 < 720 ? d + 1440 : null); };
+  const pick = (list, f) => list.map((x) => [x, f(x)]).filter((y) => y[1] != null).sort((x, y) => x[1] - y[1]).map((y) => y[0])[0];
   for (const r of reqs.filter((x) => x.kind === 'miss')) {
     const a = toMin(r.start), b = toMin(r.end);
     if (r.miss_type === 'both' && a != null && b != null) raw.push({ in: a, out: b, fromReq: { in: true, out: true } });
-    else if (r.miss_type === 'in' && a != null) { const s = raw.find((x) => x.in == null); if (s) { s.in = a; s.fromReq.in = true; } }
-    else if (r.miss_type === 'out' && b != null) { const s = raw.find((x) => x.out == null); if (s) { s.out = b; s.fromReq.out = true; } }
+    else if (r.miss_type === 'in' && a != null) { const s = pick(raw.filter((x) => x.in == null && x.out != null), (x) => gapOf(a, x.out, x.cross)); if (s) { s.in = a; s.fromReq.in = true; } }
+    else if (r.miss_type === 'out' && b != null) { const s = pick(raw.filter((x) => x.out == null && x.in != null), (x) => gapOf(x.in, b, false)); if (s) { s.out = b; s.fromReq.out = true; } }
     else if (r.miss_type === 'break' && a != null && b != null) {          // 中間休息沒打卡：end＝出去、start＝回來（同打卡端）
       const s = raw.find((x) => x.in != null && x.out != null && x.in < b && (x.cross ? x.out + 1440 : x.out) > a);
       if (s) { raw.push({ in: a, out: s.out, cross: s.cross, fromReq: { in: true } }); s.out = b; s.cross = false; s.fromReq.out = true; }
@@ -120,12 +130,15 @@ export function corePeriods(o) {
   }
   // 還缺的卡：用班表邊界補上（打卡端會回「要有忘打卡單」）
   for (const x of raw) {
-    if (x.in == null && x.out != null) { const s = S.find((y) => y[1] >= x.out - TOL) || S[0]; x.in = s ? s[0] : null; x.guess = true; }
-    if (x.out == null && x.in != null) { const s = S.find((y) => y[0] <= x.in + TOL && y[1] > x.in) || S[S.length - 1]; x.out = s ? s[1] : null; x.guess = true; }
+    // 這張卡要對得到那段班才猜（2026-11-17）：下班卡比那段班的開始還早（08:00 下班卡、班表 09–18）、上班卡比那段班的結束還晚 → 不猜，
+    //   原本猜成 09:00→隔天 08:00，冒出「要補加班單 825 分」。過午夜的下班卡（cross）與跨夜班照舊算隔天；
+    //   沒標 cross 的卡看它離哪一頭近：往後算到隔天比較近（班表 13:45–22:45、下班卡 00:45）＝過午夜才下班，照舊猜。
+    if (x.in == null && x.out != null) { const s = S.find((y) => y[1] >= x.out - TOL) || S[0]; if (s && (x.cross || s[1] > 1440 || s[0] < x.out || x.out + 1440 - s[1] < s[0] - x.out)) x.in = s[0]; x.guess = true; }
+    if (x.out == null && x.in != null) { const s = S.find((y) => y[0] <= x.in + TOL && y[1] > x.in) || S[S.length - 1]; if (s && (s[1] > x.in || s[0] + 1440 - x.in < x.in - s[1])) x.out = s[1]; x.guess = true; }
   }
   let W = merge(raw.filter((x) => x.in != null && x.out != null).map((x) => span(x.in, x.out)));
   if (!W.length) {
-    if (!S.length) return null;                                  // 沒打卡也沒班：沒得算
+    if (!S.length || zeroOnly) return null;                      // 沒打卡也沒班：沒得算；只有同一分鐘的上下班卡＝有打卡但 0 分鐘，不照班表填（卡沒有缺，打卡端不會要忘打卡單）
     // 沒打卡、有已核准整天的假單／出差單（沒填時段，時數合計蓋滿班表或滿 8 小時）＝整天請假：不照班表填時段（2026-11-15 游家輝事假 8 小時被要求補 4 張忘打卡單）
     const noTime = reqs.filter((r) => (r.kind === 'leave' || r.kind === 'trip') && !r.start).reduce((a, r) => a + (Number(r.hours) || 0), 0);
     if (noTime > 0 && (noTime >= total(minus(S, BRKcut)) / 60 - 0.01 || noTime >= 8)) return null;      // 班表時數要扣不打卡休息帶（央廚 09–17＝7 小時，事假 7 小時就是整天）

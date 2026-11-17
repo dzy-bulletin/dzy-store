@@ -210,6 +210,24 @@ export function cellOfValue(v) {
   return null;
 }
 
+/** 是不是認得的「值」（上面那幾種寫法）。這台裝置記住的挑選被改壞、或舊版存的別種值 → 不認得，當成沒選過（2026-11-17：原本 buildPlan 直接丟例外） */
+export function isValue(v) {
+  if (typeof v !== 'string') return false;
+  if (v === 'SKIP' || v === 'KEEP' || v === 'CLEAR' || v === 'R' || v === 'H') return true;
+  if (v.startsWith('L:')) return v.length > 2;
+  if (v.startsWith('S:') || v.startsWith('O:')) { const ids = v.slice(2).split('+'); return ids.length <= 2 && ids.every(Boolean); }
+  return false;
+}
+
+/** 讀回這台裝置記住的挑選：只留認得的值（班別要還在用、同仁要還在），其餘當成沒選過。m：{ tokens, names }（localStorage 讀回來的，可能被改壞） */
+export function validPicks(D, m) {
+  const act = new Set((D.shifts || []).filter((s) => s.active && !isExtId(s.id)).map((s) => s.id));
+  const ok = (v) => isValue(v) && (/^[SO]:/.test(v) ? v.slice(2).split('+') : []).every((id) => act.has(id));
+  const emp = new Set((D.staff || []).map((s) => s.emp_id));
+  const obj = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? o : {});
+  return { tokens: Object.fromEntries(Object.entries(obj(m && m.tokens)).filter(([, v]) => ok(v))), names: Object.fromEntries(Object.entries(obj(m && m.names)).filter(([, v]) => v === 'SKIP' || emp.has(v))) };
+}
+
 /** 格子 → 範本裡的寫法（下載範本用；跟 readToken 互轉） */
 export function tokenOfCell(c, shiftMap) {
   if (!c) return '';
@@ -296,7 +314,7 @@ export function buildPlan(D, parsed, picks) {
       const raw = pr.cells[d], tok = norm(excelDateBack(raw));
       const old = (D.days[known.emp_id] || {})[d] || null;
       const oldText = tokenOfCell(old, shiftMap).replace('+', '＋');
-      let v = Object.prototype.hasOwnProperty.call(P.tokens, tok) && tok ? P.tokens[tok] : readToken(tok, D.shifts || []);
+      let v = Object.prototype.hasOwnProperty.call(P.tokens, tok) && tok && isValue(P.tokens[tok]) ? P.tokens[tok] : readToken(tok, D.shifts || []);      // 記住的挑選值不認得＝當成沒選過（2026-11-17）
       // 範本原樣傳回：寫法跟現在的格子一樣（例：已停用的班別代號）就不動（2026-11-13 排班挑錯低）
       //   2026-11-17：不只讀不懂的時候——已停用的舊「A班」跟新的 A班 同代號時，原樣匯回會被換成新班別，所以寫法跟現在一樣一律不動
       if (old && tok && tok === norm(tokenOfCell(old, shiftMap))) v = 'KEEP';

@@ -530,8 +530,10 @@ export function checkSelfMonth(ctx) {
         const rh = inMonth.filter((d) => mine[d] && (mine[d].day_type === 'R' || mine[d].day_type === 'H')).length;
         if (rh < needRH) add('F2', 'block', e, first, `${who} 這期例假加休息日只有 ${rh} 天，至少要 ${needRH} 天`);
       }
+      // 連續上班跨期：往前看 LOOKBACK（13）天，同門市 checkPeriod；前期資料給幾天就算幾天（沒資料的日子當沒上班）。
+      //   2026-11-17：原本只往前看 3 天，連上 13 天有 4 天以上在前一期就只出「7～12 天覆核」、不出「最多 12 天」
       let run = 0, told = false, reviewed = false;
-      for (let d = addDays(first, -3); d <= last; d = addDays(d, 1)) {
+      for (let d = addDays(first, -LOOKBACK); d <= last; d = addDays(d, 1)) {
         run = mine[d] && mine[d].shift_id ? run + 1 : 0;
         if (!run) { told = false; reviewed = false; continue; }
         if (d < first) continue;

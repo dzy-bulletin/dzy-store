@@ -183,7 +183,7 @@ export function uncoveredMin(rs, re, segs, br) {
   }
   return n;
 }
-const periodsCover = (periods, r) => (periods || []).some((p) => p && p.start <= r.start && p.end >= r.end);
+const periodsCover = C.periodsCoverReq;      // 用分鐘比、跨午夜也對（2026-11-17；原本比字串，核定 16:00–01:00 對加班單 00:00–01:00 永遠標「加班單沒算進去」）
 /** 打卡比班表早到／晚走多少分（只算超出的部分，各自 ≥ 0）；plan＝comparePlanOf 的結果 */
 export function overshoot(plan, segments) {
   const segs = segsOf({ segments }).filter((s) => s.in && s.out);
@@ -343,6 +343,7 @@ function classifyRaw(inp) {
       const offLeave = pv.mode === 'off' && !emp.plan.away && r.kind === 'leave' && !r.start && Number(r.hours) > 0;
       if (pv.mode !== 'plan' && !offLeave) return full('排休或沒班表又有' + (r.kind === 'trip' ? '出差單' : '假單'), '這天不是上班日，要自己核對');
       if (r.kind === 'trip' && !(Number(r.hours) > 0)) return full('出差單沒有時數', '整天出差要填時數，到完整頁處理');
+      if (r.kind === 'leave' && !r.start && !(Number(r.hours) > 0)) return full('假單沒有時數', '假單時數空白或 0，到完整頁核對');      // 比照出差（2026-11-17）：原本時數空白或 0 也能一鍵「核定通過」0 小時
       if (r.start) return full('部分時段' + (r.kind === 'trip' ? '出差' : '請假'), '有填時段，要自己核對時數');
       if (segs.length || emp.attempts > 0) return full('有打卡又有' + (r.kind === 'trip' ? '出差單' : '假單'), '整天的單，當天卻有打卡');
       leaves = C.reqLeaveLines([r]).map((x) => ({ type: x.type, hours: (x.hours === 0 || x.hours) ? String(x.hours) : '' }));      // 舊卡片從輸入框送字串

@@ -412,6 +412,19 @@ function buildDays(ctx, dates, fixed, plan) {
       capLeft[st.emp_id] -= m;
     }
   }
+  // 「指定上班」（沒指定班別）那天能上的班：扣掉跟隔天接不上的——隔天是固定班（手動班、指定班別、休息日加班）就要隔得夠；
+  //   隔天又是指定上班就再往後看，看到固定班為止。全部接不上就不濾（照舊，交給後面的檢查回報）。
+  //   2026-11-17：原本前一天只看「指定上班那天有班能接」，沒管那個班接不接得上後天的固定班 → 指定上班那天排不進去、整期排不出來
+  const pinOpts = (st, d) => {
+    const e = st.emp_id, d1 = addDays(d, 1), nx = fixed[e][d1], p1 = pinOf(ctx, e, d1);
+    const all = allowedOf(ctx, e, d).map(s => ctx.shifts[s]).filter(sh => shiftMinutes(sh) <= DAY_MAX);
+    let next = null;
+    if (nx && nx.shift_id) next = [cellShift(ctx.shifts, nx)];
+    else if (!nx && p1 && p1.kind === 'work' && dates.includes(d1) && employed(st, d1) && plan[e][d1] === 'work') next = pinOpts(st, d1);
+    if (!next || !next.length) return all;
+    const fit = all.filter(sh => next.some(sh2 => gapMinutes(d, sh, d1, sh2) >= MIN_GAP));
+    return fit.length ? fit : all;
+  };
   for (const d of dates) {
     const workers = [];
     const nextShift = {};
@@ -428,7 +441,7 @@ function buildDays(ctx, dates, fixed, plan) {
       if (hold[e] && hold[e][d] !== undefined) { capLeft[e] += hold[e][d]; delete hold[e][d]; }      // 輪到指定上班這天：把替它留的時數放回來
       const d1 = addDays(d, 1), nx = fixed[e][d1], p1 = pinOf(ctx, e, d1);
       if (nx && nx.shift_id) nextShift[e] = cellShift(ctx.shifts, nx);
-      else if (!nx && p1 && p1.kind === 'work' && dates.includes(d1) && employed(st, d1) && plan[e][d1] === 'work') nextAny[e] = allowedOf(ctx, e, d1).map(s => ctx.shifts[s]).filter(sh => shiftMinutes(sh) <= DAY_MAX);
+      else if (!nx && p1 && p1.kind === 'work' && dates.includes(d1) && employed(st, d1) && plan[e][d1] === 'work') nextAny[e] = pinOpts(st, d1);
     }
     const { assign, unassigned, conflicts } = assignDay(ctx, d, workers, prevShift, nextShift, fairness, fixedCount, { capLeft, fixedShift, nextAny });
     const nm = (e) => (ctx.staff.find(s => s.emp_id === e) || {}).name;
@@ -688,10 +701,17 @@ function scheduleCore(ctx, opts, guoSkip, keepManual) {
     const need = needOf(ctx, d);
     const lacking = Object.keys(need).filter(sid => ctx.staff.filter(x => (out[x.emp_id][d] || {}).shift_id === sid).length < need[sid].min);
     let done = false;
+    // 那天休假標成「例假」的人（2026-11-17，11/10 驗收 F7）：同一週他另有一天休息日（沒排班、不是固定格）→ 兩天的標記對調
+    //   （那天改休息日、另一天改例假，休哪幾天不變）就能排休息日加班。排在本來就是休息日的人後面：有人不用對調就先用他
+    const swapOf = (e) => {
+      const w = Math.floor(dates.indexOf(d) / 7);
+      return dates.slice(w * 7, w * 7 + 7).find(x => x !== d && !fixed[e][x] && out[e][x] && out[e][x].day_type === 'H' && !out[e][x].shift_id) || null;
+    };
     const cands = ctx.staff.filter(st => {
       const e = st.emp_id, c = out[e][d], t = termAt(ctx.terms, e, d);
-      return t && t.kind === 'ft' && c && c.day_type === 'H' && !c.shift_id && c.source !== 'manual' && otUsed[e] < OT_PER_PERIOD && (pinOf(ctx, e, d) || {}).kind !== 'off';
-    }).sort((x, y) => otUsed[x.emp_id] - otUsed[y.emp_id] || (x.emp_id < y.emp_id ? -1 : 1));
+      if (!(t && t.kind === 'ft' && c && !c.shift_id && c.source !== 'manual' && otUsed[e] < OT_PER_PERIOD && (pinOf(ctx, e, d) || {}).kind !== 'off')) return false;
+      return c.day_type === 'H' || (c.day_type === 'R' && !fixed[e][d] && !!swapOf(e));
+    }).sort((x, y) => (out[x.emp_id][d].day_type === 'R') - (out[y.emp_id][d].day_type === 'R') || otUsed[x.emp_id] - otUsed[y.emp_id] || (x.emp_id < y.emp_id ? -1 : 1));
     for (const st of cands) {
       for (const sid of lacking) {
         if (!allowedOf(ctx, st.emp_id, d).includes(sid)) continue;
@@ -699,6 +719,8 @@ function scheduleCore(ctx, opts, guoSkip, keepManual) {
         if ((ctx.pairs || []).some(([a, b]) => (a === st.emp_id || b === st.emp_id) && (out[a === st.emp_id ? b : a] || {})[d] && out[a === st.emp_id ? b : a][d].shift_id === sid)) continue;
         const before = out[st.emp_id][d];
         const short0 = shortOn(d);
+        const sw = before.day_type === 'R' ? swapOf(st.emp_id) : null, swBefore = sw ? out[st.emp_id][sw] : null;
+        if (sw) out[st.emp_id][sw] = Object.assign({}, swBefore, { day_type: 'R' });
         out[st.emp_id][d] = { day_type: 'H', shift_id: sid, leave: null, source: 'auto' };
         const tres = checkPeriod(merged(ctx, dates, out));
         if (blockCount(tres) <= blockCount(res) && shortOn(d) < short0) {
@@ -707,6 +729,7 @@ function scheduleCore(ctx, opts, guoSkip, keepManual) {
           break;
         }
         out[st.emp_id][d] = before;
+        if (sw) out[st.emp_id][sw] = swBefore;
       }
       if (done) break;
     }

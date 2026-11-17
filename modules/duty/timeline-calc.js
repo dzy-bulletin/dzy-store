@@ -43,6 +43,22 @@ function inter(list, cut) {
   return out;
 }
 const len = (list) => list.reduce((t, s) => t + (s.b - s.a), 0);
+// 接起來（重疊、相鄰的併成一段）
+function union(list) {
+  const out = [];
+  list.filter((s) => s.b > s.a).sort((x, y) => x.a - y.a).forEach((s) => { const l = out[out.length - 1]; if (l && s.a <= l.b) l.b = Math.max(l.b, s.b); else out.push({ a: s.a, b: s.b }); });
+  return out;
+}
+const TOL = 15;                       // 同 core-calc：差 15 分內對齊、15 分寬限
+/** 同 core-calc overUnits：接在班表／加班單／休息帶（bounds）後面的開頭、前面的結尾各扣 15 分寬限，再往內取整到 15 分，不到 15 分不列 */
+function overUnits(list, bounds) {
+  const ends = new Set(bounds.map((x) => x.b)), starts = new Set(bounds.map((x) => x.a)), out = [];
+  list.forEach((s) => {
+    const a = Math.ceil((ends.has(s.a) ? s.a + TOL : s.a) / TOL) * TOL, b = Math.floor((starts.has(s.b) ? s.b - TOL : s.b) / TOL) * TOL;
+    if (b - a >= TOL) out.push({ a, b });
+  });
+  return out;
+}
 
 /**
  * @param {object} o
@@ -59,13 +75,16 @@ export function timelineModel(o) {
   // 不打卡的休息帶：落在當天第一段班到最後一段班之間就算（班表分兩段、中間空著也是休息；2026-11-16 吳佳宜 12–13 被畫成加班）
   const bk = span(o && o.brk && o.brk.start, o && o.brk && o.brk.end);
   const hull = plan.length ? [{ a: Math.min(...plan.map((p) => p.a)), b: Math.max(...plan.map((p) => p.b)) }] : [];
-  const breaks = bk ? inter(hull, [bk, { a: bk.a + DAY, b: bk.b + DAY }]) : [];
+  const bkAll = bk ? [bk, { a: bk.a + DAY, b: bk.b + DAY }] : [];
+  const breaks = inter(hull, bkAll);
+  // 算時數時休息帶要不要從班表裡扣（同 core-calc 的 BRKcut，2026-11-17）：班表整段蓋過休息帶才扣；半天班（央廚 09:00–12:30、總部 14:15–22:15）不扣；沒班表照扣
+  const brkCut = hull.length ? bkAll.filter((k) => hull[0].a <= k.a && hull[0].b >= k.b) : bkAll;
 
   // 同一人這天在別家店的打卡（伺服器附的 elsewhere，2026-11-17）：只畫出來，不算本店上班；落在本店班表裡的那段不算少做
   const away = [];
   (Array.isArray(o && o.elsewhere) ? o.elsewhere : []).forEach((x) => (Array.isArray(x && x.segs) ? x.segs : []).forEach((sg) => {
     const a = toMin(sg && sg.in), b0 = toMin(sg && sg.out);
-    if (a == null || b0 == null) return;
+    if (a == null || b0 == null || (a === b0 && !sg.cross)) return;      // 同一分鐘的上下班卡＝0 分鐘，不畫（不是 24 小時）
     let b = b0 + (sg.cross ? DAY : 0); if (b <= a) b += DAY;
     away.push({ a, b, label: String(x.label || '別店') });
   }));
@@ -73,6 +92,7 @@ export function timelineModel(o) {
   const punch = [], open = [];
   segs.forEach((s) => {
     const a = toMin(s && s.in), b0 = toMin(s && s.out);
+    if (a != null && a === b0 && !(s && s.cross)) return;       // 同一分鐘的上班＋下班卡（誤按）＝0 分鐘，當成沒這段（2026-11-17；原本畫成 24 小時）
     if (a != null && b0 != null) { let b = b0 + (s.cross ? DAY : 0); if (b <= a) b += DAY; punch.push({ a, b }); }
     else if (a != null) open.push({ a, side: 'out' });          // 少下班卡
     else if (b0 != null) open.push({ b: b0 + (s.cross ? DAY : 0), side: 'in' });     // 少上班卡
@@ -114,7 +134,8 @@ export function timelineModel(o) {
       if (take > 0) free.push({ a: s.a, b: s.a + take });
       if (s.b - s.a > take) rest.push({ a: s.a + take, b: s.b });
     });
-    push(free, 'extra'); push(rest, 'ot');
+    // 加班沒單：跟核定同一套寬限＋取整（core-calc overUnits，2026-11-17）——8 小時班 18:20 下班核定算 0 分，這裡也不畫
+    push(free, 'extra'); push(overUnits(rest, plan.concat(otCover, bkAll)), 'ot');
   };
   if (plan.length) {
     const work = minus(plan, breaks);
@@ -148,10 +169,16 @@ export function timelineModel(o) {
     pushLeave(rest, leavePend, true);                    // 假單還在待審：先畫成「待審的假」，不當成少做
     push(minus(rest, leavePend), 'short');
     // 遲到那段照「開頭留班表」算在 8 小時裡（同 core-calc）
-    const first = punch.length ? Math.min(...punch.map((x) => x.a)) : null;
-    const lateHead = first != null && first > plan[0].a ? minus(inter(work, [{ a: plan[0].a, b: Math.min(first, plan[0].b) }]), punch) : [];
+    //   跟 core-calc 步驟 3 同一套（2026-11-17）：第一張上班卡對到「它之後才結束的那段班」（不是固定第一段），那段打卡取整後還在、而且在那段班裡才補。
+    //   原本一律拿第一段班算：兩段班第一段沒來、第二段遲到又晚走（10–14、17–21，打卡 17:30–23:00）整段第一段被當成有上班，晚走的被畫成加班沒單
+    const p0 = union(punch)[0], planS = plan.slice().sort((x, y) => x.a - y.a);
+    const s0 = p0 ? planS.find((p) => p.b > p0.a) || planS[0] : null;
+    const edge = [].concat(...plan.concat(otCover, bkAll).map((s) => [s.a, s.b]));
+    const snap = (t, up) => { const e = edge.find((x) => Math.abs(x - t) <= TOL); return e != null ? e : (up ? Math.ceil(t / TOL) : Math.floor(t / TOL)) * TOL; };
+    const lateOk = !!p0 && p0.a > s0.a && p0.a < s0.b && snap(p0.b, false) > snap(p0.a, true) && snap(p0.a, true) < s0.b;
+    const lateHead = lateOk ? minus(inter(work, [{ a: s0.a, b: p0.a }]), punch) : [];
     const workedMin = len(inter(work, punch)) + len(lateHead);
-    splitExtra(minus(minus(punch, plan), breaks), workedMin);
+    splitExtra(minus(minus(punch, plan), bkAll), workedMin);      // 班表外多出來的打卡照休息帶扣（同 core-calc：央廚午班 13:15 起、11:45 就到，12–13 不算多做）
     // 空班休息：班表兩段之間的空檔、不打卡休息帶，沒打卡的部分
     const gaps = [];
     for (let i = 1; i < plan.length; i++) if (plan[i].a > plan[i - 1].b) gaps.push({ a: plan[i - 1].b, b: plan[i].a });
@@ -181,7 +208,10 @@ export function timelineModel(o) {
   const leavePunch = punch.length > 0 && leaveOnly.some((f) => len(inter(punch, [f])) >= 30);
   // 班內休息分鐘合計（每段班最多扣到那段的長度）：排班工時要扣掉（2026-11-17 Eason）
   const segBreakMin = planRaw.reduce((t, s) => t + Math.min(s.bm || 0, len(minus([s.sp], breaks))), 0);
-  return { from, to, ticks, planTicks, plan, punch, open, forms, devs, breaks, segBreakMin, away, leaveAllDay: allDayLeave, leavePunch };
+  // 實際工時（分鐘，2026-11-17）：打卡接起來不重複算；班表裡的照 brkCut 扣、班表外多出來的照休息帶扣（同 core-calc）。央廚 09–18 打卡中午沒打卡＝8 小時，不是 9
+  const pu = union(punch), planU = union(plan);
+  const workMin = len(minus(inter(pu, planU), brkCut)) + len(minus(minus(pu, planU), bkAll));
+  return { from, to, ticks, planTicks, plan, punch, open, forms, devs, breaks, brkCut, workMin, segBreakMin, away, leaveAllDay: allDayLeave, leavePunch };
 }
 
 // 異常排序（2026-11-15 開工確認）：缺卡 → 缺勤沒單 → 假單對不上／請假卻打卡 → 單待審 → 加班 → 遲到早退 → 其他。數字小的排前面
@@ -202,9 +232,12 @@ export function hoursSummary(models) {
   let plan = 0, work = 0, leave = 0;
   (models || []).forEach((m) => {
     if (!m) return;
-    plan += Math.max(0, len(minus(m.plan, m.breaks)) - (m.segBreakMin || 0));      // 排班工時：扣固定休息帶與班內休息分鐘（例 A 班 15:00–23:30 休 30 分＝8 小時）
-    work += len(m.punch);
-    leave += len(m.forms.filter((f) => !f.pending && (f.kind === 'leave' || f.kind === 'trip')));
+    // 三個數字用同一套休息帶規則才對得起來（2026-11-17）：brkCut＝班表整段蓋過休息帶才扣（半天班不扣，同 core-calc）
+    const cut = m.brkCut || m.breaks || [];
+    plan += Math.max(0, len(minus(m.plan, cut)) - (m.segBreakMin || 0));      // 排班工時：扣固定休息帶與班內休息分鐘（例 A 班 15:00–23:30 休 30 分＝8 小時）
+    work += m.workMin != null ? m.workMin : len(m.punch);
+    // 整天假單是照班表整段畫的框：時數要扣休息帶（央廚 09–18 請 8 小時，不是 9）；有填時段的假單照時段
+    leave += m.forms.filter((f) => !f.pending && (f.kind === 'leave' || f.kind === 'trip')).reduce((t, f) => t + (f.allDay ? len(minus([f], cut)) : f.b - f.a), 0);
   });
   const r = (x) => Math.round(x / 60 * 100) / 100;
   return { plan: r(plan), work: r(work), leave: r(leave) };

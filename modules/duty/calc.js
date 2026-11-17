@@ -85,13 +85,25 @@ export function badgeClass(statusText, day) {
   const needCards = parts.reduce((a, p) => a + missCardsOf(p, (day.periods || []).length), 0);
   return (!needLeave || leavesMatchReqs(day)) && (!needCards || missMatchesReqs(day, needCards)) ? 'normal' : 'warn';
 }
+/** 兩個時鐘時間（分鐘）的差，取最近的方向，落在 [-720, 720)：23:55 對 00:00＝-5 */
+const clockDiff = (a, b) => (a == null || b == null ? NaN : (((a - b + 720) % 1440) + 1440) % 1440 - 720);
+/** 核定時段有沒有整段蓋住這張單的起訖（2026-11-17：改用分鐘比，結束不晚於開始＝隔天；原本直接比字串，核定 16:00–01:00 對加班單 00:00–01:00 永遠對不上）。
+ *  核定時段先接起來再比；單的時間在午夜後（00:00–01:00）也試「隔天」那個位置。 */
+export function periodsCoverReq(periods, r) {
+  const sp = (a, b) => { const s = hhmmToMin(a); let e = hhmmToMin(b); if (s == null || e == null) return null; if (e <= s) e += 1440; return [s, e]; };
+  const q = sp(r && r.start, r && r.end);
+  if (!q) return false;
+  const ps = (periods || []).map(p => p && sp(p.start, p.end)).filter(Boolean).sort((x, y) => x[0] - y[0]), u = [];
+  ps.forEach(p => { const l = u[u.length - 1]; if (l && p[0] <= l[1]) l[1] = Math.max(l[1], p[1]); else u.push(p.slice()); });
+  return u.some(p => (p[0] <= q[0] && p[1] >= q[1]) || (p[0] <= q[0] + 1440 && p[1] >= q[1] + 1440));
+}
 /** 已核准的忘打卡單補足缺的卡，補的時間在核定時段頭尾 15 分鐘內，核定時數也對得上。 */
 function missMatchesReqs(day, needCards) {
   const reqs = (day.reqs || []).filter(r => r.kind === 'miss');
   const periods = day.periods || [];
   const have = reqs.reduce((a, r) => a + (r.miss_type === 'both' || r.miss_type === 'break' ? 2 : 1), 0);
   if (have < needCards || !periods.length) return false;
-  const near = (t, side) => periods.some(p => Math.abs(hhmmToMin(t) - hhmmToMin(p[side])) <= 15);
+  const near = (t, side) => periods.some(p => Math.abs(clockDiff(hhmmToMin(t), hhmmToMin(p[side]))) <= 15);      // 跨午夜也比得對：補下班 23:55、核定到 00:00＝差 5 分（2026-11-17）
   const ok = reqs.every(r => (r.miss_type === 'out' || (r.start && near(r.start, 'start'))) && (r.miss_type === 'in' || (r.end && near(r.end, 'end'))));
   return ok && Math.abs(Number(day.approvedHours) - (sumPeriods(periods).total + tripHoursOfList(day.leaves))) < 0.01;
 }
@@ -113,7 +125,7 @@ export function approvedMatchesReqs(approvedLeaves, approvedPeriods, reqs) {
   const ks = new Set(Object.keys(have).concat(Object.keys(want)));
   for (const k of ks) if (!(Math.abs((have[k] || 0) - (want[k] || 0)) < 0.01)) return false;
   const ps = (approvedPeriods || []).filter(p => p && p.start && p.end);
-  return list.filter(r => r.kind === 'ot').every(o => !o.start || !o.end || ps.some(p => p.start <= o.start && p.end >= o.end));
+  return list.filter(r => r.kind === 'ot').every(o => !o.start || !o.end || periodsCoverReq(ps, o));
 }
 // manager.html:955–959：假別＋時數的顯示後綴，如「・病假2.5h」
 export function leaveSuffix(type, hours) {
@@ -308,18 +320,21 @@ export function punchEvidence(it) {
     ? '\n→ 有按但被擋，而且定位誤差很大＝多半是手機定位失準，申請時間合理' : '');
 }
 // 忘打卡預填的上班時間：往前取整；比最近一段班表的開始還晚（遲到）或早不到 15 分鐘，留班表開始時間
-function missIn(hm, planSegs) {
+// before＝這張上班卡之前各段打卡的時間（2026-11-17）：那段班開始之後、這張卡之前已經有別的打卡＝中途出去再回來，不是那段班的第一張上班卡 → 只取整、不拉回班表開頭
+//   （打卡 09:00–12:00、13:05–？＋補下班 18:00，原本第二段也變 09:00、兩段重疊）。兩段班的第二段照舊對第二段班表。
+function missIn(hm, planSegs, before) {
   if (!hm) return hm;
   const m = hhmmToMin(hm);
   if (m === null) return hm;
-  let best = null, bestD = null;
+  let best = null, bestD = null, bestS = null;
   (planSegs || []).forEach(p => {
     const s = p && hhmmToMin(p.start);
     if (s === null || s === undefined) return;
     const d = ((m - s + 720) % 1440 + 1440) % 1440 - 720;
-    if (bestD === null || Math.abs(d) < Math.abs(bestD)) { bestD = d; best = p.start; }
+    if (bestD === null || Math.abs(d) < Math.abs(bestD)) { bestD = d; best = p.start; bestS = s; }
   });
-  return bestD !== null && bestD > -15 ? best : round15(hm, false);      // 遲到，或早到不滿 15 分（差不到 15 分鐘算照班表）→ 班表時間
+  const back = bestD !== null && (before || []).some(t => { const c = hhmmToMin(t); if (c === null) return false; const d = clockDiff(c, bestS); return d > -15 && d < bestD; });
+  return bestD !== null && bestD > -15 && !back ? best : round15(hm, false);      // 遲到，或早到不滿 15 分（差不到 15 分鐘算照班表）→ 班表時間
 }
 // 打卡時間照參考時數的規則取整到 15 分（上班進位、下班捨去）
 export function round15(hm, up) {
@@ -332,7 +347,8 @@ export function round15(hm, up) {
 // 取整（2026-11-10 Eason）：打卡時間一律往前取整到 15 分（10:20→10:15）；上班卡比班表晚時，上班留班表時間，薪資才標得出遲到分鐘。
 // planSegs＝當天班表各段 [{start,end}]（沒有就只取整）
 export function missPeriods(segments, r, planSegs) {
-  const segs = (segments || []).map(x => ({ in: missIn(x.in, planSegs), out: round15(x.out, false) }));
+  const list = segments || [];
+  const segs = list.map((x, i) => ({ in: missIn(x.in, planSegs, list.slice(0, i).reduce((a, y) => a.concat(y.in || [], y.out || []), [])), out: round15(x.out, false) }));
   if (r.miss_type === 'break') {
     // 中間休息沒打卡（2026-11-02，打卡系統 mala-clock-in 同名功能）：end＝休息開始、start＝回來上班；
     // 把含休息開始的那段拆兩段：上班卡～休息開始、回來上班～下班卡（同 manager.html）
