@@ -1,10 +1,10 @@
 // 央廚固定排班：「央廚班表」（四週一期的總表，人×日；廠長可改格子、重新產生這一期）與「固定班別」（每人平日上哪個班）。
 // 規格 docs/schedule-hq/spec.md §4、§5、§10.1：平日＝固定班別、週六休息日、週日例假、國定假日／補假（平日）＝國定假日假；手改的格子重新產生時不會被蓋掉；
 // 廠長改格子立即生效，系統約 1 分鐘內合併重送 LINE。2026-10-27 Eason 改「央廚用 T01」：畫面跟門市排班一樣 ‹ T01 › 一期 28 天，跨月那欄標月份。
-import { esc, busy } from '../../js/ui.js';
+import { esc, busy, confirmBox } from '../../js/ui.js';
 import { timeText, shiftCode } from './hours.js';
 import { call, cellInfo, cellOptions, cellOfValue, valueOfCell, otTag, md, resultsHtml, WD } from './hq.js';
-import { weekday, periodOf, periodNo, periodStart, periodEnd, periodDates, shiftPeriod, parseLabel, label, todayTaipei } from './period.js';
+import { weekday, periodOf, periodNo, periodStart, periodEnd, periodDates, shiftPeriod, parseLabel, label, todayTaipei, addDays } from './period.js';
 import { stHidden, setStHidden, stToggleHtml } from './stview.js';
 
 export const F = { key: null, period: null, data: null, loading: null, sel: null, msg: '', err: '' };
@@ -97,7 +97,7 @@ function drawFixed(ctx) {
     return `<td class="${need && n < need ? 'short' : ''}${[0, 6].includes(weekday(d)) || D.holidays[d] ? ' we' : ''}${mb(d, i)}" title="${esc(x.name)}${need ? `至少要 ${need} 人` : '沒有設人數'}">${n}${need ? '/' + need : ''}</td>`;
   }).join('')}</tr>`).join('');
   const tog = stList.length ? stToggleHtml('fxStToggle') : '';
-  const acts = (D.canEdit ? `<div class="row sc-acts mt"><button type="button" class="btn" id="fxGen">重新產生這一期（明天起；手改的不會被蓋掉）</button>${tog}</div><p class="hint fx-genhint" id="fxGenHint">清空的格子按「重新產生」會補回固定班別；要那天不上班，請改成「休」或請假。</p>`
+  const acts = (D.canEdit ? `<div class="row sc-acts mt"><button type="button" class="btn" id="fxGen">重新產生這一期（明天起；手改的不會被蓋掉）</button><button type="button" class="btn ghost" id="fxClear">清空這一期（明天起）</button>${tog}</div><p class="hint fx-genhint" id="fxGenHint">清空的格子按「重新產生」會補回固定班別；要那天不上班，請改成「休」或請假。「清空這一期」會把這一期明天起所有人的格子清成空白（請假、手改的也清），之後再按「重新產生」重排。</p>`
     : `<p class="hint mt">你只能查看央廚班表，修改請找廠長。</p>${tog ? `<div class="row sc-acts mt">${tog}</div>` : ''}`);
   el.innerHTML = head(D, `央廚 ${D.staff.length} 位同仁`, `<p class="hint mt fx-hint">平日＝固定班別、週六休息日、週日例假、國定假日／補假＝國定假日假。每期開始前 10 天自動排好下一期。廠長改格子立即生效，系統約 1 分鐘內合併送到 LINE。有「・」的是手改過的格子。</p>${acts}`)
     + resultsHtml(D.results)
@@ -127,6 +127,22 @@ function drawFixed(ctx) {
     catch (e) { say(e.message, true); if (e.code === 'CONFLICT') { try { await reload(); } catch (e2) { /* 留原畫面 */ } } ctx.rerender(); }
   });
   if (q('#fxStToggle')) q('#fxStToggle').onclick = () => { setStHidden(!stHidden()); ctx.rerender(); };
+  // 清空這一期（2026-11-17 Eason：央廚、總部也要有清除）：明天起（同「重新產生」，過去的日子已經上過班、考勤要比對，不動）所有人的格子清成空白，含請假與手改的
+  if (q('#fxClear')) q('#fxClear').onclick = () => busy(q('#fxClear'), async () => {
+    const from = addDays(todayTaipei(), 1), out = {};
+    let n = 0;
+    for (const st of D.staff) {
+      for (const d of dates) {
+        const c = (D.cells[st.emp_id] || {})[d];
+        if (d < from || (D.mode_from && d < D.mode_from) || !c || !c.t) continue;
+        (out[st.emp_id] = out[st.emp_id] || {})[d] = { t: '' }; n++;
+      }
+    }
+    if (!n) { say('這一期明天起已經是空白的'); return ctx.rerender(); }
+    if (!(await confirmBox(`把 ${F.period} 這一期 ${md(from)} 起所有同仁的班表清空（共 ${n} 格）？請假、手改的也會一起清掉，清完按「重新產生這一期」重排。`, '全部清空'))) return;
+    try { await call('fixedSave', { period: F.period, version: D.version, cells: out }); F.sel = null; await after(`已清空 ${n} 格，按「重新產生這一期」可以重排；約 1 分鐘內送到 LINE`); }
+    catch (e) { say(e.message, true); if (e.code === 'CONFLICT') { try { await reload(); } catch (e2) { /* 留原畫面 */ } } ctx.rerender(); }
+  });
   if (q('#fxGen')) q('#fxGen').onclick = () => busy(q('#fxGen'), async () => {
     try { const r = await call('fixedGenerate', { period: F.period }); await after(`產生了 ${r.generated} 格，保留 ${r.kept} 格${r.generated ? '，正在送到 LINE' : '（沒有需要改的）'}`); }
     catch (e) { say(e.message, true); ctx.rerender(); }
