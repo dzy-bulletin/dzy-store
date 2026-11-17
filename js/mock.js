@@ -928,6 +928,16 @@ function dutyDo(d, action, b) {
       const f0 = fakeOf(emp.emp_id), openSeg = !!f0 && f0.segs.some(x => !x.in || !x.out), covered = d.reqs.some(r => r.emp_id === emp.emp_id && r.date === date && r.status === 'approved');
       if (openSeg && !covered) return fail('BAD_INPUT', '這天還不能核定：缺加班單、假單或忘打卡單' + (emp.no_line ? '。這位同仁沒綁 LINE，請店長在考勤管理「代開申請」，送總監層級審核。' : ''));
     }
+    // 核定登記的假 vs 已核准的假單／出差單（打卡端 Requests.gs reqStrictLeaveProbs_，字句照抄）：示範模式預設不擋；e2e 設 d.strictLeave 才打開（2026-11-18 Q2，docs/approve-once/）
+    if (d.strictLeave) {
+      const okRows = d.reqs.filter(r => r.emp_id === emp.emp_id && r.date === date && r.status === 'approved' && (r.kind === 'leave' || r.kind === 'trip'));
+      const sumBy = list => list.reduce((o, x) => { o[x.t] = (o[x.t] || 0) + (Number(x.h) || 0); return o; }, {});
+      const have = sumBy(leaves.map(x => ({ t: String(x.type), h: x.hours }))), reqd = sumBy(okRows.map(r => ({ t: r.kind === 'trip' ? '出差' : String(r.leave_type), h: r.hours })));
+      const fmt = n => String(Math.round(n * 100) / 100), out = [];
+      Object.keys(have).forEach(t => { if (!(t in reqd)) out.push('登記了' + t + ' ' + fmt(have[t]) + ' 小時，但沒有已核准的' + (t === '出差' ? '出差單' : '假單')); else if (Math.abs(have[t] - reqd[t]) > 0.005) out.push(t + '核定登記 ' + fmt(have[t]) + ' 小時，已核准的單是 ' + fmt(reqd[t]) + ' 小時'); });
+      Object.keys(reqd).forEach(t => { if (!(t in have)) out.push('有已核准的' + t + ' ' + fmt(reqd[t]) + ' 小時，核定沒有登記'); });
+      if (out.length) return Object.assign(fail('BAD_INPUT', '這天還不能核定：' + out.join('；')), { probs: out.map(t => ({ rule: 'leave', text: t })), need_doc: true });
+    }
     const trip = leaves.reduce((a, x) => a + (x.type === '出差' && x.hours !== '' ? x.hours : 0), 0);
     // 正職上班日滿 8 小時（打卡端 reqFt8_，2026-11-13）：e2e 設 d.ftEmps 才打開；班表 W＋上班＋出差＋已核准假單（看申請單）< 8 就擋
     const pl0 = d.plans && d.plans[emp.emp_id];

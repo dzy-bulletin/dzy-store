@@ -574,15 +574,24 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
 .dq-left{font-size:13px;color:#e8e0d4;text-align:right;flex:none}
 .dq-toast{background:#e3f2e9;color:var(--ok);border-radius:10px;padding:9px 14px;font-weight:700;font-size:14px}
 .dq-fails{background:#fdf0ee;border-left:4px solid var(--red);border-radius:0 8px 8px 0;padding:9px 12px;font-size:13px;overflow-wrap:anywhere}
-.dq-okbox{background:#fff;border:1.5px solid var(--ok);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px}
-.dq-oktop{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
-.dq-oktop b{font-size:18px;font-weight:900;color:var(--ok)}
+.dq-okbox,.dq-ckbox{background:#fff;border:1.5px solid var(--ok);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.dq-oktop,.dq-cktop{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.dq-oktop b,.dq-cktop b{font-size:18px;font-weight:900;color:var(--ok)}
 .dq-sub{font-size:12.5px;color:var(--muted)}
 .dq-names{font-size:15px;overflow-wrap:anywhere}
 .dq-nm.warn{color:#b26a00;font-weight:700}
 .dq-warn{display:inline-block;margin-left:4px;padding:0 6px;border-radius:10px;background:#fff3e0;color:#b26a00;font-weight:700;font-size:11px}
-.dq-ok-all{font:inherit;height:58px;border:0;border-radius:12px;background:var(--red);color:#fff;font-size:18px;font-weight:900;cursor:pointer}
+.dq-ok-all,.dq-ckall{font:inherit;height:58px;border:0;border-radius:12px;background:var(--red);color:#fff;font-size:18px;font-weight:900;cursor:pointer}
 .dq-ok-all:disabled{opacity:.65;cursor:default}
+/* 檢查完才顯示時數（2026-11-18，docs/approve-once/）：灰色「檢查中」群組、逐筆卡右上「檢查中」、停用鈕灰底；檢查讀不到或太久的一行說明 */
+.dq-ckbox{border-color:#c9c1b8;background:#f7f5f2}
+.dq-ckbox .dq-cktop b{color:var(--muted)}
+.dq-ckall:disabled{background:#d9d4ce;color:#fff;opacity:1;cursor:default}
+.dq-ckbox .dq-checking{flex-basis:auto}
+.dq-ckmark{font-weight:700;color:var(--muted)}
+.dq-ckcard .dq-act.primary:disabled{background:#d9d4ce;border-color:#d9d4ce;color:#fff;opacity:1}
+.dq-ckfail{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:#f7f5f2;border-left:4px solid #c9c1b8;border-radius:0 8px 8px 0;padding:9px 12px;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.dq-ckretry{font:inherit;font-size:13px;min-height:36px;padding:0 12px;border:1px solid var(--line);border-radius:8px;background:#fff;color:inherit;cursor:pointer}
 .dq-sec{font-size:15px;font-weight:900;color:var(--red);padding:4px 2px 0}
 .dq-sec.muted{color:var(--muted)}
 .dq-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}

@@ -3,6 +3,7 @@
 // 原則：判斷不了的一律歸「異常」、按鈕只有「到完整頁核對」。寧可多一張卡，不可錯核。
 import * as C from './calc.js';
 import { comparePlan, THRESHOLD_MIN } from '../schedule/compare.js';
+import { corePeriods } from './core-calc.js';
 
 export const OK_MAX_H = 8;           // 一鍵核定的班表時數上限（Eason 定案）
 export const DIFF_MIN = 30;          // 核定和打卡差達這個分鐘數，伺服器要原因（規則 4）
@@ -308,7 +309,15 @@ function classifyRaw(inp) {
     const r = reqs.find((q) => q.pending && !q.decidable);
     return Object.assign(base, { status: 'blocked', tag: '等上層審核', note: (r.hours_only ? '這天有一張' + reqLine(r) + '在審核中，內容你沒有權限看，' : reqLine(r) + ' ') + '要由上層主管審核，審完才能核定', actions: [skip('先跳過，等上層審核')] });
   }
-  if (reqs.length > 1) return full('有多張申請', '這天有 ' + reqs.length + ' 張申請');
+  // 已核准、有填時段的假單／出差單（2026-11-18 Eason，docs/approve-once/）：預檢帶假別，打卡系統說會過才進一鍵核定（quick.js checkOk）；前端先擋的留在逐筆確認、不送檢查
+  const timed = (res, on) => {
+    const lc = on ? timedLeaveCheck({ emp, date, LO, brk, reqs }) : null;
+    if (!lc) return res;
+    if (lc.stop) return Object.assign(full(lc.stop[0], lc.stop[1]), { noCheck: true });
+    if (lc.clash) return Object.assign(full(lc.clash[0], lc.clash[1]), { clashNote: lc.clash[1] });      // 重疊：不帶假別（照原本只送時段），換成講清楚的標籤
+    return Object.assign(res, { leaveCheck: lc.leaves });
+  };
+  if (reqs.length > 1) return timed(full('有多張申請', '這天有 ' + reqs.length + ' 張申請'), date !== today && pv.mode === 'plan' && !splitBreak(emp.plan, brk));      // 多張：今天一律不放（班表還沒結束的判斷在後面）
 
   const br = brk;
   const openOrMissing = segs.some(isOpenSeg);
@@ -345,7 +354,7 @@ function classifyRaw(inp) {
       if (pv.mode !== 'plan' && !offLeave) return full('排休或沒班表又有' + (r.kind === 'trip' ? '出差單' : '假單'), '這天不是上班日，要自己核對');
       if (r.kind === 'trip' && !(Number(r.hours) > 0)) return full('出差單沒有時數', '整天出差要填時數，請按「手動修改」處理');
       if (r.kind === 'leave' && !r.start && !(Number(r.hours) > 0)) return full('假單沒有時數', '假單時數空白或 0，請按「手動修改」核對');      // 比照出差（2026-11-17）：原本時數空白或 0 也能一鍵「核定通過」0 小時
-      if (r.start) return full('部分時段' + (r.kind === 'trip' ? '出差' : '請假'), '有填時段，要自己核對時數');
+      if (r.start) return timed(full('部分時段' + (r.kind === 'trip' ? '出差' : '請假'), '有填時段，要自己核對時數'), true);
       if (segs.length || emp.attempts > 0) return full('有打卡又有' + (r.kind === 'trip' ? '出差單' : '假單'), '整天的單，當天卻有打卡');
       leaves = C.reqLeaveLines([r]).map((x) => ({ type: x.type, hours: (x.hours === 0 || x.hours) ? String(x.hours) : '' }));      // 舊卡片從輸入框送字串
       if (!leaves.length) return full('假單內容不明', '');
@@ -485,6 +494,81 @@ function classifyRaw(inp) {
   if (!planPeriods.length) return full('班表時段不全', '');
   if (raw != null && Math.abs(planHours * 60 - raw) >= DIFF_MIN) return full('打卡時數和班表差太多', '班表 ' + fmtH(planHours) + ' 小時，實際打卡 ' + fmtH(raw / 60) + ' 小時');
   return Object.assign(base, { status: 'ok', hours: planHours, payload: planPayload });
+}
+
+// ---- 已核准、有填時段的假單／出差單（Q2，2026-11-18 Eason；規則白話版與手算對照 docs/approve-once/progress.md）----
+const spanOf = (a, b) => { const x = hm(a), y = hm(b); return x == null || y == null ? null : [x, y <= x ? y + 1440 : y]; };
+const clashMin = (p, q) => Math.max(...[-1440, 0, 1440].map((d) => Math.min(p[1], q[1] + d) - Math.max(p[0], q[0] + d)), 0);      // 跨午夜也比得到
+/**
+ * 預檢要帶的假別列。reqs＝這人這天的申請（含 pending 旗標）。回 null＝不適用（照原本只送時段）；
+ * { leaves }＝帶這些假別去檢查（同手動修改卡片自動填的 C.reqLeaveLines，時數字串）；{ stop:[標籤, 說明] }＝前端先擋，不送檢查、留逐筆確認；
+ * { clash:[標籤, 說明] }＝假單時段跟預填上班時段重疊：不帶假別（照原本只送時段檢查，不會因為 Q2 進一鍵核定），標籤換成講清楚的。
+ * 適用：還沒核定、沒有待審單、每張都是請假或出差、每張都有起訖時段；多張時同一種要是分段請（reqPlan 不判 multi）。
+ */
+export function timedLeaveCheck(inp) {
+  const { emp, date, LO, brk } = inp || {};
+  const reqs = (inp && inp.reqs) || [];
+  if (!emp || emp.approved || !reqs.length) return null;
+  if (reqs.some((r) => !r || r.pending || (r.kind !== 'leave' && r.kind !== 'trip') || !r.start || !r.end)) return null;
+  if (reqs.length > 1 && C.reqPlan(reqs).multi) return null;
+  if (reqs.some((r) => !(Number(r.hours) > 0))) return { stop: ['假單沒有時數', '假單時數空白或 0，請按「手動修改」核對'] };      // 同 2026-11-17 整天假單那條
+  if (reqs.some((r) => r.kind === 'leave' && !r.leave_type)) return { stop: ['假單內容不明', '假單沒有寫假別，請按「手動修改」核對'] };
+  const leaves = C.reqLeaveLines(reqs).map((x) => ({ type: x.type, hours: (x.hours === 0 || x.hours) ? String(x.hours) : '' }));
+  if (!leaves.length || leaves.some((x) => !(Number(x.hours) > 0))) return { stop: ['假單沒有時數', '假單時數空白或 0，請按「手動修改」核對'] };
+  const lp = leaveProblem(LO, emp.emp_id, leaves, date);
+  if (lp) return { stop: ['假別要確認', lp] };
+  const po = personalOverProblem(LO, emp.emp_id, leaves);
+  if (po) return { stop: ['事假超過 14 天', po] };
+  // 假單時段跟要核定的上班時段重疊（例：請開頭一小時、晚一小時才打卡，遲到規則把開頭補回班表；或請假時段裡有打卡）：帶假別送會讓同一段既算上班又算請假（打卡系統不擋這條），
+  // 不帶假別、照原本只送時段（2026-11-18：請假卻有打卡那條「維持請假」照舊）
+  const core = corePeriods({ segs: emp.segments, plan: emp.plan, reqs, brk });
+  if (!core) return null;
+  const ps = core.periods.map((x) => spanOf(x.start, x.end)).filter(Boolean);
+  const hit = reqs.find((r) => { const q = spanOf(r.start, r.end); return q && ps.some((p) => clashMin(p, q) > 0); });
+  if (hit) {
+    const what = (hit.kind === 'trip' ? '出差' : hit.leave_type) + ' ' + hit.start + '–' + hit.end;
+    return { clash: ['假單和上班時段重疊', '已核准的' + what + ' 跟預填的上班時段 ' + core.periods.map((x) => x.start + '–' + x.end).join('、') + ' 重疊（預填照遲到規則從班表開頭算），請按「手動修改」把上班時段改成請假以外的時間'] };
+  }
+  return { leaves };
+}
+
+/** 會被打卡系統檢查影響的人：核定通過＋有異常裡沒有待審單、不是「核准單，核定」的人（quick.js checkOk 與灰色「檢查中」群組共用） */
+export function checkTargets(people) {
+  const s = sections(people);
+  return s.ok.concat(s.abnormal.filter((p) => !p.pendReq && !(p.actions || []).some((a) => a.decide)));
+}
+/**
+ * 送去只檢查的那一筆（mgr_approve_check items[]）：p＝classify 結果、emp＝mgr_day 那一列、core＝corePeriods 結果（可為 null）。
+ * 時段用打卡＋單算好的（core）；有 Q2 假別列就帶上 leaves 與 late_min ''（同手動修改卡片）。前端先擋（noCheck）、或沒有東西可送 → null（不檢查、照原本分類）。
+ */
+export function precheckItem(p, emp, core) {
+  if (!p || !emp || p.noCheck) return null;
+  const a0 = Array.isArray(p.actions) && p.actions[0] && p.actions[0].id !== 'full' ? p.actions[0] : null;
+  const base = (a0 && a0.payload) || p.payload;
+  // 算不出時段（沒班又沒打卡，例：排休那天只有假單）也沒有原本要送的內容：不送檢查，照原本分類（2026-11-14 許芷瑄排休喪假被顯示成 bad_periods）
+  if (!core && !(base && ((base.periods || []).length || (base.leaves || []).length))) return null;
+  const it = Object.assign({ emp_id: emp.emp_id }, base || {}, core ? { periods: core.periods } : {});
+  if (p.leaveCheck) Object.assign(it, { leaves: p.leaveCheck.map((x) => ({ type: x.type, hours: x.hours })), late_min: '' });
+  delete it.store; delete it.date;
+  return it;
+}
+/**
+ * 打卡系統「核定登記的假」不符（Requests.gs reqStrictLeaveProbs_，rule＝leave）→ 主管要做的事（2026-11-18：原本機械換成「請同仁補…」）。
+ * 回 '' ＝沒有這類；否則一句話（結尾「請按「手動修改」」）。
+ */
+export function leaveNeedText(probs) {
+  const L = (Array.isArray(probs) ? probs : []).filter((p) => p && p.rule === 'leave');
+  if (!L.length) return '';
+  const miss = [], other = [];
+  L.forEach((p) => {
+    const t = String(p.text || ''); let m;
+    if ((m = /^有已核准的(.+?) ([\d.]+) 小時，核定沒有登記$/.exec(t))) miss.push(m[1] + ' ' + m[2] + ' 小時');
+    else if ((m = /^(.+?)核定登記 ([\d.]+) 小時，已核准的單是 ([\d.]+) 小時$/.exec(t))) other.push(m[1] + '要照已核准的單登記 ' + m[3] + ' 小時（現在登記 ' + m[2] + ' 小時）');
+    else if ((m = /^登記了(.+?) ([\d.]+) 小時，但沒有已核准的(假單|出差單)$/.exec(t))) other.push('核定登記了' + m[1] + ' ' + m[2] + ' 小時，但沒有已核准的' + m[3]);
+    else if (t) other.push(t);
+  });
+  const parts = (miss.length ? [(miss.length === 1 ? '這張已核准的' : '已核准的') + miss.join('、') + '要登記進核定'] : []).concat(other);
+  return parts.length ? parts.join('；') + '，請按「手動修改」' : '';
 }
 
 /** 全域防呆：任何按鈕要送的時段不合理、或時數不在 0～12 小時 → 只剩「到完整頁核對」，不出現一鍵或照打卡／照班表 */

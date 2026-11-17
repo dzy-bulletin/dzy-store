@@ -16,7 +16,7 @@ body.embed{
 }
 body.embed main{padding-top:16px}
 /* 卡片：管理系統 .card＝白底、1px 框、圓角 10px、淡陰影 */
-body.embed .card, body.embed .du-card, body.embed .du-pa, body.embed .dq-card, body.embed .dq-okbox{border-color:var(--dzy-line);border-radius:var(--dzy-radius);box-shadow:var(--dzy-shadow)}
+body.embed .card, body.embed .du-card, body.embed .du-pa, body.embed .dq-card, body.embed .dq-okbox, body.embed .dq-ckbox{border-color:var(--dzy-line);border-radius:var(--dzy-radius);box-shadow:var(--dzy-shadow)}
 /* 按鈕：高 44px、圓角 10px；主要＝鼎兆元紅、次要＝白底框線 */
 body.embed .btn{border-radius:var(--dzy-radius);min-height:44px;padding:10px 18px;font-weight:600}
 body.embed .btn.sm{min-height:34px;padding:6px 12px;border-radius:8px}

@@ -377,7 +377,9 @@ async function goDzyLogin() {
 // 兌換並採用。fromParent＝嵌入握手：已有登入時，伺服器回的 sub 相同就保留原本的（可能已換過店），不同就先登出舊的再換
 async function runTicket(ticket, fromParent) {
   if (SSO_BUSY) return;
+  const wasShowing = !!(PENDING || SSO_ERR);      // 選店畫面或錯誤畫面正顯示著：握手結果出來一定要重畫把它換掉
   SSO_BUSY = true; SSO_ERR = '';
+  let quiet = false;      // 同一個人同一家店、權限沒變的重新握手：只換了新 token，不重畫（整個模組被重建、副本重抓，主管看到畫面一直跳；2026-11-18）
   try {
     const old = getSession();
     let r = await ssoRedeem(ticket, { only: ONLY || undefined, prefer: fromParent && old ? old.code : undefined });
@@ -388,14 +390,15 @@ async function runTicket(ticket, fromParent) {
       else if (list.length === 1) r = await ssoSelect(r.select_token, list[0].code);   // 考勤管理只剩一家能用：直接進，不用選
       else { PENDING = { select_token: r.select_token, stores: list }; return; }
     }
-    const { kept } = await adoptResult(r, fromParent);
+    const { kept, changed } = await adoptResult(r, fromParent);
     PENDING = null;
+    quiet = !!(fromParent && kept && !changed && !wasShowing);
     if (!kept && old) { location.hash = ONLY ? `#/${ONLY}/` : '#/'; location.reload(); return; }   // 換了人／換了登入方式：整頁重載，不留上一個人的畫面與暫存
     if (!kept) location.hash = ONLY ? `#/${ONLY}/` : '#/';
   } catch (e) {
     if (getSession() && fromParent) console.error('嵌入重新握手失敗：' + e.message);   // 已有登入就不打擾，使用者繼續用目前的
     else SSO_ERR = e.message;
-  } finally { SSO_BUSY = false; await UI_READY; render(); }      // 外觀設定還沒到就先等（握手跟讀外觀同時進行）
+  } finally { SSO_BUSY = false; if (!quiet) { await UI_READY; render(); } }      // 外觀設定還沒到就先等（握手跟讀外觀同時進行）
 }
 async function onHash() {
   const t = takeTicketFromHash();

@@ -48,16 +48,26 @@ export function pickSchedStore(s, mode) {
   if (mode === 'store') { let last = ''; try { last = sessionStorage.getItem(LAST_STORE) || ''; } catch (e) {} return list.find(x => x.code === last) || list[0]; }
   return list[0];
 }
+// 一個 session 去掉 token／expiresAt 之後的「身分＋權限＋店別」指紋（鍵排序、undefined 不算）：同一個人同一家店重新握手時，
+// 指紋一樣＝只是換了新 token，畫面與模組暫存都不用動；指紋不同（features、role、stores、attStores、dutyView…變了）＝權限或店別有變，要照常重畫（2026-11-18）。
+const canon = v => Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.keys(v).sort().reduce((o, k) => (v[k] === undefined ? o : (o[k] = canon(v[k]), o)), {}) : v;
+export function sessionFingerprint(s) {
+  if (!s) return '';
+  const o = { ...s }; delete o.token; delete o.expiresAt;
+  return JSON.stringify(canon(o));
+}
 // 採用新的登入結果。目前已有別的登入（別的人、或門市帳號）→ 先把舊 session 在伺服器端登出再換；
 // 嵌入模式每次握手都會收到新券：伺服器回的 sub 跟目前相同（而且是同一家店）→ 採用新 token、把舊 token 登出（新 token 帶最新權限；
-// 使用者可能已換過店或在做事，所以不重載畫面，kept=true 代表「同一個人同一家店，不用重載」）。
+// 使用者可能已換過店或在做事，所以不重載畫面，kept=true 代表「同一個人同一家店，不用重載」；changed＝新舊 session 去掉 token 後有差，要重畫）。
 export async function adoptResult(d, keepSame) {
   const old = getSession();
   const same = !!(old && old.person && d.person && old.person.sub === d.person.sub);
   if (keepSame && same && old.code === d.code) {
-    setSession(toSession(d));
+    const fresh = toSession(d);
+    const changed = sessionFingerprint(old) !== sessionFingerprint(fresh);      // 權限或店別有變：呼叫端要照常重畫
+    setSession(fresh);
     if (old.token && old.token !== d.token) api('POST', '/logout', {}, old.token).catch(() => {});   // 不等它：舊 token 登出不影響畫面（2026-11-02 少等一趟）
-    return { session: getSession(), kept: true };
+    return { session: getSession(), kept: true, changed };
   }
   if (old && old.token && old.token !== d.token) {
     try { await api('POST', '/logout', {}, old.token); } catch (e) {}
