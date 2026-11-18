@@ -662,6 +662,11 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
 .dq-todaygo{flex:0 0 auto}
 .dq-toggle{font:inherit;min-height:50px;border:1px solid var(--line);border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 14px;font-weight:700;margin-top:4px;cursor:pointer}
 .dq-rq{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+/* 還沒核定、有待審單（2026-11-18）：卡片上的提示＋直接列待審單給核准／退回 */
+.dq-pendnote{background:#fff4e0;color:var(--warn,#8a5a00);border-radius:8px;padding:8px 10px;font-size:13px;font-weight:600}
+.dq-pendreqs{display:flex;flex-direction:column;gap:8px}
+.dq-pendreqs .dq-rq{border-style:dashed}
+.du-leavewarn{font-size:12.5px;font-weight:700;color:var(--warn,#8a5a00);border-left:3px solid var(--warn,#c98a00);padding-left:8px;margin:6px 0}
 .dq-rtop{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .dq-rtop b{font-size:16px}
 .dq-rk{font-size:12.5px;font-weight:700;color:var(--red)}

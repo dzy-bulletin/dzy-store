@@ -7,6 +7,7 @@ import { approvedSegTag, proxyOtSegs, SEG_MAX_OT_ADMIN } from './req-group.js';
 import { corePeriods, OVER_BLOCK_MIN, otSuggestText, cardDiffs, cardLabel, cardReasonText } from './core-calc.js';
 import * as C from './calc.js';
 import { api } from '../../js/api.js';
+import { leaveOverText } from './core-calc.js';      // 2026-11-18 第 5 題提醒（另起一行：上面那行同時有別的分支在改）
 import { planFlags, REASONS } from './quick-calc.js';
 import { ssoSwitch, setSession, toSession } from '../../js/auth.js';
 import { renderQuick, backBar, e2eNoCore } from './quick.js';
@@ -693,6 +694,7 @@ function buildCard(emp, date) {
   // ---- 打卡＋單＝核定時數（2026-11-14 Eason 定案，docs/punch-plus-req/）：系統先照原則算好時段（core-calc.js），檢查會過＝亮燈「核定通過」，
   //      不會過＝灰底「未符合規定」＋要補齊的單（每項有處理鈕）、核定鈕灰掉；檢查讀不到＝照舊（可以送出，由打卡系統送出時判）
   const verdict = h('div', 'du-verdict'); verdict.hidden = true;
+  const leaveWarn = h('div', 'du-leavewarn', '', { role: 'note' }); leaveWarn.hidden = true;
   body.insertBefore(verdict, badge.nextSibling);
   let editOpen = false;
   const editEls = () => [periodRows, totalBox, moreBtn, actions].concat(moreBox.hidden ? [] : [moreBox]);
@@ -701,6 +703,10 @@ function buildCard(emp, date) {
     if (readOnly || !card.__pending || emp.approved || e2eNoCore()) return;
     const pr = corePeriods({ segs: C.segsWithDupPicks(emp.segments, dupGroups, dupPicks), plan: emp.plan, reqs: card.__dayReqs || [], brk: br });
     card.__prop = pr;
+    // 假單沒填時段、上班＋假單比班表多（2026-11-18 Eason 第 5 題）：只提醒、不擋
+    const lw = leaveOverText(pr);
+    if (lw && !leaveWarn.isConnected) body.insertBefore(leaveWarn, verdict);
+    leaveWarn.textContent = lw; leaveWarn.hidden = !lw;
     if (!pr) return;
     periodRows.textContent = '';
     pr.periods.forEach(x => periodRows.append(periodRow(x, refresh)));
@@ -782,7 +788,7 @@ function buildCard(emp, date) {
       setEdit(editOpen);
     } else if (ck.error === 'need_diff_reason') {
       // 每張卡跟核定差超過 30 分鐘（2026-11-16 Eason）：單都齊了，每張卡選一個原因；選好寫進原因欄（diff_reason）→ 重新檢查 → 變「核定通過」
-      const cards = Array.isArray(ck.cards) && ck.cards.length ? ck.cards : cardDiffs(emp.segments, readRows().filter(r => r.start && r.end));
+      const cards = Array.isArray(ck.cards) && ck.cards.length ? ck.cards : cardDiffs(emp.segments, readRows().filter(r => r.start && r.end), String(lateIn.value || '').trim() === '' ? null : Number(lateIn.value));      // 主管填的遲到分鐘算已涵蓋（2026-11-18）
       mini.className = 'du-mini pending'; mini.textContent = '要選原因';
       verdict.className = 'du-verdict gray du-verdict-why';
       verdict.append(h('div', 'du-verdict-t', '打卡跟核定差超過 30 分鐘，每張卡選一個原因' + (ps ? '（核定 ' + ps + '）' : '')));

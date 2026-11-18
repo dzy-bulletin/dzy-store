@@ -142,13 +142,13 @@ export function renderQuick(ctx) {
       Object.assign(p, { status: 'abnormal', tag: u.pre ? (u.failedDiff ? '要寫原因' : '還不能核定') : '沒核定成功', note: u.failed, actions: [main, { id: 'full', label: '手動修改', primary: false }] });
     }
     // 打卡＋單＝核定時數（2026-11-14）：檢查會過＝照算好的時段核定；異常的人也移到「核定通過」；不會過＝寫出要補齊的單
-    if (u.pass && !u.failed && !p.pendReq && !e2eNoCore() && (p.status === 'ok' || p.status === 'abnormal')) {      // 已核定又有待審單：維持「有待審單」（2026-11-16）
+    if (u.pass && !u.failed && !p.pendReq && !p.hasPend && !e2eNoCore() && (p.status === 'ok' || p.status === 'abnormal')) {      // 已核定又有待審單：維持「有待審單」（2026-11-16）；還沒核定、有待審單（hasPend）也不升（2026-11-18 第 7 題，第二道）
       const cards = u.cards && u.cards.length ? u.cards : null;
       const act = { id: 'plan', label: '核定 ' + C.round2(u.pass.hours) + ' 小時' + (cards ? '（選原因）' : ''), primary: true, hours: u.pass.hours, payload: u.pass.payload, askReason: !!cards, cards };
       Object.assign(p, cards ? { status: 'abnormal', tag: '要選原因', note: '打卡跟核定差超過 30 分鐘：' + cards.map(cardLabel).join('、') }
         : { status: 'ok', tag: '核定通過', note: C.crossNotes(emp, u.pass.notes, u.pass.hours, firstStart(u.pass.payload)).join('；') },
         { hours: u.pass.hours, payload: u.pass.payload, actions: [act, { id: 'full', label: '手動修改', primary: false }] });
-    } else if ((u.need || u.needMgr) && !p.pendReq && !e2eNoCore() && p.status === 'abnormal') {      // 不會過：寫出要補齊的單，不再給「選原因」（2026-11-14 不再靠寫原因放行）
+    } else if ((u.need || u.needMgr) && !p.pendReq && !p.hasPend && !e2eNoCore() && p.status === 'abnormal') {      // 不會過：寫出要補齊的單，不再給「選原因」（2026-11-14 不再靠寫原因放行）
       // 核定登記假別（needMgr，2026-11-18）是主管在手動修改裡做的事，不寫成「請同仁補…」；同時缺同仁的單時兩句都寫
       const mgrOnly = !!u.needMgr && !u.need;
       const note = (u.need ? '要補齊：' + u.need + (u.needMgr ? '；' + u.needMgr : '') : u.needMgr) + (p.clashNote ? '；' + p.clashNote : '');      // 假單和上班時段重疊：提醒照留
@@ -156,9 +156,9 @@ export function renderQuick(ctx) {
         actions: [{ id: 'full', label: mgrOnly ? '手動修改' : '手動修改（幫同仁開單或改單）', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
     }
     // 列進「核定通過」的人：打卡比班表晚到、早退達 15 分鐘，名單上標橘色「遲到 N 分／早退 N 分」（只提醒不擋，同完整頁的橘色標籤；2026-11-15 考勤驗收 B2-2b-4）
-    if (p.status === 'ok') p.warn = Q.lateEarlyOf(emp, brkOf(emp)).tags;
+    if (p.status === 'ok') p.warn = Q.lateEarlyOf(emp, brkOf(emp), (approved && approved[key]) || []).tags;      // 帶已核准的單：有時段假單時遲到從假單結束算（2026-11-18，跟展開說明同一個數）
     // 請假卻有打卡（2026-11-15 開工確認第 5 題）：標紅提醒、不擋。維持請假要選理由；要算上班就到細調把假單作廢
-    if ((p.status === 'ok' || p.status === 'abnormal') && !emp.approved) {
+    if ((p.status === 'ok' || p.status === 'abnormal') && !emp.approved && !p.hasPend) {      // 有待審單：先審單（不給「維持請假，核定」）
       const m = modelOf(emp, date, approved);
       if (m.leavePunch) {
         const base = mainAction(p);
@@ -174,6 +174,7 @@ export function renderQuick(ctx) {
       const x = C.crossOt(emp, base.hours != null ? base.hours : p.hours, firstStart(base.payload || p.payload));
       if (x) p.note = (p.note ? p.note + '；' : '') + x.text;
     }
+    if (p.leaveWarn && !String(p.note || '').includes(p.leaveWarn)) p.note = (p.note ? p.note + '；' : '') + p.leaveWarn;      // 假單沒填時段、上班＋假單比班表多（2026-11-18 第 5 題）：只提醒，前面換掉 note 的也補回來
     // 在等同仁補單、還沒有新的單送來：不列在要處理的人裡（列在「等同仁補單」），不算「還剩幾人」；單送來了就回到原本的分類
     const w = waitOf(key, date);
     if (w && ['ok', 'abnormal', 'blocked'].includes(p.status) && !arrived(w)) p.status = 'waiting';
@@ -410,8 +411,9 @@ export function renderQuick(ctx) {
     const now = new Set(Q.checkTargets(st.people).filter((p) => p.status === 'ok' || !e2eNoCore()).map((p) => p.key));
     return new Set([...keys].filter((k) => now.has(k)));
   }
-  function startCheck(tok) {
+  function startCheck(tok, only) {
     const plan = checkPlan();
+    if (only) for (const [k, pairs] of [...plan]) { const keep = pairs.filter((x) => only.has(x[0].key)); if (keep.length) plan.set(k, keep); else plan.delete(k); }      // 卡片上審完單：只重新檢查那個人（2026-11-18 第 8 題）
     st.checking = plan.size > 0; st.ckFail = '';
     st.ckKeys = new Set([].concat(...[...plan.values()]).map((x) => x[0].key));
     render();
@@ -453,7 +455,7 @@ export function renderQuick(ctx) {
           if (!probs.length && !r.message && CHECK_CODE[r.error] === null) return;      // 格式類錯誤（不是缺單）：不標，照原本分類
           const ps = (Array.isArray(it.periods) ? it.periods : []).filter((x) => x && x.start && x.end).map((x) => x.start + '–' + x.end).join('、');
           // 核定登記假別（打卡端 rule＝leave）是主管在手動修改裡做的事：另外寫，不混進「請同仁補…」（2026-11-18）
-          const mgr = Q.leaveNeedText(probs), rest = probs.filter((x) => !x || x.rule !== 'leave');
+          const mgr = Q.mgrNeedText(probs), rest = probs.filter((x) => !x || (x.rule !== 'leave' && x.rule !== 'ot_gap'));      // ot_gap（加班單沒接上，2026-11-18）也是主管改時段或請同仁改單，不寫「請同仁補」
           const text = rest.length ? rest.map((x) => C.fixText(x, ps)).join('；') : probs.length ? '' : String(r.message || CHECK_CODE[r.error] || '打卡系統不接受，請按「手動修改」核對').replace(/^這天還不能核定：/, '');
           if (p.status === 'ok') Object.assign(U(p.key), { failed: '還不能核定：' + [text, mgr].filter(Boolean).join('；'), failedDiff: false, pre: true });
           else Object.assign(U(p.key), { need: text, needMgr: mgr });
@@ -463,6 +465,18 @@ export function renderQuick(ctx) {
     clearTimeout(timer);
     if (tok !== st.tok || !live()) return;
     st.checking = false; st.ckFail = miss ? 'fail' : ''; recompute(); render();
+    if (st.ckAgain && st.ckAgain.size) { const again = st.ckAgain; st.ckAgain = null; startCheck(tok, again); }      // 檢查中在卡片上審了單：這次跑完再檢查那些人
+  }
+  // 卡片上審完待審單（2026-11-18 第 8 題）：核准的單算進已核准，重新分類，那個人自己再跟打卡系統檢查一次
+  function afterDecide(it, decision) {
+    const key = Q.keyOf(it);
+    if (decision === 'approve' && it.date === st.date) { const list = st.appr[key] || (st.appr[key] = []); if (!list.some((x) => String(x.id) === String(it.id))) list.push(Object.assign({}, it, { status: 'approved' })); }
+    if (it.date !== st.date) return;
+    st.fineEls.delete(key);      // 細調卡片照新的單重建
+    const u = U(key); u.pass = null; u.cards = null; u.need = ''; u.needMgr = ''; u.mismatch = '';
+    recompute();
+    if (st.checking) { (st.ckAgain || (st.ckAgain = new Set())).add(key); return; }
+    if (Q.checkTargets(st.people).some((p) => p.key === key)) startCheck(st.tok, new Set([key]));
   }
   // 這天都處理完了 → 自動換下一天
   async function afterChange() {
@@ -587,7 +601,7 @@ export function renderQuick(ctx) {
   async function approveAll(store) {
     if (st.busy) return;
     const gray = st.checking ? grayKeys('run') : new Set();      // 檢查中的人（灰組）不送：鈕本來就停用，這裡再擋一次
-    const list0 = secs().ok.filter((p) => (typeof store !== 'string' || storeOf(p) === store) && !gray.has(p.key));
+    const list0 = secs().ok.filter((p) => (typeof store !== 'string' || storeOf(p) === store) && !gray.has(p.key) && !p.hasPend && !p.pendReq);      // 有待審單的人不送（2026-11-18 第 7 題，再擋一次）
     // 檢查還沒回來就按（2026-11-14）：打卡超出班表＋加班單 30 分鐘以上的人先在這裡擋下（這條打卡系統不會擋），移到異常區
     const list = list0.filter((p) => {
       if (U(p.key).pass || e2eNoCore()) return true;
@@ -717,12 +731,13 @@ export function renderQuick(ctx) {
       delete S.dayCache[it.date];
       st.handled.add(k);
       st.extra.push(it.name + (decision === 'approve' ? ' 核准' : ' 退回') + ' ' + C.REQ_KIND_LABEL[it.kind] + '單' + (r && r.warn ? '（⚠ ' + (r.message || '那天已經核定過，請重新核定一次') + '）' : ''));      // 2026-11-13 a2
+      afterDecide(it, decision);
     } catch (e) {
       st.reqMsg[k] = '沒有成功：' + ((e && e.message) || '請再試一次');
       if (uncertain(e)) {                                     // 逾時：先重讀，單子已不在待審＝其實處理成功
         try {
           const fate = await reqFate(it.id, it.store, it.date);
-          if (fate === (decision === 'approve' ? 'approved' : 'gone')) { st.handled.add(k); st.reqMsg[k] = ''; st.extra.push(it.name + (decision === 'approve' ? ' 核准' : ' 退回') + ' ' + C.REQ_KIND_LABEL[it.kind] + '單'); }
+          if (fate === (decision === 'approve' ? 'approved' : 'gone')) { st.handled.add(k); st.reqMsg[k] = ''; st.extra.push(it.name + (decision === 'approve' ? ' 核准' : ' 退回') + ' ' + C.REQ_KIND_LABEL[it.kind] + '單'); recompute(); }
           else if (fate === 'pending') st.reqMsg[k] = '回應逾時，已重新讀取：沒有寫入，可以再按一次';
           else { st.handled.add(k); st.extra.push(it.name + ' 的申請已被處理，結果請到申請審核看'); }
         } catch (e2) { st.reqMsg[k] = '連線有問題，無法確認有沒有寫入，請重新載入頁面再看'; }
@@ -763,7 +778,12 @@ export function renderQuick(ctx) {
     if (adv && grid.firstChild) { grid.classList.add('adv'); timeChips(grid.childNodes[1]); }      // 建議補單：底色框＋時段做成小標籤，一眼看得出要補哪幾段（2026-11-16 Eason：更有質感、好辨識）
     if (grid.childNodes.length) c.append(grid);
     if (Q.overText(p)) c.append(h('div', 'du-total-over dq-over', Q.overText(p)));      // 超過單日 10 小時：紅字、不擋（2026-11-15）
-    const pend = st.pending.filter((it) => it.date === st.date && Q.keyOf(it) === p.key && !st.handled.has(hid(it)) && it.attach_id && Q.reqDecidable(it, canWriteRow));      // 不能審的單（含自己的）伺服器不給看附件，同 request.js
+    // 還沒核定、有待審單（2026-11-18 第 7、8 題）：標「有待審單：先審單再核定」，卡片直接列待審單給核准／退回（同「其他申請」那列），審完自動重新分類。
+    //   按鈕已經有那張單的退回（申請和打卡對不上＝只給退回）就不重複列
+    const pendList = p.hasPend && !(p.actions || []).some((a) => a.id === 'reject') ? reqShown(st.pending).filter((it) => it.date === st.date && Q.keyOf(it) === p.key && !st.handled.has(hid(it)) && Q.reqDecidable(it, canWriteRow)) : [];
+    if (p.pendNote) c.append(h('div', 'dq-pendnote', p.pendNote, { role: 'note' }));
+    if (pendList.length) { const box = h('div', 'dq-pendreqs'); pendList.forEach((it) => box.append(otherReqEl(it))); c.append(box); }
+    const pend = st.pending.filter((it) => it.date === st.date && Q.keyOf(it) === p.key && !st.handled.has(hid(it)) && it.attach_id && Q.reqDecidable(it, canWriteRow) && !pendList.includes(it));      // 不能審的單（含自己的）伺服器不給看附件，同 request.js；列在待審單裡的那張已有附件鈕
     pend.forEach((it) => c.append(attachEl(it)));
     if (u.proxied) c.append(h('div', 'dq-info', '已幫同仁開單：' + u.proxied + '。等總監在「申請審核」核准後，再回來核定。'));
     if (u.msg) c.append(h('div', 'dq-msg bad', u.msg, { role: 'alert' }));

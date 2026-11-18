@@ -3,7 +3,7 @@
 // 原則：判斷不了的一律歸「異常」、按鈕只有「到完整頁核對」。寧可多一張卡，不可錯核。
 import * as C from './calc.js';
 import { comparePlan, THRESHOLD_MIN } from '../schedule/compare.js';
-import { corePeriods } from './core-calc.js';
+import { corePeriods, leaveOverText } from './core-calc.js';
 
 export const OK_MAX_H = 8;           // 一鍵核定的班表時數上限（Eason 定案）
 export const DIFF_MIN = 30;          // 核定和打卡差達這個分鐘數，伺服器要原因（規則 4）
@@ -161,9 +161,17 @@ export function segLag(planSegs, segments) {
  * 門檻不另外寫：用完整頁同一個 comparePlan（schedule/compare.js THRESHOLD_MIN），再用 lag／segLag 算一次、兩邊取大的。
  * 有異常卡片的標籤、「核定通過」名單上的橘色提醒都用這一份（2026-11-15 考勤驗收 B2-2b-4）。
  */
-export function lateEarlyOf(emp, br) {
+export function lateEarlyOf(emp, br, reqs) {
   const plan = comparePlanOf(emp && emp.plan), segs = segsOf(emp);
   if (!plan || !segs.length) return { late: 0, early: 0, tags: [] };
+  // 有已核准、有填時段的假單／出差單（2026-11-18）：遲到從假單結束（再順延過休息）算、早退比到假單開始——跟核定說明「遲到 N 分」同一個來源（core-calc corePeriods 的 late／early），
+  //   不再拿整天班表比（例 A 事假 09–11、11:20 打卡：原本標「遲到 140 分」，說明卻寫 20 分）。沒有這種單的人照舊（comparePlan、達 15 分才標）。
+  const ok = (reqs || []).filter((r) => r && !r.pending && (r.kind === 'leave' || r.kind === 'trip') && r.start && r.end);
+  if (ok.length) {
+    const core = corePeriods({ segs: emp.segments, plan: emp.plan, reqs: (reqs || []).filter((r) => r && !r.pending), brk: br });
+    const late = core && core.late > 0 ? core.late : 0, early = core && core.early > 0 ? core.early : 0;      // 不另設 15 分門檻：跟說明「遲到 N 分」一字不差（說明有寫就標）
+    return { late, early, tags: [late ? '遲到 ' + late + ' 分' : '', early ? '早退 ' + early + ' 分' : ''].filter(Boolean) };
+  }
   const cp = comparePlan(plan, emp.segments, { past: true, brk: br });
   const fl = parseFlags(cp ? cp.flags : []);
   const n = emp.plan.segs.length;
@@ -278,7 +286,8 @@ function classifyRaw(inp) {
   const { emp, date, today, brk, LO, canHours, skipped } = inp;
   const reqs = inp.reqs || [];
   const key = keyOf(emp);
-  const base = { key, name: emp.name, empId: emp.emp_id, store: emp.store || '', date, status: '', tag: '', planText: '', punchText: '', note: '', chk: '', hours: null, payload: null, actions: [], skipped: !!skipped, reqId: null };
+  const base = { key, name: emp.name, empId: emp.emp_id, store: emp.store || '', date, status: '', tag: '', planText: '', punchText: '', note: '', chk: '', hours: null, payload: null, actions: [], skipped: !!skipped, reqId: null,
+    hasPend: reqs.some((r) => r && r.pending && r.decidable) };      // 有這位主管審得了的待審單（2026-11-18 第 7 題）：不送檢查、不進一鍵核定（classify 結尾標 pendNote，標籤照原本）
   const pv = C.planPrefill(emp, emp.plan, brk);
   base.planText = pv.mode === 'plan' ? pv.text.replace(/^班表 /, '') : (pv.text || '沒有班表');      // 已核定的人也要寫班表（2026-11-16：原本在已核定分支之後才算，已核定卡片時間軸有班表、文字卻寫「沒有班表」）
   // 休息日／例假出勤要在班表文字標出來（2026-11-15 Eason）；放在已核定分支之前，已核定的人也要標（2026-11-17 Eason：吳佳宜 11/1 已核定卡片看不出是休息日加班）
@@ -511,6 +520,11 @@ export function timedLeaveCheck(inp) {
   if (!emp || emp.approved || !reqs.length) return null;
   if (reqs.some((r) => !r || r.pending || (r.kind !== 'leave' && r.kind !== 'trip') || !r.start || !r.end)) return null;
   if (reqs.length > 1 && C.reqPlan(reqs).multi) return null;
+  // 兩張不同假別的單時段互相重疊（2026-11-18 驗收）：登記的時數加起來會把重疊那段算兩次 → 前端先擋、留逐筆（打卡端 reqLeaveOverlapProbs_ 也擋）
+  for (let i = 0; i < reqs.length; i++) for (let j = i + 1; j < reqs.length; j++) {
+    const p = spanOf(reqs[i].start, reqs[i].end), q = spanOf(reqs[j].start, reqs[j].end);
+    if (p && q && clashMin(p, q) > 0) return { stop: ['假單時段重疊', '已核准的' + (reqs[i].kind === 'trip' ? '出差' : reqs[i].leave_type) + ' ' + reqs[i].start + '–' + reqs[i].end + ' 跟' + (reqs[j].kind === 'trip' ? '出差' : reqs[j].leave_type) + ' ' + reqs[j].start + '–' + reqs[j].end + ' 時段重疊，同一段不能請兩次，請作廢或改其中一張'] };
+  }
   if (reqs.some((r) => !(Number(r.hours) > 0))) return { stop: ['假單沒有時數', '假單時數空白或 0，請按「手動修改」核對'] };      // 同 2026-11-17 整天假單那條
   if (reqs.some((r) => r.kind === 'leave' && !r.leave_type)) return { stop: ['假單內容不明', '假單沒有寫假別，請按「手動修改」核對'] };
   const leaves = C.reqLeaveLines(reqs).map((x) => ({ type: x.type, hours: (x.hours === 0 || x.hours) ? String(x.hours) : '' }));
@@ -519,15 +533,15 @@ export function timedLeaveCheck(inp) {
   if (lp) return { stop: ['假別要確認', lp] };
   const po = personalOverProblem(LO, emp.emp_id, leaves);
   if (po) return { stop: ['事假超過 14 天', po] };
-  // 假單時段跟要核定的上班時段重疊（例：請開頭一小時、晚一小時才打卡，遲到規則把開頭補回班表；或請假時段裡有打卡）：帶假別送會讓同一段既算上班又算請假（打卡系統不擋這條），
-  // 不帶假別、照原本只送時段（2026-11-18：請假卻有打卡那條「維持請假」照舊）
+  // 假單時段跟要核定的上班時段重疊：2026-11-18 起 corePeriods 已扣掉已核准、有時段的假單（遲到從假單結束算、請假時段裡有打卡也扣），正常不會再發生；
+  // 留著當防呆（算法以後改壞時不帶假別、留逐筆），打卡系統也會擋（Requests.gs leave_overlap）
   const core = corePeriods({ segs: emp.segments, plan: emp.plan, reqs, brk });
-  if (!core) return null;
+  if (!core || !core.periods.length) return null;      // 上班時段全被假單蓋掉（整天有時段假單、當天卻有打卡）：照原本逐筆（2026-11-18 第 4 題維持現狀；手動修改卡片照假單預填、上班時段空）
   const ps = core.periods.map((x) => spanOf(x.start, x.end)).filter(Boolean);
   const hit = reqs.find((r) => { const q = spanOf(r.start, r.end); return q && ps.some((p) => clashMin(p, q) > 0); });
   if (hit) {
     const what = (hit.kind === 'trip' ? '出差' : hit.leave_type) + ' ' + hit.start + '–' + hit.end;
-    return { clash: ['假單和上班時段重疊', '已核准的' + what + ' 跟預填的上班時段 ' + core.periods.map((x) => x.start + '–' + x.end).join('、') + ' 重疊（預填照遲到規則從班表開頭算），請按「手動修改」把上班時段改成請假以外的時間'] };
+    return { clash: ['假單和上班時段重疊', '已核准的' + what + ' 跟預填的上班時段 ' + core.periods.map((x) => x.start + '–' + x.end).join('、') + ' 重疊，請按「手動修改」把上班時段改成請假以外的時間'] };
   }
   return { leaves };
 }
@@ -535,7 +549,7 @@ export function timedLeaveCheck(inp) {
 /** 會被打卡系統檢查影響的人：核定通過＋有異常裡沒有待審單、不是「核准單，核定」的人（quick.js checkOk 與灰色「檢查中」群組共用） */
 export function checkTargets(people) {
   const s = sections(people);
-  return s.ok.concat(s.abnormal.filter((p) => !p.pendReq && !(p.actions || []).some((a) => a.decide)));
+  return s.ok.concat(s.abnormal.filter((p) => !p.pendReq && !p.hasPend && !(p.actions || []).some((a) => a.decide)));      // hasPend：還沒核定、有待審單（2026-11-18 第 7 題）
 }
 /**
  * 送去只檢查的那一筆（mgr_approve_check items[]）：p＝classify 結果、emp＝mgr_day 那一列、core＝corePeriods 結果（可為 null）。
@@ -543,6 +557,7 @@ export function checkTargets(people) {
  */
 export function precheckItem(p, emp, core) {
   if (!p || !emp || p.noCheck) return null;
+  if (core && !core.periods.length) core = null;      // 上班時段全被假單蓋掉（2026-11-18）：當成算不出時段，照原本
   const a0 = Array.isArray(p.actions) && p.actions[0] && p.actions[0].id !== 'full' ? p.actions[0] : null;
   const base = (a0 && a0.payload) || p.payload;
   // 算不出時段（沒班又沒打卡，例：排休那天只有假單）也沒有原本要送的內容：不送檢查，照原本分類（2026-11-14 許芷瑄排休喪假被顯示成 bad_periods）
@@ -556,6 +571,11 @@ export function precheckItem(p, emp, core) {
  * 打卡系統「核定登記的假」不符（Requests.gs reqStrictLeaveProbs_，rule＝leave）→ 主管要做的事（2026-11-18：原本機械換成「請同仁補…」）。
  * 回 '' ＝沒有這類；否則一句話（結尾「請按「手動修改」」）。
  */
+/** 主管自己要處理的（不是請同仁補單）：核定登記假別（leave）＋加班單跟上班時段沒接上（打卡端 ot_gap，2026-11-18 驗收 A，原文照顯示） */
+export function mgrNeedText(probs) {
+  const gaps = (Array.isArray(probs) ? probs : []).filter((p) => p && p.rule === 'ot_gap' && p.text).map((p) => String(p.text));
+  return [leaveNeedText(probs)].concat(gaps).filter(Boolean).join('；');
+}
 export function leaveNeedText(probs) {
   const L = (Array.isArray(probs) ? probs : []).filter((p) => p && p.rule === 'leave');
   if (!L.length) return '';
@@ -590,6 +610,19 @@ export function classify(inp) {
     }
   }
   if ((res.status === 'ok' || res.status === 'abnormal') && hs.some((h) => C.overDay(h))) res.over = true;      // 超過單日 10 小時：照實核定、卡片標紅（需求 2；2026-11-15）
+  // 還沒核定、有這位主管審得了的待審單（2026-11-18 Eason 第 7、8 題）：一律留逐筆、標「有待審單」，卡片直接列待審單給核准／退回（quick.js pendReqsEl），審完自動重新分類。
+  //   「核准單，核定 X 小時」那條（decide）本來就先審單再核定，照舊；已核定又有待審單（pendReq）照 11/16。
+  //   標籤與按鈕照原本的判斷（例：申請和打卡對不上＝只給退回），另外標 pendNote，checkTargets 排除、quick.js 也不升「核定通過」。
+  if (res.hasPend && !res.pendReq && (res.status === 'ok' || res.status === 'abnormal') && !(res.actions || []).some((a) => a.decide)) {
+    if (res.status === 'ok') Object.assign(res, { status: 'abnormal', tag: '有待審單', actions: [{ id: 'full', label: '手動修改', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });      // 防呆：有待審單不會是「沒問題」
+    res.pendNote = '有待審單：先審單再核定';
+    delete res.leaveCheck;      // 不帶假別送檢查（本來就不送）
+  } else res.hasPend = false;      // decide／已核定（pendReq）／blocked：照原本的流程
+  // 假單沒填時段、上班＋假單比班表多（2026-11-18 第 5 題）：只提醒、不擋
+  if ((res.status === 'ok' || res.status === 'abnormal') && !inp.emp.approved && (inp.reqs || []).some((r) => !r.pending && (r.kind === 'leave' || r.kind === 'trip') && !r.start)) {
+    const w = leaveOverText(corePeriods({ segs: inp.emp.segments, plan: inp.emp.plan, reqs: (inp.reqs || []).filter((r) => !r.pending), brk: inp.brk }));
+    if (w) { res.leaveWarn = w; res.note = (res.note ? res.note + '；' : '') + w; }
+  }
   return res;
 }
 

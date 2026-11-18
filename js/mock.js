@@ -937,6 +937,17 @@ function dutyDo(d, action, b) {
       Object.keys(have).forEach(t => { if (!(t in reqd)) out.push('登記了' + t + ' ' + fmt(have[t]) + ' 小時，但沒有已核准的' + (t === '出差' ? '出差單' : '假單')); else if (Math.abs(have[t] - reqd[t]) > 0.005) out.push(t + '核定登記 ' + fmt(have[t]) + ' 小時，已核准的單是 ' + fmt(reqd[t]) + ' 小時'); });
       Object.keys(reqd).forEach(t => { if (!(t in have)) out.push('有已核准的' + t + ' ' + fmt(reqd[t]) + ' 小時，核定沒有登記'); });
       if (out.length) return Object.assign(fail('BAD_INPUT', '這天還不能核定：' + out.join('；')), { probs: out.map(t => ({ rule: 'leave', text: t })), need_doc: true });
+      // 核定上班時段跟已核准、有時段的假單／出差單重疊（打卡端 Requests.gs reqLeaveOverlapProbs_，2026-11-18 第 6 題；字句照抄，任何重疊都擋）
+      const mm = t => +t.slice(0, 2) * 60 + +t.slice(3), hmOf = n => String(Math.floor((n % 1440) / 60)).padStart(2, '0') + ':' + String(n % 60).padStart(2, '0');
+      const PS = periods.filter(p => p && /^\d{2}:\d{2}$/.test(p.start || '') && /^\d{2}:\d{2}$/.test(p.end || '')).map(p => [mm(p.start), mm(p.end) <= mm(p.start) ? mm(p.end) + 1440 : mm(p.end)]);
+      const ov = [];
+      okRows.filter(r => /^\d{2}:\d{2}$/.test(r.start || '') && /^\d{2}:\d{2}$/.test(r.end || '') && r.start !== r.end).forEach(r => {
+        const a = mm(r.start), b2 = mm(r.end) <= a ? mm(r.end) + 1440 : mm(r.end);
+        let best = 0, hit = [];
+        [0, -1440, 1440].forEach(dd => { let t = 0; const hh = []; PS.forEach(p => { const m = Math.min(p[1], b2 + dd) - Math.max(p[0], a + dd); if (m > 0) { t += m; hh.push(p); } }); if (t > best) { best = t; hit = hh; } });
+        if (best > 0) ov.push('核定上班 ' + hit.map(p => hmOf(p[0]) + '–' + hmOf(p[1])).join('、') + ' 跟已核准的' + (r.kind === 'trip' ? '出差' : String(r.leave_type || '假')) + ' ' + r.start + '–' + r.end + ' 重疊 ' + best + ' 分鐘，同一段不能同時算上班和' + (r.kind === 'trip' ? '出差' : '請假') + '，請把上班時段改到' + (r.kind === 'trip' ? '出差單' : '假單') + '以外（要算上班就先作廢那張單）');
+      });
+      if (ov.length) return Object.assign(fail('BAD_INPUT', '這天還不能核定：' + ov.join('；') + '。請照上面調整核定時段，或處理那張單。'), { probs: ov.map(t => ({ rule: 'leave_overlap', text: t })), need_doc: false });
     }
     const trip = leaves.reduce((a, x) => a + (x.type === '出差' && x.hours !== '' ? x.hours : 0), 0);
     // 正職上班日滿 8 小時（打卡端 reqFt8_，2026-11-13）：e2e 設 d.ftEmps 才打開；班表 W＋上班＋出差＋已核准假單（看申請單）< 8 就擋
@@ -978,16 +989,33 @@ function dutyDo(d, action, b) {
         const G = f.segs.map(x => [mm(x.in), mm(x.out) <= mm(x.in) ? mm(x.out) + 1440 : mm(x.out)]).sort((x, y) => x[0] - y[0]);
         let over = P.reduce((a, p) => a + (p[1] - p[0]) - G.reduce((c, g) => c + Math.max(0, Math.min(p[1], g[1]) - Math.max(p[0], g[0])), 0), 0);
         over -= Math.max(0, Math.min(G[0][0], P[0][1]) - P[0][0]);
+        // 中間假單結束後晚回來＝遲到、不算多核（打卡端 reqOverCreditMin_ backs，2026-11-18 Eason 選 B）：第二段以後的開頭＝已核准有時段假單／出差單的結束（或結束在休息帶、開頭＝休息結束）
+        const bk = Array.isArray(d.brk) && d.brk[0] && d.brk[1] ? [mm(d.brk[0]), mm(d.brk[1])] : null;
+        const backs = d.reqs.filter(r => r.emp_id === emp.emp_id && r.date === date && r.status === 'approved' && (r.kind === 'leave' || r.kind === 'trip') && /^\d{2}:\d{2}$/.test(r.start || '') && /^\d{2}:\d{2}$/.test(r.end || '')).map(r => mm(r.end));
+        P.slice(1).forEach(p => {
+          if (!backs.some(e => e === p[0] || e === p[0] - 1440 || (bk && p[0] === bk[1] && e >= bk[0] && e <= bk[1]))) return;
+          if (G.some(g => g[0] <= p[0] && g[1] > p[0])) return;
+          const ins = G.filter(g => g[0] > p[0] && g[0] < p[1]).map(g => g[0]);
+          if (ins.length) over -= Math.min(...ins) - p[0];
+        });
+        // 請假前提早離開＝早退、不算多核（打卡端 reqOverCreditMin_ starts，2026-11-18 Eason）：核定結尾＝已核准有時段假單的開始（或開始在休息帶、結尾＝休息開始）
+        const starts = d.reqs.filter(r => r.emp_id === emp.emp_id && r.date === date && r.status === 'approved' && (r.kind === 'leave' || r.kind === 'trip') && /^\d{2}:\d{2}$/.test(r.start || '') && /^\d{2}:\d{2}$/.test(r.end || '')).map(r => mm(r.start));
+        P.forEach(p => {
+          if (!starts.some(t => t === p[1] || t + 1440 === p[1] || (bk && p[1] === bk[0] && t >= bk[0] && t <= bk[1]))) return;
+          if (G.some(g => g[0] < p[1] && g[1] >= p[1])) return;
+          const outs = G.filter(g => g[1] > p[0] && g[1] < p[1]).map(g => g[1]);
+          if (outs.length) over -= p[1] - Math.max(...outs);
+        });
         if (over >= (Number(d.diffRule) || 30)) return Object.assign(fail('BAD_INPUT', '這天還不能核定：核定比打卡多 ' + over + ' 分鐘（沒有打卡的時間要有忘打卡單、假單或補休單）。請同仁在 LINE「加班請假」補申請。'),
           { probs: [{ rule: 'over_credit', text: '核定比打卡多 ' + over + ' 分鐘（沒有打卡的時間要有忘打卡單、假單或補休單）' }], need: { over_min: over }, need_doc: true });
       }
     }
-    // 每張卡跟核定差超過 30 分鐘要原因（2026-11-16 Eason；打卡端 REQ_CARD_REASON_FROM 預設 2026-11-17）：示範模式預設不擋（舊 e2e 的日子都在之後）；
-    // e2e 設 d.cardRule＝起算日（或 true＝2026-11-17）才打開。缺單的檢查在上面，單齊了才看這條，同打卡端
-    const cardFrom = d.cardRule === true ? '2026-11-17' : d.cardRule;
+    // 每張卡跟核定差超過 30 分鐘要原因（2026-11-16 Eason；打卡端 REQ_CARD_REASON_FROM 預設 2026-11-01）：示範模式預設不擋（舊 e2e 的日子都在之後）；
+    // e2e 設 d.cardRule＝起算日（或 true＝2026-11-01）才打開。缺單的檢查在上面，單齊了才看這條，同打卡端
+    const cardFrom = d.cardRule === true ? '2026-11-01' : d.cardRule;      // 2026-11-18 起算日改 11/1（同打卡端）
     if (cardFrom && date >= cardFrom && periods.length && !String(b.diff_reason ?? '').trim()) {
       const f = fakeOf(emp.emp_id);
-      const cards = f ? cardDiffs(f.segs, periods) : [];
+      const cards = f ? cardDiffs(f.segs, periods, String(b.late_min ?? '').trim() === '' ? null : Number(b.late_min)) : [];      // 已記成遲到／早退的不用原因（2026-11-18，同打卡端）
       if (cards.length) return Object.assign(fail('need_diff_reason', '核定和打卡差超過 30 分鐘：' + cards.map(c => (c.side === 'in' ? '上班卡 ' : '下班卡 ') + c.card + '（核定 ' + c.core + '，差 ' + c.min + ' 分）').join('、') + '，每張卡要選原因才能送出。'), { cards });
     }
     const dupIgn = Array.isArray(b.dup_ignore) ? b.dup_ignore.slice() : ((d.approved[date + emp.emp_id] || {}).dup_ignore || []);

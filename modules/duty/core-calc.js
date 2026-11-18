@@ -17,14 +17,17 @@ export const DAY_FREE_MIN = 480;
  *  跟打卡端 Requests.gs reqCardDiffs_ 同一套：一段打卡對到重疊的核定時段，上班卡比最早那段的開始、下班卡比最晚那段的結束；
  *  整段沒被核定就比最近的開始／結束；只有單邊的卡只比有的那邊。CARD_REASON_FROM 起的日子才要（打卡端 REQ_CARD_REASON_FROM）。 */
 export const CARD_DIFF_MIN = 30;
-export const CARD_REASON_FROM = '2026-11-17';
-export function cardDiffs(segs, periods) {
+export const CARD_REASON_FROM = '2026-11-01';      // 2026-11-18 Eason「卡差 30 分起算日維持 11/1」（原本 11/17；同打卡端 REQ_CARD_REASON_FROM_DEFAULT_）
+// 2026-11-18 Eason 拿掉「遲到超過 30 分要選原因」（同打卡端 reqCardDiffs_）：上班卡晚於對到的核定開始＝記成遲到、下班卡早於對到的核定結束＝記成早退，不算卡差；
+// lateGiven＝主管填的遲到分鐘（沒填 null）：只有他認的分鐘算已涵蓋。仍要原因：早到很多、晚走很多、整段沒被核定。
+export function cardDiffs(segs, periods, lateGiven) {
   const ps0 = (periods || []).map((p) => span(toMin(p.start), toMin(p.end))).filter(Boolean);
   if (!ps0.length) return [];
   // 核定時段只有時鐘時間：跨夜的核定被拆成兩段（22:00–01:00、01:30–06:00）時，午夜後那段其實是隔天 → 多放一份「加一天」的再比（2026-11-17；原本誤報下班卡差 300 分）
   const ps = ps0.concat(ps0.filter((p) => p[1] <= 1440).map((p) => [p[0] + 1440, p[1] + 1440]));
   const near = (t, i) => ps.reduce((a, p) => (a == null || Math.abs(p[i] - t) < Math.abs(a - t) ? p[i] : a), null);
   const out = [];
+  let lateLeft = lateGiven == null || lateGiven === '' ? null : Math.max(0, Number(lateGiven) || 0);
   for (const g of segs || []) {
     if (!g) continue;
     let a = toMin(g.in), b = toMin(g.out);
@@ -34,8 +37,13 @@ export function cardDiffs(segs, periods) {
       const ov = ps.filter((p) => Math.min(b, p[1]) > Math.max(a, p[0]));
       if (ov.length) { st = Math.min(...ov.map((p) => p[0])); en = Math.max(...ov.map((p) => p[1])); }
     }
-    if (a != null) { const c = st != null ? st : near(a, 0), d = Math.abs(a - c); if (d > CARD_DIFF_MIN) out.push({ side: 'in', card: toHm(a), core: toHm(c), min: d }); }
-    if (b != null) { const c = en != null ? en : near(b, 1), d = Math.abs(b - c); if (d > CARD_DIFF_MIN) out.push({ side: 'out', card: toHm(b), core: toHm(c), min: d }); }
+    if (a != null) {
+      const c = st != null ? st : near(a, 0), d = Math.abs(a - c);
+      let left = d;
+      if (st != null && a > c) { const cov = lateLeft == null ? d : Math.min(d, lateLeft); if (lateLeft != null) lateLeft -= cov; left = d - cov; }
+      if (left > CARD_DIFF_MIN) out.push({ side: 'in', card: toHm(a), core: toHm(c), min: d });
+    }
+    if (b != null) { const c = en != null ? en : near(b, 1), d = Math.abs(b - c); if (!(en != null && b < c) && d > CARD_DIFF_MIN) out.push({ side: 'out', card: toHm(b), core: toHm(c), min: d }); }
   }
   return out;
 }
@@ -100,8 +108,18 @@ function snapOut(t, bounds) { const b = bounds.find((x) => Math.abs(x - t) <= TO
 export function corePeriods(o) {
   const plan = o.plan && o.plan.work && Array.isArray(o.plan.segs) ? o.plan.segs : [];
   const S = merge(plan.map((x) => span(toMin(x.start), toMin(x.end))));
+  // 沒有班表（這家店沒排他，例：到別店支援；或班表時段是空的）＋有已核准加班單（2026-11-18 Eason，張淳 11/17 金山）：照打卡算，加班單只標示哪段是加班、不截斷時段。
+  // 排休（plan.work === false：休息日／例假整天算加班）不算這種，照舊只算加班單那段
+  const noSched = !S.length && !(o.plan && o.plan.work === false);
   const reqs = Array.isArray(o.reqs) ? o.reqs : [];
   const otRaw = reqs.filter((r) => r.kind === 'ot').map((r) => span(toMin(r.start), toMin(r.end)));
+  const lvReqs = reqs.filter((r) => r && (r.kind === 'leave' || r.kind === 'trip') && r.pending !== true);      // 只算已核准（呼叫端本來就只給已核准的；防呆）
+  const lvSpan = (r) => (toMin(r.start) != null && toMin(r.start) === toMin(r.end) ? null : span(toMin(r.start), toMin(r.end)));      // 起訖相同（11:00–11:00）＝沒有時段，忽略（同打卡端；原本被當成 24 小時）
+  const LVraw = lvReqs.map(lvSpan).filter((x) => x && x[1] > x[0]);
+  // 假單時數（分鐘）：有填時數照時數，只有時段沒時數照時段長度（第 4 題：上班＋假滿 8 小時就不再多算班表外的打卡）
+  const leaveMin = lvReqs.reduce((a, r) => { const h = Number(r.hours); if (h > 0) return a + h * 60; const x = lvSpan(r); return a + (x ? x[1] - x[0] : 0); }, 0)
+    - Math.max(0, LVraw.reduce((a, x) => a + x[1] - x[0], 0) - total(merge(LVraw)));      // 兩張假單時段重疊：重疊那段只算一次（2026-11-18 驗收）
+  const untimedLeave = lvReqs.some((r) => !lvSpan(r) && Number(r.hours) > 0);
   const brkS = toMin(o.brk && o.brk.start), brkE = toMin(o.brk && o.brk.end);
   const BRK = brkS != null && brkE != null && brkE > brkS ? [[brkS, brkE]] : [];
   // 半天班（2026-11-17 Eason）：班表從第一段開始到最後一段結束沒有整段蓋過休息帶（例 央廚 09:00–12:30、總部 14:15–22:15）→ 班表裡的時間不扣休息帶。
@@ -149,6 +167,18 @@ export function corePeriods(o) {
   // 只搬「當天那個時間沒有打卡對到、加一天後落在這天班表或打卡的範圍內（差 15 分內算接得上）」的單；其他照舊（2026-11-15 考勤驗收 C6-6）
   const dayEnd = Math.max(...Wraw.concat(S).map((x) => x[1]));
   const OT = merge(otRaw.map((x) => (x && dayEnd > 1440 && x[1] <= 1440 && x[0] + 1440 <= dayEnd + TOL && !total(intersect([x], Wraw)) ? [x[0] + 1440, x[1] + 1440] : x)));
+  // 已核准、有填起訖的假單／出差單時段（2026-11-18 Eason 第 1、2 題，docs/decisions/0005-開頭請假與待審單核定-20261118.md）：
+  //   假單時段一律不算上班（核定扣掉，請假時段裡有打卡也一樣；要算上班就作廢假單）；班表開頭請假 → 遲到從假單結束算。
+  //   跨夜班凌晨的假單（班表 22:00–06:00、事假 05:00–06:00）同加班單：當天那個時間對不到班表／打卡、加一天落在這天範圍內 → 換到隔天。
+  const LV = merge(LVraw.map((x) => (dayEnd > 1440 && x[1] <= 1440 && x[0] + 1440 < dayEnd && !total(intersect([x], S.concat(Wraw))) ? [x[0] + 1440, x[1] + 1440] : x)));
+  // 遲到／早退用的班表（2026-11-18）：每段班開頭被假單蓋到的部分往後推到假單結束、結尾被蓋到的往前推到假單開始（只推頭尾；班表中間的假不改遲到規則）。
+  //   推到的點落在不打卡休息帶裡（或剛好是休息開始）→ 再順延到休息結束（結尾：提前到休息開始）；跨夜班的休息帶也試加一天。
+  //   例 班表 09–18、休 12–13、事假 09–12、13:10 回來 → 遲到從 13:00 算＝10 分（原本從 12:00 算＝70）。整段班都被假單蓋掉的那段不算。
+  const BRKs = BRKcut.concat(BRKcut.map(([a, b]) => [a + 1440, b + 1440]));
+  const pushIn = (a, end) => { for (let k = 0; k < 8; k++) { const l = LV.find((x) => x[0] <= a && x[1] > a), b = !l && BRKs.find((x) => x[0] <= a && x[1] > a); if (l) a = Math.min(l[1], end); else if (b) a = Math.min(b[1], end); else break; } return a; };
+  const pullOut = (e, beg) => { for (let k = 0; k < 8; k++) { const l = LV.find((x) => x[0] < e && x[1] >= e), b = !l && BRKs.find((x) => x[0] < e && x[1] >= e); if (l) e = Math.max(l[0], beg); else if (b) e = Math.max(b[0], beg); else break; } return e; };
+  const SL = S.map((s) => { const a = LV.some((x) => x[0] <= s[0] && x[1] > s[0]) ? pushIn(s[0], s[1]) : s[0]; const y = [a, s[1]]; y.moved = a !== s[0]; return y; }).filter((x) => x[1] > x[0]);
+  const SE = S.map((s) => (LV.some((x) => x[0] < s[1] && x[1] >= s[1]) ? [s[0], pullOut(s[1], s[0])] : s.slice())).filter((x) => x[1] > x[0]);
   // 1b. 班別設定的休息（break_min）：同一段班中間出去休息有打卡 → 從出去那張卡起扣滿休息分鐘；休超過的照實扣到回來那張卡（2026-11-17 Eason「照班別休息分鐘扣，超過的照實扣」）。
   //     原本兩張卡各往內取整到 15 分，休 23 分會被扣成 45 分（陳盈如 11/2 E班 09:00–17:30 休 30：13:25 出、13:48 回 → 7.75 小時，主管手動核 13:25–13:55＝8 小時）。
   //     做法：出去、回來那兩張卡先接成一段（不取整），最後再把休息挖掉。每段班只認第一個空檔；空檔要整個在那段班裡。
@@ -165,12 +195,13 @@ export function corePeriods(o) {
     }
   }
   if (RESTS.length) notes.push('休息 ' + RESTS.map(([a, b]) => toHm(a) + '–' + toHm(b)).join('、') + '（班別休息從出去那張卡起算' + (RESTS.some(([a, b]) => b - a > 0 && plan.some((p) => Number(p.break_min) > 0 && b - a > Number(p.break_min))) ? '，休超過的照實扣' : '') + '）');
-  const bounds = [].concat(...S, ...OT, ...BRK);
+  const bounds = [].concat(...S, ...OT, ...BRK, ...LV);      // 已核准、有時段假單的起訖也當對齊點（2026-11-18 Eason 選 A：假 16–18、15:50 下班 → 算到 16:00；假 17–19、19:10 回 → 從 19:00 起）
   W = merge(W.map(([a, b]) => [snapIn(a, bounds), snapOut(b, bounds)]));
 
   // 2. 班表＋已核准加班單裡的打卡照算；都沒有（排休、沒排班又沒加班單）就照打卡（打卡端回要加班單）
   const A = merge(S.concat(OT));
-  let core = A.length ? intersect(W, A) : W.map((x) => x.slice());
+  const otOnly = noSched && OT.length > 0;      // 沒班表＋有加班單：照打卡（見上面 noSched）
+  let core = A.length && !otOnly ? intersect(W, A) : W.map((x) => x.slice());
   // 3. 遲到：開頭留班表。
   //    當天第一張上班卡那段班：比班表開頭晚 → 核定從班表開頭起、標遲到（原本的規則）。
   //    後面的班段（兩段班的第二段）：只有「那段的打卡不完整、靠忘打卡單或班表邊界補上」時才照班表開頭填
@@ -178,30 +209,95 @@ export function corePeriods(o) {
   //    後面的班段打卡完整就照打卡算——11 月正式資料重放：每段都留班表開頭會讓 54 人天預填變動、14 筆離主管實核更遠（墨竹亭兩段班晚上常晚到，主管都照實核）。
   //    共同條件：只補「那張上班卡那段打卡」的開頭，那段取整後還在、而且就在這段班裡。打卡短到取整後消失（09:31–09:44）、或那張卡在這段班快結束才打（兩段班 13:51）→ 不補。
   let late = 0;
-  if (S.length && core.length && Wraw.length) {
-    for (const s0 of S) {
+  if (SL.length && core.length && Wraw.length) {
+    for (const s0 of SL) {
       const ins = Wraw.filter((w) => w[0] > s0[0] && w[0] < s0[1]).map((w) => w[0]);
       if (!ins.length) continue;
       const firstIn = Math.min(...ins);
       if (Wraw.some((w) => w[0] <= s0[0] && w[1] > s0[0])) continue;
-      if (s0 !== S.find((y) => y[1] > Wraw[0][0]) && !raw.some((x) => (x.guess || x.fromReq.in || x.fromReq.out) && x.in != null && x.out != null && x.in < s0[1] && (x.cross ? x.out + 1440 : (x.out <= x.in ? x.out + 1440 : x.out)) > s0[0])) continue;      // 這段班開頭已經有打卡蓋到（早到、或前一段打卡接過來）：不是遲到
-      const c = core.find((x) => x[0] > s0[0] && x[0] < s0[1]);
+      // 2026-11-18 Eason（取代上面 11/17「後面的班段打卡完整就照打卡算」）：每一段班的開頭晚到都記遲到、核定從那段班表開始（有假單蓋住開頭＝從假單結束），不論有沒有假單、是第幾段。
+      //   原本只補「當天第一段」與「那段靠忘打卡單／班表邊界補上」的段。15 分內對齊照班表邊界現行做法（核定對齊、遲到分鐘由打卡端照實記）。
+      const c = core.find((x) => (s0.moved ? x[0] >= s0[0] : x[0] > s0[0]) && x[0] < s0[1]);      // 推過的起點（假單結束／休息結束）不吃 15 分寬限：13:10 回來＝遲到 10
       if (!c || core.some((x) => x !== c && x[0] < c[0] && x[1] > s0[0])) continue;
       if (c[0] <= snapIn(firstIn, bounds)) { late += firstIn - s0[0]; c[0] = s0[0]; }
     }
     core = merge(core);
   }
+  // 早退（2026-11-18，給一頁核定名單的橘色標籤，跟遲到同一個來源）。
+  //   請假前提早走（2026-11-18 Eason「請假前提早離開一律記早退」）：已核准、有時段的假單開始（落在休息帶就往前到休息開始）＝該下班的時間 stops；
+  //   不論早走幾分鐘，核定算到那個時間、另記早退分鐘（下面 3'' 一起處理，班表結尾被假單蓋到的、班表中間的假單都算）。
+  //   班表結尾沒有假單：照舊（核定照打卡＋對齊，早退分鐘只給名單標籤）。
+  let early = 0;
+  const stops = [];
+  // 2026-11-18 Eason「二段班各段開頭晚到與結尾早走一律記遲到早退（含沒有假單）」：多段班中間那幾段的結尾（後面還有一段班）也是該下班的時間 sched。
+  //   當天最後一段的結尾（＝單段班的下班）照舊：核定照打卡＋對齊、不補（正職不足 8 小時要假單，由打卡端檢查）。
+  S.forEach((s, i) => { if (LV.some((x) => x[0] < s[1] && x[1] >= s[1])) { const d = pullOut(s[1], s[0]); if (d > s[0]) stops.push({ d, s }); } else if (i < S.length - 1) stops.push({ d: s[1], s, sched: true }); });
+  if (SE.length && Wraw.length && !stops.some((x) => x.s === S[S.length - 1])) { const last = SE[SE.length - 1], lo = Math.max(...Wraw.map((w) => w[1])); if (lo > last[0] && lo < last[1] && snapOut(lo, bounds) >= last[1]) early = total(minus([[lo, last[1]]], BRKs)); }      // 只算打卡端會記的（差 15 分內對齊到下班時間；更早走＝核定照打卡取整、打卡端不記早退）
+  // 3'. 班表中間請假（2026-11-18 Eason 選 B）：比照開頭請假——假單結束（落在休息帶再順延到休息結束）就是該回來的時間，晚回來＝遲到，核定從那個時間起（同開頭「留班表」）；
+  //     假單開始（落在休息帶再提前到休息開始）前提早走＝早退（只算分鐘給名單標籤；核定時段照打卡＋對齊，同結尾早退）。休息帶不算進分鐘。
+  //     例 班表 09–18、休 12–13、補休 14–15：15:20 回 → 核定 15:00 起、遲到 20；13:50 走 → 下班對齊 14:00、早退 10。回來時間有打卡蓋到（請假時段裡有打卡）→ 不算遲到。
+  if (LV.length && core.length && Wraw.length) {
+    for (const l of LV) {
+      const sg = S.find((x) => l[0] > x[0] && l[1] < x[1]);      // 假單整個在這段班中間（開頭、結尾的上面已算）
+      if (!sg) continue;
+      const r = pushIn(l[1], sg[1]);
+      const back = Wraw.filter((w) => w[0] > r && w[0] < sg[1]).map((w) => w[0]);
+      if (r < sg[1] && back.length && !Wraw.some((w) => w[0] <= r && w[1] > r)) {
+        const firstBack = Math.min(...back), cc = core.find((x) => x[0] >= r && x[0] < sg[1]);
+        // 不設門檻（2026-11-18 Eason 選 B：晚回來達 30 分以上也一律從假單結束起算、記遲到）。打卡端 reqOverCreditMin_ 同日起把「假單結束到回來那張卡」當遲到、不當多核工時
+        //（Requests.gs reqLeaveBackMs_；舊打卡端達 30 分會擋「核定比打卡多」，上線要打卡端先）
+        const gap = total(minus([[r, firstBack]], BRKs));
+        if (cc && cc[0] <= snapIn(firstBack, bounds) && !core.some((x) => x !== cc && x[0] < cc[0] && x[1] > r)) { late += gap; cc[0] = r; }
+      }
+      const d = pullOut(l[0], sg[0]);
+      if (d > sg[0]) stops.push({ d, s: sg });
+    }
+    core = merge(core);
+  }
+  // 3''. 請假前提早走：核定補到該下班的時間（同晚回來補到假單結束），早退分鐘＝那個時間－最後一張下班卡（休息帶不算）。
+  //      例 班表 09–18、休 12–13、事假 16–18：15:44 走 → 09–12、13–16＝6 小時、早退 16（原本 15:30、5.5 小時、不記）。
+  //      那個時間有打卡蓋到（做到請假時段裡）、或那段班裡沒有下班卡 → 不適用。打卡端 reqOverCreditMin_ 同日起把這段當早退、不當多核工時。
+  let stopEarly = 0;
+  let schedEarly = 0;
+  for (const { d, s, sched } of stops) {
+    const before = Wraw.filter((w) => w[0] < d && w[1] > s[0]);
+    if (!before.length || Wraw.some((w) => w[0] < d && w[1] >= d)) continue;
+    const lo0 = Math.max(...before.map((w) => w[1]));
+    // 2026-11-18 驗收：①中間隔著不打卡休息帶（午休前就走、沒回來）＝中途離開不回來，照 main 的單段班中途離開：照打卡算、不補、不記早退（正職不足 8 小時要假單）；
+    //   ②多段班中間那段：走了之後、下一段班開始前又回來打卡（整天打卡型態跟班表錯開，例：班表 11:30–15:30／17:00–21:00、打卡 10:51–15:02、15:54–20:02）＝不是提早走，不補
+    if (BRKs.some((b) => b[0] < d && b[1] >= lo0)) continue;      // 休息結束整點才走（13:00 整）也算午休前就走、下午沒上（2026-11-18 驗收 B）；13:01 走才算下午有上班
+    if (sched) { const nx = S.find((x) => x[0] >= s[1]); if (nx && Wraw.some((w) => w[0] > lo0 && w[0] < nx[0])) continue; }
+    //   ③多段班中間那段走了之後整天沒再回來（例：總部 09–14／15–18、12:30 走就沒回來）＝中途離開不回來，同①照打卡、不補（2026-11-18 驗收第 7 點）
+    if (sched && !Wraw.some((w) => w[0] >= d)) continue;
+    const lo = Math.max(...before.map((w) => w[1]));
+    if (lo >= d) continue;
+    const gone = total(minus([[lo, d]], BRKs));
+    early += gone; if (sched) schedEarly += gone; else stopEarly += gone;
+    const cc = core.filter((x) => x[1] <= d && x[1] <= lo + TOL && x[1] > s[0]).sort((a, b) => b[1] - a[1])[0];
+    if (cc) cc[1] = d;
+  }
+  core = merge(core);
+  // 3a. 假單時段不算上班（第 2 題）：請假時段裡有打卡也扣掉，說明寫出來
+  let lvAll = false;
+  if (LV.length) {
+    const hit = intersect(core, LV);
+    if (hit.length) notes.push('請假 ' + hit.map(([a, b]) => toHm(a) + '–' + toHm(b)).join('、') + ' 有打卡，照假單不算上班（要算上班請把假單作廢）');
+    lvAll = core.length > 0 && !minus(core, LV).length;      // 上班時段全被已核准假單蓋掉（整天有時段假單、當天卻有打卡）
+    core = minus(core, LV);
+  }
   // 3b. 班表以外的打卡（S 有班表時）：當天不含加班單的時數還沒滿 8 小時，就照時間先後算進去，滿 8 小時為止；超過的部分要加班單（2026-11-16）。
   //     放在遲到補開頭之後算：遲到的那段照「開頭留班表」算在 8 小時裡（打卡端是看核定時數超過 8 小時就要加班單）
   let freeExtra = [];
   if (S.length) {
-    let budget = Math.max(0, DAY_FREE_MIN - total(minus(minus(core, OT), BRKcut.concat(RESTS))));      // 班別休息也不算      // 不打卡休息帶不算上班時間
+    let budget = Math.max(0, DAY_FREE_MIN - total(minus(minus(core, OT), BRKcut.concat(RESTS))) - leaveMin);      // 班別休息也不算      // 不打卡休息帶不算上班時間；已核准假單／出差時數算進 8 小時（2026-11-18 第 4 題）
     // 只算真的打卡（忘打卡單補的時間超出班表照舊不算，例 10），也不算照班表猜的缺卡
     const real = merge(raw.filter((x) => x.in != null && x.out != null && !x.guess && !x.fromReq.in && !x.fromReq.out).map((x) => span(x.in, x.out)).map(([a, b]) => [snapIn(a, bounds), snapOut(b, bounds)]));
-    for (const [a, b] of minus(intersect(minus(W, A), real), BRK)) {
+    for (const [a, b] of minus(intersect(minus(W, A), real), BRK.concat(LV))) {
       if (budget <= 0) break;
       const take = Math.min(b - a, budget);
-      freeExtra.push([a, a + take]); budget -= take;
+      // 額度不夠整段：這段後面緊接著核定時段、前面沒接 → 取靠核定那頭（2026-11-18 驗收 MZTMC01 11/01：取前頭會在同一段打卡中間留洞，打卡端判少打卡）
+      const tail = take < b - a && core.some((x) => x[0] === b) && !core.some((x) => x[1] === a);
+      freeExtra.push(tail ? [b - take, b] : [a, a + take]); budget -= take;
     }
     freeExtra = merge(freeExtra);
     core = merge(core.concat(freeExtra));
@@ -212,13 +308,15 @@ export function corePeriods(o) {
   else if (BRK.length) core = merge(intersect(core, S).concat(minus(minus(core, S), BRK)));      // 半天班：班表裡不扣，班表外多出來的照扣
   if (RESTS.length) core = minus(core, RESTS);
   core = merge(core);
+  if (!core.length && lvAll) return { periods: [], hours: 0, notes, late: 0, early: 0, over: [], overMin: 0, leaveOver: 0 };      // 照假單登記、上班時段空（2026-11-18 驗收：原本回 null 不預填）
   if (!core.length) return null;
 
   // 5. 給主管看的說明
   const FREE = merge(A.concat(freeExtra));
   // 不打卡休息帶（央廚 12–13、總部 14–15）：中間沒打下班卡照樣是休息，不算多出來的時段（2026-11-16 Eason：吳佳宜 08:25–17:42 被要求補 12:15–12:45 加班單）
-  const WnoBrk = minus(Wraw, BRK);
-  for (const x of minus(WnoBrk, FREE.length ? FREE : WnoBrk)) if (x[1] - x[0] > TOL) notes.push(toHm(x[0]) + '–' + toHm(x[1]) + ' 超過當天 8 小時、沒有加班單，不算');
+  const WnoBrk = minus(Wraw, BRK.concat(LV));      // 請假時段裡的打卡照假單算，不算「多出來要加班單」
+  if (otOnly) notes.push('這天沒有班表：照打卡算，已核准加班單 ' + OT.map(([a, b]) => toHm(a) + '–' + toHm(b)).join('、') + ' 是其中的加班時段（跨店同一天合計超過 8 小時的部分照加班歸屬由這家吸收）');
+  for (const x of (otOnly ? [] : minus(WnoBrk, FREE.length ? FREE : WnoBrk))) if (x[1] - x[0] > TOL) notes.push(toHm(x[0]) + '–' + toHm(x[1]) + ' 超過當天 8 小時、沒有加班單，不算');
   const freeMin = total(freeExtra);
   if (freeMin > 0) notes.push('比班表多 ' + Math.round(freeMin / 6) / 10 + ' 小時（當天沒滿 8 小時，不用加班單）');
   for (const x of raw) if (x.fromReq.out && S.length && x.out != null && x.out > S[S.length - 1][1] + TOL && !OT.some((y) => x.out <= y[1] + TOL)) {
@@ -229,19 +327,29 @@ export function corePeriods(o) {
   const extra = total(minus(minus(core, S), freeExtra));
   if (S.length && extra > 0 && OT.length) notes.push('比班表多 ' + Math.round(extra / 6) / 10 + ' 小時（已核准加班單）');
   if (late > 0) notes.push('遲到 ' + late + ' 分（薪資照扣）');
+  if (stopEarly > 0) notes.push('早退 ' + stopEarly + ' 分（請假前提早走，薪資照扣）');
+  if (schedEarly > 0) notes.push('早退 ' + schedEarly + ' 分（這段班提早走，薪資照扣）');      // 多段班中間那段的結尾（2026-11-18）      // 2026-11-18：核定補到假單開始，打卡端照記早退 N 分
 
   // 超過當天 8 小時、又不在加班單裡的打卡時段；沒班表也沒加班單時不算（打卡端會要加班單）。
   // 2026-11-16 Eason：「時段的認定是以 15 分鐘為一單位，上班前 15 分鐘打卡跟下班後 15 分鐘打卡都不算在薪資內」
   //   → 緊接在班表或已核准加班單前後的那 15 分鐘先扣掉（「滿 8 小時」那個點不是上下班，不扣），剩下的再往內取整到 15 分，不到 15 分的整段不列。
   //   例 班表 12:00–16:00、18:00–22:15，打卡 11:58–16:19、17:54–22:20 → 0 分（原本照實際打卡算 32 分、被擋）。
-  const outside = A.length ? overUnits(minus(WnoBrk, FREE), A.concat(BRK)) : [];
+  const outside = A.length && !otOnly ? overUnits(minus(WnoBrk, FREE), A.concat(BRK)) : [];
   const over = outside.map(([a, b]) => ({ start: toHm(a), end: toHm(b) }));
   const overMin = total(outside);
   const periods = core.map(([a, b]) => ({ start: toHm(a), end: toHm(b) }));
-  return { periods, hours: Math.round(total(core) / 60 * 100) / 100, notes, late, over, overMin };
+  // 假單沒填時段、上班＋假單比班表多（2026-11-18 第 5 題）：只提醒、不擋。班表＝扣不打卡休息帶與班別休息；加班單那段不算
+  let leaveOver = 0;
+  if (untimedLeave && S.length) leaveOver = Math.max(0, Math.round(total(minus(core, OT)) + leaveMin - total(minus(minus(S, BRKcut), RESTS))));
+  return { periods, hours: Math.round(total(core) / 60 * 100) / 100, notes, late, early, over, overMin, leaveOver };
 }
 
 /** 超出的打卡時段 → 要加班單的時段：接在班表／加班單（bounds）後面的開頭、前面的結尾各扣 15 分寬限，再往內取整到 15 分，不到 15 分不列 */
+/** 第 5 題提醒字句：「上班＋假單比班表多 2 小時（假單沒填時段，請確認上班時段或假單時數）」；沒有回 '' */
+export function leaveOverText(pr) {
+  const m = pr && Number(pr.leaveOver);
+  return m > 0 ? '上班＋假單比班表多 ' + Math.round(m / 60 * 100) / 100 + ' 小時（假單沒填時段，請確認上班時段或假單時數）' : '';
+}
 function overUnits(list, bounds) {
   const ends = new Set(bounds.map((x) => x[1])), starts = new Set(bounds.map((x) => x[0])), out = [];
   for (const [a0, b0] of list) {
