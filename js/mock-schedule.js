@@ -43,6 +43,7 @@ function storeOf(db, code) {
 // ---- 門市互相支援排班（2026-11-09，同 server/sched-support.js、schedule.js）----
 // 示範資料裡的門市＝db.accounts 的門市帳號；規則同伺服器：同品牌、啟用中、門市排班、有使用中班別、不含自己、不是 TEST 開頭
 // （示範的帳號全是 TEST 開頭，e2e 用 accounts.X.supportOk=true 開例外，不然示範模式永遠看不到這個功能）
+const mockAwayIn = (x, dates) => !!(x && x.away_home && x.away_from && dates[27] >= x.away_from);
 const shortOf = (a) => { const t = String((a && a.name) || '').trim().split(/\s+/); return t[t.length - 1] || (a && a.code) || ''; };
 function mockExtStores(db, code) {
   const me = db.accounts[code], out = [];
@@ -150,11 +151,21 @@ export async function schedule(action, me, b, db, s, hooks) {
       for (const d of dates) if (st.dayDemand[d]) ov[d] = st.dayDemand[d];
       const days = {};
       for (const e in st.days) for (const d in st.days[e]) if (d >= addDays(dates[0], -13) && d <= dates[27]) (days[e] = days[e] || {})[d] = st.days[e][d];
+      // 班表只在主要單位（同 server/schedule.js buildCtx）：支援帳號列（away_home）這期 ext:'away'，away_from 起留著的格子搬到 awayDays（人數、規則都不看）
+      const awayInfo = new Map(), awayDays = {}, chkDays = Object.assign({}, st.days);
+      for (const x of st.staff) if (mockAwayIn(x, dates)) {
+        awayInfo.set(x.emp_id, { home: x.away_home, name: shortOf(db.accounts[x.away_home]) || x.away_home, from: x.away_from });
+        const m = days[x.emp_id] || {}, keep = {}, all = Object.assign({}, st.days[x.emp_id] || {});
+        for (const d of Object.keys(m)) if (d >= x.away_from) (awayDays[x.emp_id] = awayDays[x.emp_id] || {})[d] = m[d]; else keep[d] = m[d];
+        days[x.emp_id] = keep;
+        for (const d of Object.keys(all)) if (d >= x.away_from) delete all[d];
+        chkDays[x.emp_id] = all;
+      }
       const months = [...new Set(dates.map((d) => d.slice(0, 7)))].map((ym) => {
         let minutes = 0;
         for (const x of st.staff) for (const d in (st.days[x.emp_id] || {})) {
           const c = st.days[x.emp_id][d];
-          if (d.slice(0, 7) === ym && c.shift_id && st.shifts[c.shift_id] && (!x.hire_date || x.hire_date <= d) && (!x.leave_date || d <= x.leave_date)) minutes += shiftMinutes(st.shifts[c.shift_id]);
+          if (d.slice(0, 7) === ym && c.shift_id && st.shifts[c.shift_id] && (!x.hire_date || x.hire_date <= d) && (!x.leave_date || d <= x.leave_date) && !(x.away_home && x.away_from && d >= x.away_from)) minutes += shiftMinutes(st.shifts[c.shift_id]);
         }
         // 別家門市排來支援這家店的班，算進這家店的工時比（門市互相支援排班；總部來源不算）
         const mFirst = ym + '-01', mLast = addDays(addDays(mFirst, 32).slice(0, 7) + '-01', -1), mDates = []; for (let d = mFirst; d <= mLast; d = addDays(d, 1)) mDates.push(d);
@@ -166,14 +177,14 @@ export async function schedule(action, me, b, db, s, hooks) {
       const support = st.__hq ? [] : mockSupport(db, me.code, dates, st.staff).concat(mockStoreSupport(db, me.code, dates, st.staff));      // 總部支援＋門市支援（同 server buildCtx）
       const extEmp = new Map();
       for (const x of support) if (x.emp) { const prev = extEmp.get(x.emp); extEmp.set(x.emp, x.kind === 'store' && (prev === undefined || prev === 'store') ? 'store' : true); }
-      const supStaff = extEmp.size ? st.staff.map((x) => (extEmp.has(x.emp_id) ? Object.assign({}, x, { ext: extEmp.get(x.emp_id) }) : x)) : st.staff;
+      const supStaff = extEmp.size || awayInfo.size ? st.staff.map((x) => (awayInfo.has(x.emp_id) ? Object.assign({}, x, { ext: 'away', away: awayInfo.get(x.emp_id) }) : extEmp.has(x.emp_id) ? Object.assign({}, x, { ext: extEmp.get(x.emp_id) }) : x)) : st.staff;
       const extAll = mockExtShifts(db, me.code), extCodes = new Set(mockExtStores(db, me.code));      // 這家店能選的支援門市＋格子裡已經用到的
       for (const m of Object.values(days)) for (const c of Object.values(m)) for (const id of [c.shift_id, c.shift2_id]) if (isExtId(id)) extCodes.add(id.slice(0, id.indexOf('.')));
       const pickX = (y) => Object.assign({ id: y.id, name: y.name, start: y.start, end: y.end, break_min: y.break_min, color: y.color, active: y.active, store: y.store, local: y.local }, y.segs ? { segs: y.segs } : {});
       return ok({ period, dates, today: todayTaipei(), store: me.code,
         meta: { version: r.version, locked: !!r.locked, locked_at: r.locked_at, locked_by: r.locked_by, needs_recheck: !!r.needs_recheck, publication: pubs.length ? pubs[pubs.length - 1] : null, clockAlias, lineFrom: '2026-11-01' },
         shifts: Object.values(st.shifts).sort((a, x) => a.sort - x.sort), staff: supStaff, terms: st.terms, days, support, actuals: st.actuals, demand: ctx.demand, demandTpl: tpl, demandOverrides: ov,
-        pins: ctx.pins, pairs: st.pairs, months, cfg: st.cfg, holidays: hol, monthOtMin: {}, results: checkPeriod(Object.assign(ctx, { days: st.days, support, staff: supStaff, shifts: Object.assign({}, st.shifts, extAll) })), roster: { synced: clockAlias !== null },
+        pins: ctx.pins, pairs: st.pairs, months, cfg: st.cfg, holidays: hol, monthOtMin: {}, results: checkPeriod(Object.assign(ctx, { days: chkDays, awayDays, support, staff: supStaff, shifts: Object.assign({}, st.shifts, extAll) })), awayDays, roster: { synced: clockAlias !== null },
         extStores: st.__hq ? [] : [...extCodes].filter((c) => mockExtStores(db, me.code).includes(c)).map((c) => ({ code: c, name: shortOf(db.accounts[c]), shifts: Object.values(extAll).filter((y) => y.store === c && y.active).map(pickX), stations: Object.values(storeOf(db, c).stations).filter((y) => y.active).sort((a, x) => a.sort - x.sort) })),
         extShifts: Object.values(extAll).filter((y) => extCodes.has(y.store)).map(pickX), extStations: Object.fromEntries([...extCodes].map((c) => [c, storeOf(db, c).stations])),
         notes: Object.fromEntries(dates.filter((d) => (st.notes || {})[d]).map((d) => [d, st.notes[d]])),
@@ -202,6 +213,7 @@ export async function schedule(action, me, b, db, s, hooks) {
         const pv = (st.days[c.emp_id] || {})[c.date];
         const otLocked = pv && pv.day_type === 'H' && pv.shift_id;
         if (c.clear) { if (otLocked) return fail('BAD_INPUT', '這天是休息日加班，不能清空；不需要上班請改回休息日'); if (st.days[c.emp_id]) delete st.days[c.emp_id][c.date]; continue; }
+        if (sf.away_home && sf.away_from && c.date >= sf.away_from) return fail('BAD_INPUT', `${sf.name} 的班表在〈${shortOf(db.accounts[sf.away_home]) || sf.away_home}〉，請到那邊排；要來〈${shortOf(db.accounts[me.code])}〉上班請在那邊選這家的班別`);   // 同 server/schedule.js saveDays（sched-primary.js）
         let cell = { day_type: c.day_type, shift_id: c.shift_id || null, leave: c.leave || null, shift2_id: c.shift2_id || null };
         if (supported.has(c.emp_id + '|' + c.date)) return fail('BAD_INPUT', `${sf.name} ${+c.date.slice(5, 7)}/${+c.date.slice(8, 10)} 已被別家門市排了支援這家店，這天在這裡不能改；要先清空才能收掉原本手動排的班`);
         if (isExtId(cell.shift_id) || isExtId(cell.shift2_id)) {
@@ -231,7 +243,7 @@ export async function schedule(action, me, b, db, s, hooks) {
       actx.support = st.__hq ? [] : mockSupport(db, me.code, dates, st.staff).concat(mockStoreSupport(db, me.code, dates, st.staff));      // 總部＋門市支援：先扣人數、名冊裡對到的支援帳號不排（同 server auto）
       actx.shifts = Object.assign({}, st.shifts, mockExtShifts(db, me.code));      // 這家店的人支援別家門市的班：算工時、換班間隔，自動排班不會排它（auto.js 認得「.」）並整格保留
       const extEmp = new Set(actx.support.map((x) => x.emp).filter(Boolean));
-      actx.staff = st.staff.filter((x) => !extEmp.has(x.emp_id));
+      actx.staff = st.staff.filter((x) => !extEmp.has(x.emp_id) && !mockAwayIn(x, dates));      // 班表在別家的支援帳號列也不排（sched-primary.js）
       const res = autoSchedule(actx, { keepManual: b.keepManual !== false });
       if (!res.ok) return ok({ ok: false, problems: res.problems, version: prow(st, period).version });
       for (const x of actx.staff) { st.days[x.emp_id] = st.days[x.emp_id] || {}; for (const d of dates) { const c = (res.days[x.emp_id] || {})[d]; if (c) putDay(st, x.emp_id, d, c, c.source || 'auto'); else delete st.days[x.emp_id][d]; } }

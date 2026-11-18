@@ -206,6 +206,14 @@ export function checkPeriod(ctx) {
   const sup = ctx.support || [];
   for (const st of ctx.staff) {
     if (st.ext) {
+      // 班表只在主要單位（server/sched-primary.js，2026-11-18 Eason）：這位同仁的班表在別家（st.away），這家不能排他；
+      //   這期還留著的舊格子（ctx.awayDays，人數、工時都不算）擋鎖定，請店長清空
+      if (st.ext === 'away') {
+        const held = Object.keys((ctx.awayDays || {})[st.emp_id] || {}).filter(d => d >= start && d <= end).sort();
+        const where = (st.away && st.away.name) || '主要單位';
+        if (held.length) add('X2', 'block', st.emp_id, held[0], `${st.name} 的班表在〈${where}〉，這家不能排他的班；這期還留著 ${held.length} 天（${held.slice(0, 4).map(md).join('、')}${held.length > 4 ? ' 等' : ''}），請點那幾格改成「清空」。要來這家上班，請在〈${where}〉選這家的班別`);
+        continue;
+      }
       // 門市互相支援排班（st.ext==='store'）：這位同仁在別家門市排了支援這一家的班，這一期在這裡已手動排的格子保留不動，列在提醒清單請店長清掉（總部來源 ext===true 維持原樣：不提醒）
       if (st.ext === 'store') {
         const held = dates.filter(d => employed(st, d) && (ctx.days[st.emp_id] || {})[d] && (ctx.days[st.emp_id] || {})[d].shift_id);

@@ -41,7 +41,11 @@ export function renderBoard(ctx) {
   const extStationsOf = (sid) => Object.values(extStat[sid.slice(0, sid.indexOf('.'))] || {});
   // 總部支援（2026-11-07）：總部同仁排到這家店的班，另列一區、唯讀、算進人數；門市名冊裡對到的支援帳號（ext）不列在一般同仁
   // 門市來源的支援帳號（st.ext==='store'）若這期還留著手動排的班，照樣列出來（標「支援帳號」），店長才點得到、清得掉（提醒清單 X1）
-  const heldExt = (st) => st.ext === 'store' && D.dates.some((d) => ((D.days[st.emp_id] || {})[d] || {}).shift_id);
+  // 班表只在主要單位（server/sched-primary.js，2026-11-18）：st.ext==='away'＝這位同仁的班表在別家（st.away.name），這家不能排；
+  //   這期還留著的舊格子在 D.awayDays（人數、工時都不算），有才列出來（標「支援・班表在○○」），點格子只能清空
+  const cellsOf = (st) => (st.ext === 'away' ? (D.awayDays || {})[st.emp_id] : D.days[st.emp_id]) || {};
+  const extTag = (st, tag) => (st.ext === 'away' ? `<${tag} class="sc-suptag sc-extacct sc-away">支援・班表在${esc((st.away && st.away.name) || '主要單位')}</${tag}>` : st.ext ? `<${tag} class="sc-suptag sc-extacct">支援帳號</${tag}>` : '');
+  const heldExt = (st) => (st.ext === 'store' && D.dates.some((d) => ((D.days[st.emp_id] || {})[d] || {}).shift_id)) || (st.ext === 'away' && Object.keys(cellsOf(st)).length > 0);
   const staff = D.staff.filter((st) => (!st.ext || heldExt(st)) && D.dates.some((d) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date)));
   const sup = D.support || [];
   const locked = D.meta.locked;
@@ -149,6 +153,9 @@ export function renderBoard(ctx) {
       <div class="sc-ckfoot">${guideA}${ck.allDone ? '<button type="button" class="btn ghost sm" id="scCkMore">收起</button>' : ''}</div></div>`;
   }
 
+  // 班表在別家的同仁（支援帳號）：白話說明為什麼這裡不能排他
+  const awayList = D.staff.filter((st) => st.ext === 'away' && D.dates.some((d) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date)));
+  const awayNote = awayList.length ? `<div class="note mt sc-awaynote" id="scAwayNote">${awayList.map((st) => `<div>${esc(st.name)} 的班表在〈${esc((st.away && st.away.name) || '主要單位')}〉，請到那邊排；要來這家上班請在那邊選這家的班別。</div>`).join('')}</div>` : '';
   const head = `<div class="card sc-head">
     <div class="sc-printtitle">${esc((ctx.session && ctx.session.name) || '')} 班表　${esc(D.period)}　${md(D.dates[0])}–${md(periodEnd(D.period))}</div>${printRev}
     <div class="sc-period"><button type="button" class="btn ghost sm" id="scPrev" aria-label="上一期">‹</button>
@@ -171,6 +178,7 @@ export function renderBoard(ctx) {
       <span class="grow"></span>
       <div class="sc-seg" role="group" aria-label="檢視方式"><button type="button" id="scViewGrid" class="${view === 'grid' ? 'on' : ''}">整期</button><button type="button" id="scViewDay" class="${view === 'day' ? 'on' : ''}">單日</button></div>
     </div>
+    ${awayNote}
     ${D.meta.needs_recheck ? '<div class="note warn mt" role="alert">這一期已鎖定，但之後的變動（上一期改班、同仁到職或離職日、別家門市排了同一個人）讓它出現不合規定的地方，請看提醒清單的紅字。請解除鎖定、修正後再鎖定。</div>' : ''}
     <div class="sc-months mt">${monthsHtml}</div>
     <div id="scMsg" class="${S.err ? 'err' : 'okmsg'}" role="status">${esc(S.err || S.msg || '')}</div>
@@ -186,7 +194,7 @@ export function renderBoard(ctx) {
     const th = D.dates.map((d) => { const w = weekday(d), hol = D.holidays.days[d], g = !hol && govOff(d); return `<th class="${isWe(d) ? 'we' : ''}${hol ? ' hol' : ''}" title="${esc(hol || (g ? g + '（行政院人事行政總處辦公日曆，非勞基法國定假日）' : ''))}">${md(d)}<small>${WD[w]}${hol ? '・國' : g ? '・補' : ''}</small></th>`; }).join('');
     const rows = staff.map((st) => {
       const tds = D.dates.map((d) => {
-        const c = (D.days[st.emp_id] || {})[d];
+        const c = cellsOf(st)[d];
         const inJob = (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date);
         if (!inJob) return '<td class="sc-c na"></td>';
         const x = cellText(c, allSh), iss = byCell[st.emp_id + '|' + d] || [];
@@ -197,7 +205,7 @@ export function renderBoard(ctx) {
         return `<td class="sc-c ${x.cls}${x.color ? ' shc' : ''}${isWe(d) ? ' we' : ''}${bday(st, d) ? ' bd' : ''}${lv ? ' i-' + lv : ''}${sel ? ' sel' : ''}${pinCls}"${x.color ? ` style="--shc:${x.color}"` : ''} data-emp="${esc(st.emp_id)}" data-date="${d}" title="${esc(iss.map((r) => r.msg).concat(pin && pin.kind === 'off' ? ['指定休假'] : [], x.ot ? ['休息日加班'] : []).join('\n'))}">${esc(x.t)}${otTag(x)}${stTag(c)}${bday(st, d) ? '<i class="sc-bd" title="生日">生日</i>' : ''}</td>`;
       }).join('');
       const o = offOf(st), lvs = Object.entries(o.lv).map(([k, v]) => k + ' ' + v).join('・');
-      return `<tr><th class="sc-name" scope="row">${esc(st.name)}${st.ext ? '<small class="sc-suptag sc-extacct">支援帳號</small>' : ''}${annualTxt(st)}</th>${tds}<td class="sc-off"><b>${o.n}</b>${lvs ? `<small>${esc(lvs)}</small>` : ''}</td><td class="sc-hr"><b>${+(hoursOf(st) / 60).toFixed(2)}</b></td></tr>`;
+      return `<tr><th class="sc-name" scope="row">${esc(st.name)}${extTag(st, 'small')}${annualTxt(st)}</th>${tds}<td class="sc-off"><b>${o.n}</b>${lvs ? `<small>${esc(lvs)}</small>` : ''}</td><td class="sc-hr"><b>${+(hoursOf(st) / 60).toFixed(2)}</b></td></tr>`;
     }).join('');
     const supHr = (x) => D.dates.reduce((a, d) => { const s = cellShift(shifts, x.days[d]); return a + (s ? shiftMinutes(s) : 0); }, 0);
     const supRows = sup.map((x) => `<tr class="sc-suprow${x.kind === 'store' ? ' sc-suprow-store' : ''}" data-sup="${esc(x.key)}"><th class="sc-name" scope="row">${esc(x.name)}${supTag(x, 'small')}</th>${D.dates.map((d) => {
@@ -231,11 +239,11 @@ export function renderBoard(ctx) {
     const d = S.day, hol = D.holidays.days[d];
     const chips = D.dates.map((x) => `<button type="button" class="sc-daychip${x === d ? ' on' : ''}${isWe(x) ? ' we' : ''}${(byDay[x] || []).length ? ' warn' : ''}" data-day="${x}">${md(x)}<small>${WD[weekday(x)]}</small></button>`).join('');
     const list = staff.filter((st) => (!st.hire_date || st.hire_date <= d) && (!st.leave_date || d <= st.leave_date)).map((st) => {
-      const c = (D.days[st.emp_id] || {})[d], x = cellText(c, allSh), iss = byCell[st.emp_id + '|' + d] || [];
+      const c = cellsOf(st)[d], x = cellText(c, allSh), iss = byCell[st.emp_id + '|' + d] || [];
       const s = cellShift(allSh, c);
       const pin = (D.pins[st.emp_id] || {})[d];
       return `<button type="button" class="sc-drow ${x.cls}${bday(st, d) ? ' bd' : ''}${pin && pin.kind === 'off' ? ' pin-off' : ''}${iss.length ? ' i-' + iss.sort((a, b) => LV_RANK[a.level] - LV_RANK[b.level])[0].level : ''}" data-emp="${esc(st.emp_id)}" data-date="${d}">
-        <span class="sc-dn">${esc(st.name)}${st.ext ? ' <i class="sc-suptag sc-extacct">支援帳號</i>' : ''}${bday(st, d) ? ' <i class="sc-bd">生日</i>' : ''}${annualTxt(st)}</span><span class="sc-dv">${esc(x.t)}${otTag(x)}${s ? `<small>${esc(timeText(s))}</small>` : ''}${stTag(c)}</span>
+        <span class="sc-dn">${esc(st.name)}${st.ext ? ' ' + extTag(st, 'i') : ''}${bday(st, d) ? ' <i class="sc-bd">生日</i>' : ''}${annualTxt(st)}</span><span class="sc-dv">${esc(x.t)}${otTag(x)}${s ? `<small>${esc(timeText(s))}</small>` : ''}${stTag(c)}</span>
         ${iss.length ? `<span class="sc-dmsg">${esc(iss.map((i) => i.msg).join('；'))}</span>` : ''}</button>`;
     }).join('') + sup.filter((x) => x.days[d]).map((x) => {
       const c = x.days[d], t = cellText(c, shifts), sh = cellShift(shifts, c);
@@ -276,7 +284,11 @@ export function renderBoard(ctx) {
     const showSt = slots.some(([sid, cur]) => isExtId(sid) || stActive.length || cur);
     const stRow = c.shift_id && showSt ? `<div class="row mt">${slots.map(([sid, cur, id, nm], i) => `<label for="${id}">${i === 0 && id === 'scStationSel' ? nm : nm || '第二班的'}工作站</label><select id="${id}" aria-label="${id === 'scStationSel' ? '這一格的工作站' : '第二班的工作站'}">${stOpts(cur, sid)}</select>`).join('')}
       <button type="button" class="btn" id="scStationOk">儲存站別</button>${locked ? '<button type="button" class="btn ghost" id="scCellX">取消</button>' : ''}</div>` : '';
-    if (locked) {
+    if (st && st.ext === 'away') {
+      const ca = cellsOf(st)[S.sel.date];
+      editor = `<div class="card sc-editor" id="scEditor">${head2}<p class="hint">${esc(st.name)} 的班表在〈${esc((st.away && st.away.name) || '主要單位')}〉，這裡不能排他；這格是之前留下的，${locked ? '要先解除鎖定才能清空' : '請按「清空」收掉'}。要來這家上班，請在〈${esc((st.away && st.away.name) || '主要單位')}〉選這家的班別。</p>
+        <div class="row mt">${ca && !locked ? '<button type="button" class="btn" id="scAwayClear">清空</button>' : ''}<button type="button" class="btn ghost" id="scCellX">取消</button></div></div>`;
+    } else if (locked) {
       const sh = cellShift(allSh, c);
       editor = `<div class="card sc-editor" id="scEditor">${head2}<span class="hint">　${esc(sh ? `${cellText(c, allSh).t} ${timeText(sh)}` : '')}　已鎖定，只能改工作站（改完會自動重送 LINE）</span>${stRow || '<div class="row mt"><button type="button" class="btn ghost" id="scCellX">取消</button></div>'}</div>`;
     } else {
@@ -372,6 +384,10 @@ export function renderBoard(ctx) {
     rerender();
   });
   if (q('#scCellX')) q('#scCellX').onclick = () => { S.sel = null; rerender(); };
+  if (q('#scAwayClear')) q('#scAwayClear').onclick = () => busy(q('#scAwayClear'), async () => {
+    try { await mutate('saveDays', { cells: [{ emp_id: S.sel.emp, date: S.sel.date, clear: true }] }); S.sel = null; say('已清空'); } catch (e) { say(e.message, true); }
+    rerender();
+  });
   if (q('#scStationOk')) q('#scStationOk').onclick = () => busy(q('#scStationOk'), async () => {
     try {
       const cells = [];      // 沒鎖定時支援別家門市的那班不在這一列（選班別時一起選），所以兩個下拉不一定都有
