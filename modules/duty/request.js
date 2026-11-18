@@ -6,6 +6,7 @@ import { confirmBox } from '../../js/ui.js';
 import { S, call, callAll, h, failBar, failedStores, setReqBadge, loadLeave, leaveFor, supportTag, reqShown, reqCanDecide } from './state.js';
 import { watchJob } from './bg.js';
 import { tsLabel, shortDate, punchEvidence, compBalanceNote, reqQuotaBlock, reqWarnLines, REQ_KIND_LABEL, REQ_BATCH_MAX } from './calc.js';
+import { groupPairs, groupHours, segWord } from './req-group.js';
 
 export function renderRequest(ctx) {
   const el = ctx.el;
@@ -34,7 +35,8 @@ export function renderRequest(ctx) {
       card.append(title);
       if (roN) card.append(h('div', 'du-rq-ronote', '另有 ' + roN + ' 筆只能看，不算在待審數字裡'));
       card.append(buildBatchBar(card, title));
-      items.forEach(it => card.append(buildItem(it, card, title)));
+      // 同一次送出（2026-11-18 一次填兩段）：同店、同組別、同人、同日、而且都按得下去的兩張框成一組；沒有組別標記的舊資料照舊一張一張列
+      groupPairs(items, reqCanDecide).forEach(g => card.append(g.type === 'group' ? buildGroup(g.items, card, title) : buildItem(g.it, card, title)));
       if (!card.querySelector('.du-rq-pick')) { const bw = card.querySelector('.du-rq-batchwrap'); if (bw) bw.hidden = true; }      // 全是唯讀（只看）：沒有批次核准列
       box.append(card);
       syncBatch(card);
@@ -71,47 +73,113 @@ function buildBatchBar(card, title) {
   all.onchange = () => { card.querySelectorAll('.du-rq-pick').forEach(x => { x.checked = all.checked; }); syncBatch(card); };
   btn.onclick = async () => {
     const picked = [...card.querySelectorAll('.du-rq')].filter(el => { const c = el.querySelector('.du-rq-pick'); return c && c.checked; });
-    const skipQ = picked.filter(el => el.__quotaBlock), els = picked.filter(el => !el.__quotaBlock);      // 額度已用完的略過並提示
-    const skipNote = skipQ.length ? '已略過 ' + skipQ.length + ' 筆（額度已用完，不能核准）：' + skipQ.map(el => el.__req.name + ' ' + el.__req.summary).join('、') : '';
-    skipQ.forEach(el => { const c = el.querySelector('.du-rq-pick'); if (c) c.checked = false; });
-    if (!els.length) { if (skipNote) { msg.className = 'du-rq-msg bad'; msg.textContent = '✕ ' + skipNote; syncBatch(card); } return; }
-    if (els.length > REQ_BATCH_MAX) { msg.className = 'du-rq-msg bad'; msg.textContent = '一次最多核准 ' + REQ_BATCH_MAX + ' 筆，請少勾幾筆'; return; }
-    const list = els.map(el => '・' + (el.__req.storeName ? el.__req.storeName + ' ' : '') + el.__req.name + '：' + el.__req.summary).join('\n');
-    const elseL = els.filter(el => elsewhereText(el.__req)).map(el => '・' + elsewhereText(el.__req));
-    if (!await confirmBox('核准以下 ' + els.length + ' 筆申請？\n' + list + (elseL.length ? '\n\n⚠ 其中有這天沒在本店打卡的（可能送錯店）：\n' + elseL.join('\n') : '') + '\n\n核准後，那幾天的核定會先幫你填好，你核定那天時確認送出才算數。', '核准 ' + els.length + ' 筆')) return;
-    btn.disabled = all.disabled = true; msg.className = 'du-rq-msg'; msg.textContent = '送出中…';
-    // 跨店時依店分批（每批一次 mgr_req_decide_batch，帶那一批的店）；任一批沒通過只影響那一批，結果逐店回報
-    const groups = new Map();
-    els.forEach(el => { const k = el.__req.store || ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(el); });
-    const bad = [];
-    let nDone = 0, nSkip = 0, nLock = 0;
-    await Promise.all([...groups.entries()].map(async ([store, gEls]) => {
-      try {
-        const r = await call('mgr_req_decide_batch', { ids: gEls.map(el => el.__req.id), decision: 'approve', store: store || undefined });
-        const done = Array.isArray(r.done) ? r.done.map(String) : [], skipped = Array.isArray(r.skipped) ? r.skipped : [];
-        const warns = Array.isArray(r.warn_items) ? r.warn_items : [];      // 那天已核定、要重新核定的幾筆（2026-11-13 a2）
-        gEls.forEach(el => {
-          const it = el.__req, tag = (it.storeName ? it.storeName + ' ' : '');
-          const wn = warns.filter(x => String(x.id) === String(it.id))[0];
-          if (done.indexOf(String(it.id)) >= 0) { nDone++; el.__markDone('✓ 已核准：' + tag + it.name + ' ' + it.summary + (wn ? '\n⚠ ' + (wn.message || '那天已經核定過，請重新核定一次') : '')); delete S.dayCache[it.date]; return; }
-          const sk = skipped.filter(x => String(x.id) === String(it.id))[0];
-          // 薪資鎖月（2026-11-15）：那筆沒有被處理，留在清單上、寫出原因（解鎖後可以再核），不算「已被處理過」
-          if (sk && /薪資已鎖定/.test(String(sk.reason || ''))) { nLock++; const c = el.querySelector('.du-rq-pick'); if (c) c.checked = false; el.__say('bad', '✕ ' + sk.reason); return; }
-          if (sk) { nSkip++; el.__markDone('— 略過：' + tag + it.name + ' ' + it.summary + '（' + sk.reason + '）'); }
-        });
-      } catch (e) { bad.push({ store, storeName: (gEls[0].__req.storeName || ''), names: gEls.map(el => el.__req.name + ' ' + el.__req.summary), message: (e && e.message) || '沒有成功，請再試一次' }); }
-    }));
-    if (bad.length) {
-      msg.className = 'du-rq-msg bad';
-      msg.textContent = groups.size === 1 ? '✕ ' + bad[0].message
-        : '✕ ' + bad.map(b => (b.storeName ? b.storeName + '：' : '') + b.message + '（沒送出：' + b.names.join('、') + '）').join('\n') + (nDone ? '\n其餘已核准 ' + nDone + ' 筆' : '');
-    } else {
-      msg.textContent = (nSkip ? '已核准 ' + nDone + ' 筆，略過 ' + nSkip + ' 筆（已被處理過）' : '') + (skipNote ? (nSkip ? '\n' : '') + skipNote : '');
-      if (nLock) { msg.className = 'du-rq-msg bad'; msg.textContent = '✕ ' + nLock + ' 筆沒有核准：那個月薪資已鎖定，請先到薪資頁解鎖' + (nDone ? '（其餘已核准 ' + nDone + ' 筆）' : '') + (msg.textContent ? '\n' + msg.textContent : ''); }
-    }
+    await runBatch(picked, card, title, msg, on => { btn.disabled = all.disabled = on; });
     all.disabled = false;
     refreshTitle(card, title); syncBatch(card);
   };
+  return wrap;
+}
+
+// 批次核准的實際動作（「核准勾選的 N 筆」與同一次送出的「兩筆一起核准」共用，判斷與文字一字不改）：
+//   picked＝要核准的那幾列；msg＝結果寫在哪；lock(true)＝送出中鎖住按鈕（結束後由呼叫端放開）
+//   組框在批次進行中不重算（一張一張標完成時不能先把框拆掉），整批結束才統一整理
+async function runBatch(picked, card, title, msg, lock) {
+  card.__batching = true;
+  try { await runBatchInner(picked, card, title, msg, lock); }
+  finally { card.__batching = false; card.querySelectorAll('.du-rq-grp').forEach(g => { if (g.__refresh) g.__refresh(); }); }
+}
+async function runBatchInner(picked, card, title, msg, lock) {
+  const skipQ = picked.filter(el => el.__quotaBlock), els = picked.filter(el => !el.__quotaBlock);      // 額度已用完的略過並提示
+  const skipNote = skipQ.length ? '已略過 ' + skipQ.length + ' 筆（額度已用完，不能核准）：' + skipQ.map(el => el.__req.name + ' ' + el.__req.summary).join('、') : '';
+  skipQ.forEach(el => { const c = el.querySelector('.du-rq-pick'); if (c) c.checked = false; });
+  if (!els.length) { if (skipNote) { msg.className = 'du-rq-msg bad'; msg.textContent = '✕ ' + skipNote; syncBatch(card); } return; }
+  if (els.length > REQ_BATCH_MAX) { msg.className = 'du-rq-msg bad'; msg.textContent = '一次最多核准 ' + REQ_BATCH_MAX + ' 筆，請少勾幾筆'; return; }
+  const list = els.map(el => '・' + (el.__req.storeName ? el.__req.storeName + ' ' : '') + el.__req.name + '：' + el.__req.summary).join('\n');
+  const elseL = els.filter(el => elsewhereText(el.__req)).map(el => '・' + elsewhereText(el.__req));
+  if (!await confirmBox('核准以下 ' + els.length + ' 筆申請？\n' + list + (elseL.length ? '\n\n⚠ 其中有這天沒在本店打卡的（可能送錯店）：\n' + elseL.join('\n') : '') + '\n\n核准後，那幾天的核定會先幫你填好，你核定那天時確認送出才算數。', '核准 ' + els.length + ' 筆')) return;
+  lock(true); msg.className = 'du-rq-msg'; msg.textContent = '送出中…';
+  // 跨店時依店分批（每批一次 mgr_req_decide_batch，帶那一批的店）；任一批沒通過只影響那一批，結果逐店回報
+  const groups = new Map();
+  els.forEach(el => { const k = el.__req.store || ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(el); });
+  const bad = [];
+  let nDone = 0, nSkip = 0, nLock = 0;
+  await Promise.all([...groups.entries()].map(async ([store, gEls]) => {
+    try {
+      const r = await call('mgr_req_decide_batch', { ids: gEls.map(el => el.__req.id), decision: 'approve', store: store || undefined });
+      const done = Array.isArray(r.done) ? r.done.map(String) : [], skipped = Array.isArray(r.skipped) ? r.skipped : [];
+      const warns = Array.isArray(r.warn_items) ? r.warn_items : [];      // 那天已核定、要重新核定的幾筆（2026-11-13 a2）
+      gEls.forEach(el => {
+        const it = el.__req, tag = (it.storeName ? it.storeName + ' ' : '');
+        const wn = warns.filter(x => String(x.id) === String(it.id))[0];
+        if (done.indexOf(String(it.id)) >= 0) { nDone++; el.__markDone('✓ 已核准：' + tag + it.name + ' ' + it.summary + (wn ? '\n⚠ ' + (wn.message || '那天已經核定過，請重新核定一次') : '')); delete S.dayCache[it.date]; return; }
+        const sk = skipped.filter(x => String(x.id) === String(it.id))[0];
+        // 薪資鎖月（2026-11-15）：那筆沒有被處理，留在清單上、寫出原因（解鎖後可以再核），不算「已被處理過」
+        if (sk && /薪資已鎖定/.test(String(sk.reason || ''))) { nLock++; const c = el.querySelector('.du-rq-pick'); if (c) c.checked = false; el.__say('bad', '✕ ' + sk.reason); return; }
+        if (sk) { nSkip++; el.__markDone('— 略過：' + tag + it.name + ' ' + it.summary + '（' + sk.reason + '）'); }
+      });
+    } catch (e) { bad.push({ store, storeName: (gEls[0].__req.storeName || ''), names: gEls.map(el => el.__req.name + ' ' + el.__req.summary), message: (e && e.message) || '沒有成功，請再試一次' }); }
+  }));
+  if (bad.length) {
+    msg.className = 'du-rq-msg bad';
+    msg.textContent = groups.size === 1 ? '✕ ' + bad[0].message
+      : '✕ ' + bad.map(b => (b.storeName ? b.storeName + '：' : '') + b.message + '（沒送出：' + b.names.join('、') + '）').join('\n') + (nDone ? '\n其餘已核准 ' + nDone + ' 筆' : '');
+  } else {
+    msg.textContent = (nSkip ? '已核准 ' + nDone + ' 筆，略過 ' + nSkip + ' 筆（已被處理過）' : '') + (skipNote ? (nSkip ? '\n' : '') + skipNote : '');
+    if (nLock) { msg.className = 'du-rq-msg bad'; msg.textContent = '✕ ' + nLock + ' 筆沒有核准：那個月薪資已鎖定，請先到薪資頁解鎖' + (nDone ? '（其餘已核准 ' + nDone + ' 筆）' : '') + (msg.textContent ? '\n' + msg.textContent : ''); }
+  }
+}
+
+// ---- 同一次送出（2026-11-18 一次填兩段）：兩張單框成一組 ----
+// 打卡端把同仁一次送出的兩段拆成兩張普通的單、標同一個 group；這裡只是畫面上框在一起，每張仍各自核准、退回（按鈕與 buildItem 完全相同）。
+// 「兩筆一起核准」＝沿用批次核准 mgr_req_decide_batch（runBatch，同一份程式、同樣的確認與略過規則）。
+// 核定、預檢、薪資都不看 group。組內只剩一張還沒處理（另一張已核准或退回）→ 框、標題、按鈕消失，剩下那張照常；兩張一起核准完 → 框留著寫「已核准」。
+function buildGroup(its, card, title) {
+  const els = its.map(it => buildItem(it, card, title));
+  const first = its[0], n = its.length;
+  const wrap = h('div', 'du-rq-grp'); wrap.dataset.group = String(first.group || first.grp || '');
+  const kindWord = first.kind === 'leave' && first.leave_type ? first.leave_type : (REQ_KIND_LABEL[first.kind] || first.kind);
+  const hrs = groupHours(its);
+  const head = h('div', 'du-rq-gh');
+  head.append(h('span', 'du-rq-gt', first.name + ' ' + shortDate(first.date) + ' ' + kindWord + segWord(n) + (hrs !== null ? '・共 ' + hrs + ' 小時' : '')), h('small', null, '同一次送出'));
+  const ev = punchEvidence(its.find(x => x.punches) || first);      // 打卡紀錄只列一次
+  const evEl = ev ? h('div', 'du-rq-evid du-rq-grp-ev', ev) : null;
+  const rows = h('div', 'du-rq-grp-rows');
+  const reasons = [...new Set(its.map(x => x.reason).filter(Boolean))];      // 原因只列一次（兩張寫的不一樣才各列）
+  const bal = compBalanceNote(leaveFor(first.store), first);
+  const info = h('div', 'du-rq-l2 du-rq-grp-info', (reasons.length ? '原因：' + reasons.join('／') : '') + bal + ((reasons.length || bal) ? '\n' : '') + '送出：' + tsLabel(first.created_at));
+  const gbtn = h('button', 'du-rq-gbtn btn', n === 2 ? '兩筆一起核准' : n + ' 筆一起核准', { type: 'button' });
+  const gmsg = h('div', 'du-rq-msg du-rq-grp-msg'); gmsg.setAttribute('role', 'status');
+  els.forEach((el, i) => {
+    const p = el.__parts, it = its[i];
+    p.nameEl.textContent = '第 ' + (Number(it.seg) >= 1 ? Number(it.seg) : i + 1) + ' 段 ' + (it.start && it.end ? it.start + '–' + it.end : it.summary);
+    if (Number(it.hours) > 0) p.dateEl.textContent = Number(it.hours) + ' 小時';
+    p.l2.hidden = true; if (p.evEl) p.evEl.hidden = true;
+    if (p.ewEl && i > 0 && els[0].__parts.ewEl) p.ewEl.hidden = true;      // 「這天沒在本店打卡」兩張一樣，列一次
+    el.classList.add('du-rq-in-grp'); el.__grp = () => wrap.__refresh();
+    rows.append(el);
+  });
+  gbtn.onclick = async () => {
+    const pend = els.filter(el => el.querySelector('.du-rq-ok'));
+    await runBatch(pend, card, title, gmsg, on => { gbtn.disabled = on; });
+    gbtn.disabled = false;
+    if (!pend.some(el => el.querySelector('.du-rq-ok')) && !/✕|略過/.test(gmsg.textContent)) { gmsg.className = 'du-rq-msg du-rq-grp-msg ok'; gmsg.textContent = '核准後，那天的核定會先幫你填好，你核定那天時確認送出才算數。'; }
+    refreshTitle(card, title); syncBatch(card);
+  };
+  wrap.__refresh = () => {
+    if (card.__batching || wrap.__gone) return;
+    const left = els.filter(el => el.querySelector('.du-rq-ok')).length;
+    if (left >= 2) return;
+    if (left === 0) { wrap.classList.add('done'); return; }      // 兩張都處理完（一起核准）：框留著給主管看結果
+    wrap.__gone = true;      // 只剩一張：拆組，剩下那張照現在的樣子
+    els.forEach(el => {
+      const p = el.__parts;
+      if (el.querySelector('.du-rq-ok')) { p.nameEl.textContent = p.name0; p.dateEl.textContent = p.date0; p.l2.hidden = false; if (p.evEl) p.evEl.hidden = false; if (p.ewEl) p.ewEl.hidden = false; }
+      el.classList.remove('du-rq-in-grp'); el.__grp = null;
+      wrap.before(el);
+    });
+    wrap.remove();
+  };
+  wrap.append(head, ...(evEl ? [evEl] : []), rows, info, gbtn, gmsg);
   return wrap;
 }
 
@@ -150,13 +218,18 @@ function buildItem(it, card, title, onDone) {
   pick.onchange = () => syncBatch(card);
   if (canDecide && card) who.append(pick);
   const sup = supportTag(it);      // 支援（原單位）
-  who.append(h('span', 'du-rq-kind ' + (REQ_KIND_LABEL[it.kind] ? it.kind : ''), REQ_KIND_LABEL[it.kind] || it.kind), h('span', 'du-rq-name', it.name), ...(sup ? [sup] : []), ...(upOn && canDecide ? [h('span', 'du-rq-kind upper', upperLabel(it))] : []), ...(it.storeName ? [h('span', 'du-where', '打卡地點：' + it.storeName, { 'data-where': it.store })] : []));
-  l1.append(who, h('span', 'du-rq-date', shortDate(it.date)));
-  el.append(l1, h('div', 'du-rq-l2', it.summary + (it.reason ? '\n原因：' + it.reason : '') + compBalanceNote(leaveFor(it.store), it) + '\n送出：' + tsLabel(it.created_at)));
+  const nameEl = h('span', 'du-rq-name', it.name), dateEl = h('span', 'du-rq-date', shortDate(it.date));
+  who.append(h('span', 'du-rq-kind ' + (REQ_KIND_LABEL[it.kind] ? it.kind : ''), REQ_KIND_LABEL[it.kind] || it.kind), nameEl, ...(sup ? [sup] : []), ...(upOn && canDecide ? [h('span', 'du-rq-kind upper', upperLabel(it))] : []), ...(it.storeName ? [h('span', 'du-where', '打卡地點：' + it.storeName, { 'data-where': it.store })] : []));
+  l1.append(who, dateEl);
+  const l2 = h('div', 'du-rq-l2', it.summary + (it.reason ? '\n原因：' + it.reason : '') + compBalanceNote(leaveFor(it.store), it) + '\n送出：' + tsLabel(it.created_at));
+  el.append(l1, l2);
   const ev = punchEvidence(it);
-  if (ev) el.append(h('div', 'du-rq-evid', ev));
+  const evEl = ev ? h('div', 'du-rq-evid', ev) : null;
+  if (evEl) el.append(evEl);
   const ew = elsewhereText(it);
-  if (ew) el.append(h('div', 'du-rq-warn du-rq-else', '⚠ ' + ew));
+  const ewEl = ew ? h('div', 'du-rq-warn du-rq-else', '⚠ ' + ew) : null;
+  if (ewEl) el.append(ewEl);
+  el.__parts = { nameEl, dateEl, l2, evEl, ewEl, name0: nameEl.textContent, date0: dateEl.textContent };      // 同一次送出的組框要換掉其中幾行（見 buildGroup），拆組時還原
   const wl = reqWarnLines(it);                    // 事假前一天／出差前一週／本月事假第 3 次起／本月第 N 次忘刷（2026-11-06，提醒不擋）
   if (wl.length) el.append(h('div', 'du-rq-warn', wl.map(w => '⚠ ' + w).join('\n') + '（提醒，不影響核准）'));
 
@@ -230,7 +303,7 @@ function buildItem(it, card, title, onDone) {
     } catch (e) { ok.disabled = no.disabled = false; say('bad', '✕ ' + (e.message || '沒有成功，請再試一次')); }
   }
   el.__say = say;                                 // 批次核准被擋（例：薪資鎖月）時把原因寫在這一筆上
-  el.__markDone = text => { el.textContent = ''; el.classList.add('done'); el.append(h('div', 'du-rq-l2', text)); };   // 單筆與批次共用
+  el.__markDone = text => { el.textContent = ''; el.classList.add('done'); el.append(h('div', 'du-rq-l2', text)); if (el.__grp) el.__grp(); };   // 單筆與批次共用；在組框裡的通知組框重算（只剩一張就拆組）
   ok.onclick = () => decide('approve'); no.onclick = () => decide('reject');
   return el;
 }

@@ -662,7 +662,7 @@ function reqSummary(r) {     // Requests.gs reqSummary_
 }
 const reqPublic = r => ({ id: r.id, created_at: r.created_at, emp_id: r.emp_id, name: r.name, kind: r.kind, date: r.date, leave_type: r.leave_type || '', start: r.start || '', end: r.end || '',
   hours: r.hours ?? null, miss_type: r.miss_type || '', reason: r.reason || '', has_attach: !!r.attach_id, status: r.status, decided_at: r.decided_at || '', decided_by: r.decided_by || '',
-  reject_reason: r.reject_reason || '', summary: reqSummary(r), ...(r.upper ? { upper: true } : {}) });
+  reject_reason: r.reject_reason || '', summary: reqSummary(r), ...(r.upper ? { upper: true } : {}), ...(r.group ? { group: r.group, seg: r.seg || 0 } : {}) });      // group／seg：同一次送出（2026-11-18，Requests.gs reqPublic_ 同名欄位；舊資料沒有＝不帶）
 // mgr_req_month 每筆申請的形狀（型別寫死，同打卡端 spec §2）
 const reqMonthPublic = r => ({ id: String(r.id), emp_id: String(r.emp_id), name: r.name, kind: r.kind, date: r.date, leave_type: r.leave_type || '', start: r.start || '', end: r.end || '',
   hours: r.hours == null || r.hours === '' ? null : Number(r.hours), miss_type: r.miss_type || '', reason: r.reason || '', has_attach: !!r.attach_id, status: r.status,
@@ -1106,6 +1106,22 @@ function dutyDo(d, action, b) {
     const openT01 = taipeiDay(0) <= '2026-11-28' && dt >= '2026-11-01';
     const lim = 4;
     if ((openT01 || !(dt < taipeiDay(-lim))) && !(emp.no_line && dt <= taipeiDay(0))) return fail('BAD_INPUT', `${lim} 天內請同仁自己在 LINE 申請；超過 ${lim} 天才能代開`);
+    // 加班兩段（2026-11-18 一次填兩段，Requests.gs segments 分支）：只有加班；兩段都過才寫兩張、同一個 group，任一段不過一張都不寫；代開上限 10 小時（單張與合計）
+    if (Array.isArray(b.segments)) {
+      if (String(b.kind) !== 'ot') return fail('BAD_INPUT', '只有加班單可以分兩段');
+      if (b.segments.length !== 2) return fail('BAD_INPUT', '分段要剛好兩段');
+      if (b.start || b.end) return fail('BAD_INPUT', '分段時不要同時送 start／end');      // 前端兩段只送 segments：舊打卡端不認時才會因缺時間被擋，不會默默只開第一張
+      const hm = x => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(x || '')); return m ? +m[1] * 60 + +m[2] : null; };
+      const sg = b.segments.map(x => { const a = hm(x && x.start), e0 = hm(x && x.end); return a === null || e0 === null ? null : { start: x.start, end: x.end, a, e: e0 <= a ? e0 + 1440 : e0 }; });
+      if (sg.some(x => !x)) return fail('BAD_INPUT', '請填時間');
+      sg.sort((x, y) => x.a - y.a);
+      if (sg[1].a <= sg[0].e) return fail('BAD_INPUT', sg[1].a === sg[0].e ? '兩段時間剛好接在一起，請填成一段' : '兩段時間重疊了');
+      const total = Math.round(sg.reduce((t, x) => t + (x.e - x.a) / 60, 0) * 100) / 100;
+      if (total > 10) return fail('BAD_INPUT', '兩段合計 ' + total + ' 小時，店長代開最多 10 小時');
+      const grp = 'G' + (d.reqs.length + 1), at = new Date().toISOString(), made = sg.map((x, i) => ({ id: 'P' + (d.reqs.length + 1 + i), created_at: at, emp_id: emp.emp_id, name: emp.name, kind: 'ot', date: b.date, leave_type: '', start: x.start, end: x.end, hours: Math.round((x.e - x.a) / 60 * 100) / 100, miss_type: '', reason, attach_id: '', status: 'pending', upper_kind: 'director', proxy_by: b.__who ? b.__who.by : MGR, group: grp, seg: i + 1 }));
+      made.forEach(r => d.reqs.push(r));
+      return ok({ id: made[0].id, ids: made.map(r => r.id), group: grp, requests: made.map(r => reqPublic(r)), summary: parseInt(b.date.slice(5, 7), 10) + '/' + parseInt(b.date.slice(8, 10), 10) + ' 加班兩段 ' + made.map(r => r.start + '–' + r.end).join('、') + '（共 ' + total + ' 小時）（主管代開）' });
+    }
     const r = { id: 'P' + (d.reqs.length + 1), created_at: new Date().toISOString(), emp_id: emp.emp_id, name: emp.name, kind: String(b.kind || 'miss'), date: b.date, leave_type: '', start: b.start || '', end: b.end || '', hours: null, miss_type: b.miss_type || '', reason, attach_id: '', status: 'pending', upper_kind: 'director', proxy_by: b.__who ? b.__who.by : MGR };
     d.reqs.push(r);
     return ok({ id: r.id, summary: reqSummary(r) });

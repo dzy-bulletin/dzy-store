@@ -323,6 +323,28 @@ select{min-height:44px}
 .du-total-cont{flex-basis:100%;font-size:12.5px;font-weight:800;color:#a15a00;background:#fff6e0;border-left:3px solid #e0a020;padding:3px 8px}   /* 連續 4 小時沒休 30 分（2026-11-06） */
 .du-ft8{flex-basis:100%;font-size:12.5px;font-weight:700;color:#256c45;background:#e8f5ee;border-left:3px solid #2f8a57;padding:3px 8px}.du-ft8.short{color:#a12a1f;background:#fdecea;border-left-color:#c0392b}   /* 正職上班日滿 8 小時（2026-11-13） */
 .du-rq-evid{background:#f7f2ef;border-radius:8px;padding:7px 9px;font-size:12.5px;color:#5a463f;line-height:1.6;margin:0 0 8px;white-space:pre-line;overflow-wrap:anywhere}
+/* 同一次送出（2026-11-18 一次填兩段）：兩張單框成一組；只是畫面分組，每張照舊各自核准／退回 */
+.du-rq-grp{border:1.5px solid #e6c36a;background:#fffaf0;border-radius:10px;padding:10px 12px 12px;margin:10px 0 4px}
+.du-rq-grp .du-rq{border-top:1px dashed #e6d3a8;padding:10px 0 8px}
+.du-rq-grp .du-rq:first-child{border-top:0}
+.du-rq-gh{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-weight:900;font-size:14.5px;color:#6b4c00}
+.du-rq-gh small{font-weight:600;font-size:12px;color:#8a6100;background:#fff4d6;border-radius:6px;padding:1px 7px;align-self:center}
+.du-rq-grp .du-rq-evid{margin-top:8px}
+.du-rq-grp .du-rq-grp-info{margin:6px 0 0}
+.du-rq-grp .du-rq-l2[hidden],.du-rq-grp .du-rq-evid[hidden],.du-rq-grp .du-rq-warn[hidden]{display:none}
+.du-rq-gbtn{width:100%;margin-top:6px;min-height:44px}
+.du-rq-msg.ok{color:var(--ok)}
+.du-rq-grp.done{opacity:.85}
+.du-rq-grp.done .du-rq-grp-ev,.du-rq-grp.done .du-rq-grp-info,.du-rq-grp.done .du-rq-gbtn{display:none}
+.seg-tag{display:inline-block;font-size:11.5px;font-weight:700;color:#8a6100;background:#fff4d6;border-radius:6px;padding:0 6px;margin-left:4px}      /* 已核准的申請列：同一次送出 第 N／M 段 */
+@media (min-width:861px){      /* 電腦寬：左邊兩段各自核准／退回，右邊打卡紀錄、原因與「兩筆一起核准」 */
+  .du-rq-grp{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:16px;align-items:start}
+  .du-rq-grp .du-rq-gh{grid-column:1 / -1}
+  .du-rq-grp .du-rq-grp-rows{grid-column:1;grid-row:2 / span 4}
+  .du-rq-grp .du-rq-grp-ev,.du-rq-grp .du-rq-grp-info,.du-rq-grp .du-rq-gbtn,.du-rq-grp .du-rq-grp-msg{grid-column:2}
+  .du-rq-grp .du-rq-gbtn{max-width:420px}
+  .du-rq-grp.done .du-rq-grp-rows{grid-column:1 / -1}
+}
 .du-rq-reason{width:100%;margin:0 0 8px;min-height:44px;font-size:16px}
 .du-rq-acts{display:flex;gap:8px;flex-wrap:wrap}
 .du-rq-acts .btn{flex:1;min-height:44px;min-width:84px}
@@ -561,6 +583,14 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
 .du-proxy-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .du-proxy-row [hidden] { display: none; }
 .du-proxy-why { width: 100%; box-sizing: border-box; }
+.du-proxy [hidden] { display: none; }
+/* 代開加班第二段（2026-11-18 一次填兩段）：「＋ 加第二段」、第二段時間列、兩段合計 */
+.du-proxy-add2 { justify-self: start; }
+.du-proxy-seg2 { background: #fff4d6; border-radius: 8px; padding: 6px 8px; }
+.du-proxy-seg2 .seg-k { flex-basis: 100%; font-size: 12px; font-weight: 700; color: #8a6100; }
+.du-proxy-seg2 input[type=time] { min-height: 40px; font-size: 16px; }
+.du-proxy-segsum { background: #fff4d6; color: #6b4c00; border-radius: 7px; padding: 6px 9px; font-weight: 700; font-size: 13.5px; }
+.du-proxy-segsum.bad { background: #fdecea; color: var(--bad); }
 
 /* ── 考勤管理「手機一頁核定」（web/modules/duty/quick.js，2026-11-09）：只在手機寬度出現。主要按鈕 --red，品牌色 --brand 用在標題條底線 ── */
 .dq{display:flex;flex-direction:column;gap:10px;max-width:640px;margin:0 auto}
