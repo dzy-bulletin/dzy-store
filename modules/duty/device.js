@@ -3,6 +3,7 @@
 import { confirmBox } from '../../js/ui.js';
 import { S, call, h, failBar } from './state.js';
 import { tsLabel } from './calc.js';
+import { xLine } from './mirror-line.js';      // 從副本給時的「資料更新於」（第 1 階段）
 
 export function renderDevice(ctx) {
   const el = ctx.el;
@@ -12,6 +13,7 @@ export function renderDevice(ctx) {
     call('mgr_pending_devices').then(r => {
       if (!el.isConnected) return;
       box.innerHTML = '';
+      { const xl = xLine(r, 'duDevAt'); if (xl) box.append(xl); }
       const list = r.pending || [];
       if (!list.length) { box.append(h('div', 'card du-center', '目前沒有待核准的裝置。')); return; }
       list.forEach(g => box.append(buildCard(g)));

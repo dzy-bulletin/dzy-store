@@ -231,6 +231,7 @@ function route(method, p, q, b, token) {
       if (peeked && peeked.ok && peeked.data) { peeked.data.snapshot_at = window.__dutySnapAt; if (window.__dutySnapReplica) peeked.data.snapshot_kind = 'replica'; }
       return peeked;
     }
+    if (m[1] === 'duty' && b && b.fresh === true && window.__dutyFreshFail) return new Promise((res) => setTimeout(() => res(fail('TIMEOUT', '打卡系統回應太久，請稍後再試')), 200));      // e2e：「直接向打卡系統讀取」也讀不到（第 1 階段）
     if (m[1] === 'duty' && window.__dutyUpMs) (window.__dutyReads = window.__dutyReads || []).push({ a: m[2], date: (b && b.date) || '', store: (b && (b.asStore || b.store)) || '', fresh: !!(b && b.fresh), at: Date.now() });      // e2e：記讀了什麼（驗換頁後背景再問不再發）
     if (m[1] === 'duty' && window.__dutyUpMs) {      // e2e（2026-11-18 核定工時 3 秒內，mod_duty_fast）：模擬打卡上游延遲 __dutyUpMs；__dutyMirrorFirst＝伺服器副本先給
       const w = window, MF = ['mgr_day', 'mgr_req_day', 'mgr_pending_approvals', 'mgr_req_pending', 'payroll_leave_options'];
@@ -867,6 +868,12 @@ function duty(action, me, s, b) {
   if (d.mirror && me.person && r.ok && ['mgr_day', 'mgr_req_pending', 'mgr_req_day', 'mgr_pending_approvals'].includes(action)) {
     if (!(b && b.fresh === true)) r.data.mirror_at = Date.now();      // 送出前重讀（fresh）＝直接問打卡，不是副本；版本照樣帶
     if (d.mirrorStale) r.data.mirror_stale = true;      // 上游慢、先給的舊值（2026-11-18，e2e mod_duty_mirror）
+    // 只讀 mini（打卡正本收回 mini 第 1 階段，server DUTY_READ_MINI=1）：d.mirrorRo＝開了；d.mirrorRoStale＝打卡系統的變動暫時沒傳過來（過期）；
+    //   d.mirrorRoAgeMs＝過期那份最後更新距今多久（預設 70 分；超過一天前端改紅底）。直接向打卡系統讀取（fresh）不標
+    if (d.mirrorRo && !(b && b.fresh === true)) {
+      r.data.mirror_ro = true; r.data.mirror_state = d.mirrorRoStale ? 'stale' : 'ok';
+      if (d.mirrorRoStale) { r.data.mirror_stale = true; r.data.mirror_at = Date.now() - (d.mirrorRoAgeMs || 70 * 60e3); }
+    }
   }
   if (r.ok && action === 'mgr_day' && Array.isArray(r.data.employees)) { r.data.employees.forEach(e => { e.ver = mverOf(d, r.data.date, e.emp_id); e.calc_ver = mcalcOf(d, e.emp_id); e.ver_req = true; }); noteSeen(tgt || (me && me.code) || '', r.data.date, r.data.employees); }      // 名單一律帶版本（同伺服器 with_ver、calc_ver、ver_req，2026-11-19）
   if (fault && fault.mode === 'partial' && r.ok) r.data.failed = [{ store: 'cf', storeName: '央廚', message: '打卡系統暫時沒有回應，請稍後再試' }];      // 部分門市讀不到（伺服器 failed 契約）

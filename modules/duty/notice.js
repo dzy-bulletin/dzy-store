@@ -3,6 +3,7 @@
 import { esc, confirmBox } from '../../js/ui.js';
 import { call, failBar } from './state.js';
 import { taipeiToday } from './calc.js';
+import { xLine } from './mirror-line.js';      // 從副本給時的「資料更新於」（第 1 階段）
 
 export function renderNotice(ctx) {
   const el = ctx.el;
@@ -43,6 +44,7 @@ export function renderNotice(ctx) {
     call('mgr_notices').then(r => {
       if (!el.isConnected) return;
       q('#duNtFail').innerHTML = '';
+      { const xl = xLine(r, 'duNtAt'); if (xl) q('#duNtFail').append(xl); }
       if (Number(r.max_len) > 0) { maxLen = Number(r.max_len); ta.setAttribute('maxlength', String(maxLen)); }
       if (Number(r.max_show) > 0) q('#ntMaxShow').textContent = String(r.max_show);
       ends.min = taipeiToday();          // 下架日不給選過去的日子（後端也會擋）

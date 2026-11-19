@@ -14,6 +14,7 @@ import { pendingFor } from './pend-gate.js';
 import { ssoSwitch, setSession, toSession } from '../../js/auth.js';
 import { renderQuick, backBar, e2eNoCore } from './quick.js';
 import { canBg, watchJob, refreshJobs, rejectBar } from './bg.js';
+import { mirrorLine, mirrorFlags } from './mirror-line.js';      // 「資料更新於」那一行＋只讀 mini 的過期黃條（第 1 階段）
 
 // 2026-11-15 考勤核定合成一頁時間軸（docs/duty-timeline/）：所有人都用新頁（quick.js）；舊的完整頁只留系統管理員從新頁最下面切回，
 // 到 FULL_UNTIL 為止當緊急備用（Eason 定 14 天），之後連程式一起刪。卡片的編輯（buildCard）搬進新頁的「細調」，所以這支檔留著。
@@ -81,7 +82,9 @@ export function renderApprove(ctx) {
     unStale();                     // 上一次的「先顯示上次」還沒換掉就換日期：先解除
     const wait = gate ? gate.then(() => null, () => null) : Promise.resolve(null);
     S.dayMirrorAt = 0; S.dayMirrorStale = false; S.dayReqStale = false; S.dayPendStale = false; S.dayReqs = {};
-    if (dateOverride && S.dayCache[dateOverride]) {
+    const freshReq = !!S.dayFreshNext; S.dayFreshNext = false; S.dayFreshErr = !!S.dayFreshErrNext; S.dayFreshErrNext = false;      // 黃條的「直接向打卡系統讀取」：這一次直接問打卡（第 1 階段）
+    if (!freshReq) { S.dayFreshAt = 0; S.dayMirrorRo = false; S.dayMirrorFeed = false; }
+    if (dateOverride && S.dayCache[dateOverride] && !freshReq) {
       wait.then(() => { if (tok === S.dayTok && live()) { drawDay(dateOverride, S.dayCache[dateOverride], []); prefetch(dateOverride); } });
       return;
     }
@@ -103,6 +106,7 @@ export function renderApprove(ctx) {
       markStale('這是' + snapLabel(peekAt) + '的資料，正在讀取最新資料，讀到後就可以核定…');
     }, () => {});
     const body = dateOverride ? { date: dateOverride } : {};
+    if (freshReq) body.fresh = true;
     let gateDone = !gate;                 // 假別額度還沒到：名單先畫出來看，但不能按（2026-11-09 Eason：考勤選店後等太久）
     if (gate) wait.then(() => { gateDone = true; });
     dayRead(body).then(r => {
@@ -110,6 +114,7 @@ export function renderApprove(ctx) {
       if (tok !== S.dayTok || !live()) return;
       unStale();
       S.dayMirrorAt = r.mirror_at || 0; S.dayMirrorStale = !!r.mirror_stale;      // 考勤副本讀的：卡片上方標「資料更新於」；上游慢先給的舊值另加一句（2026-11-18）
+      { const f = mirrorFlags(r); if (freshReq) { S.dayFreshAt = Date.now(); S.dayMirrorFeed = false; const at = S.dayFreshAt; setTimeout(() => { if (S.dayFreshAt !== at || tok !== S.dayTok || !live()) return; S.dayFreshAt = 0; S.dayMirrorAt = at; const el = document.querySelector('#duMirrorAt'); const nl = dayLine(); if (el && nl) el.replaceWith(nl); }, 3000); } else { S.dayMirrorRo = f.ro; S.dayMirrorFeed = f.ro && f.feed; } }
       if (S.dayMirrorStale) fullNewer(r.date, r.employees, tok);      // 完整頁：背景再問，有差只顯示「有更新的資料［更新］」（不偷換畫面，2026-11-19）
       const failed = r.failed || [];          // 單一門市也可能有：總部那組併進來的別家讀不到（不快取、顯示提示）
       if (!S.all) S.elsewhere = Array.isArray(r.elsewhere) ? r.elsewhere : [];      // 捷徑卡（歸屬這組、在別家打卡的人）不隨日期變，快取的日子沿用
@@ -123,6 +128,7 @@ export function renderApprove(ctx) {
     }, e => {
       fresh = true;
       if (tok !== S.dayTok || !live()) return;
+      if (freshReq && S.dayMirrorRo) { S.dayFreshErrNext = true; loadDay(dateOverride); return; }      // 直接讀也讀不到：回到副本那份，黃條多一行「還是讀不到」
       unStale();
       const c = h('div', 'card');
       if (peekAt) {                        // 讀不到最新的：舊資料留著看，仍然不能按；重新載入鈕放在外面才按得到
@@ -134,6 +140,11 @@ export function renderApprove(ctx) {
       failBar(c, '這天的名單', e, () => loadDay(dateOverride));
     });
   }
+  // 「資料更新於」那一行（只讀 mini 時：平常換字樣、過期出黃條＋按鈕；沒開＝跟以前一樣）
+  function dayLine() {
+    return mirrorLine({ at: S.dayMirrorAt, stale: S.dayMirrorStale, ro: S.dayMirrorRo, feed: S.dayMirrorFeed, freshAt: S.dayFreshAt, freshErr: S.dayFreshErr, freshBusy: false,
+      onFresh: () => { const b = document.querySelector('#duMirrorAtFresh'); if (b) { b.textContent = '讀取中…'; b.disabled = true; } S.dayFreshNext = true; loadDay(S.date); }, id: 'duMirrorAt' });
+  }
   function unStale() { box.classList.remove('du-stale'); box.inert = false; box.removeAttribute('aria-busy'); }
   function markStale(text) {
     box.classList.add('du-stale'); box.inert = true; box.setAttribute('aria-busy', 'true');   // inert：鍵盤也按不到（2026-11-02 審查）
@@ -144,7 +155,7 @@ export function renderApprove(ctx) {
     const focus = S.focusEmp;
     renderEmployees(box, date, employees, failed, () => { loadPending(); loadDay(date); });
     if (quick) { S.focusEmp = focus; return; }
-    if (S.dayMirrorAt) box.prepend(h('div', 'du-mirror-at', '資料更新於 ' + snapLabel(S.dayMirrorAt) + '・從 Mac mini 讀取' + (S.dayMirrorStale ? '・打卡系統回應較慢，先顯示這份；送出時仍以打卡系統為準' : ''), { id: 'duMirrorAt' }));   // 先秀上次的資料：申請、班表等新資料到了再一起套；待核定提醒點的那位留給新資料打開
+    { const ml = dayLine(); if (ml) box.prepend(ml); }   // 先秀上次的資料：申請、班表等新資料到了再一起套；待核定提醒點的那位留給新資料打開
     applyDayRequests(date);
     applyDayPlan(date);
   }

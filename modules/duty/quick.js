@@ -8,6 +8,7 @@ import * as C from './calc.js';
 import * as Q from './quick-calc.js';
 import { batchLeaveDecide, leaveIncrements } from './leave-batch.js';
 import { canBg, watchJob, refreshJobs, rejectBar } from './bg.js';
+import { mirrorLine, mirrorFlags } from './mirror-line.js';      // 「資料更新於」那一行＋只讀 mini 的過期黃條（第 1 階段）
 import { corePeriods, OVER_BLOCK_MIN, otSuggestText, cardDiffs, cardLabel, cardReasonText } from './core-calc.js';
 import { MOCK } from '../../js/config.js';
 
@@ -113,7 +114,7 @@ export function renderQuick(ctx) {
     toast: '', failLine: '', extra: [], progress: '', showReq: false, ui: {}, reqMsg: {}, reqReject: {},
     // 時間軸（2026-11-15）：detail＝詳細模式（每張卡的細調都攤開，每人自己選、記在這台裝置）；fine＝簡潔模式下按了「細調」的人；
     // fineEls＝細調卡片本身（重畫時搬回去，裡面填到一半的欄位不會不見）；waits＝等同仁補單（伺服器記，null＝讀不到或還沒上線）
-    detail: modeGet(), fine: new Set(), fineEls: new Map(), fineNew: [], waits: null, elsewhere: [], mirrorAt: 0, okOpen: false, doneOpen: false, openKey: null,
+    detail: modeGet(), fine: new Set(), fineEls: new Map(), fineNew: [], waits: null, elsewhere: [], mirrorAt: 0, mirrorRo: false, mirrorFeed: false, freshAt: 0, freshBusy: false, freshErr: false, okOpen: false, doneOpen: false, openKey: null,
     // 檢查完才顯示時數（2026-11-18，docs/approve-once/）：checking＝正在跟打卡系統只檢查；ckKeys＝這次送去檢查的人；ckFail＝'fail' 讀不到、'slow' 等超過 CHECK_WAIT_MS 先照班表顯示
     checking: false, ckKeys: null, ckFail: '' };
   const U = (k) => st.ui[k] || (st.ui[k] = {});
@@ -238,7 +239,7 @@ export function renderQuick(ctx) {
   async function readDay(date) {
     if (st.dayPre && st.dayPre.has(date)) { const p = st.dayPre.get(date); st.dayPre.delete(date); return p; }      // 副本先算出要看哪一天，已經先向打卡讀了
     const [d, rq] = await Promise.all([rd('mgr_day', { date }), rd('mgr_req_day', { date })]);
-    return { emps: Array.isArray(d.employees) ? d.employees : [], appr: apprFrom(rq), failed: [].concat((d && d.failed) || [], (rq && rq.failed) || []), elsewhere: Array.isArray(d && d.elsewhere) ? d.elsewhere : [], mirrorAt: (d && d.mirror_at) || 0, mirrorStale: !!((d && d.mirror_stale) || (rq && rq.mirror_stale)) };
+    return { emps: Array.isArray(d.employees) ? d.employees : [], appr: apprFrom(rq), failed: [].concat((d && d.failed) || [], (rq && rq.failed) || []), elsewhere: Array.isArray(d && d.elsewhere) ? d.elsewhere : [], mirrorAt: (d && d.mirror_at) || 0, mirrorStale: !!((d && d.mirror_stale) || (rq && rq.mirror_stale)), mf: mirrorFlags(d, rq) };
   }
   // Mac mini 記得的上次資料先顯示（2026-11-10 Eason）：灰色不能按，最新資料到了整份換掉。少任何一份就不顯示
   // 都核完時列出今天的出勤名單（2026-11-16 Eason「都核完時直接列出今天的出勤名單」）：只看、不能核定（今天的班還沒結束，隔天才列入待核定）。
@@ -323,6 +324,22 @@ export function renderQuick(ctx) {
     });
     return out;
   }
+  // 只讀 mini（第 1 階段）：回應帶 mirror_ro 才換字樣；mirror_state:'stale'＝過期黃條（mirror-line.js）
+  function setRo(f) { if (!f) return; st.mirrorRo = !!f.ro; st.mirrorFeed = !!(f.ro && f.feed); if (f.ro) st.roSeen = true; }
+  // 黃條上的「直接向打卡系統讀取」：這一頁這一次直接問打卡（fresh，最多約 15 秒），成功後灰色一行 3 秒再收回
+  async function freshNow() {
+    if (st.freshBusy || st.busy || !st.date) return;
+    const tok = st.tok;
+    st.freshBusy = true; st.freshErr = false; render();
+    let ok = false;
+    try { await reconcile(true); ok = true; } catch (e) { ok = false; }
+    if (tok !== st.tok || !live()) return;
+    st.freshBusy = false;
+    if (!ok) { st.freshErr = true; render(); return; }
+    const at = Date.now();
+    st.freshAt = at; st.freshDone = true; st.mirrorFeed = false; st.mirrorStale = false; st.reqStale = false; st.loadedAt = at; st.fineEls = new Map(); recompute(); startCheck(tok); render();
+    setTimeout(() => { if (tok !== st.tok || !live() || st.freshAt !== at) return; st.mirrorAt = at; st.freshAt = 0; if (!busyHere()) render(); }, 3000);
+  }
   function revalidateSoon(tok, n) {
     if (n >= REVAL_MS.length) return;
     setTimeout(() => { revalidate(tok, n).catch(() => {}); }, REVAL_MS[n]);
@@ -345,7 +362,7 @@ export function renderQuick(ctx) {
     root.append(nb);
   }
   async function revalidate(tok, n) {
-    if (tok !== st.tok || !live() || !st.date) return;
+    if (tok !== st.tok || !live() || !st.date || st.freshDone) return;      // 剛按「直接向打卡系統讀取」拿到最新的：不再拿副本來比（副本可能還是舊的）
     if (st.busy || st.loading) return revalidateSoon(tok, n + 1);
     const date = st.date, wantLeave = !!S.leaveMirrorStale;
     let lp = null;
@@ -356,17 +373,18 @@ export function renderQuick(ctx) {
     if (!emps || !pending) return revalidateSoon(tok, n + 1);
     const changed = JSON.stringify(emps) !== JSON.stringify(st.emps) || JSON.stringify(pending) !== JSON.stringify(st.pending) || JSON.stringify(appr) !== JSON.stringify(st.appr);
     const stillStale = !!(d.mirror_stale || rq.mirror_stale || r.mirror_stale || S.leaveMirrorStale);
-    const apply = () => { st.emps = emps; st.pending = pending; st.appr = appr; st.mirrorAt = d.mirror_at || 0; st.mirrorStale = stillStale; st.fineEls = new Map(); st.newerData = null; recompute(); startCheck(tok); };
+    const roNow = mirrorFlags(d, rq, r);
+    const apply = () => { st.emps = emps; st.pending = pending; st.appr = appr; st.mirrorAt = d.mirror_at || 0; st.mirrorStale = stillStale; setRo(roNow); st.fineEls = new Map(); st.newerData = null; recompute(); startCheck(tok); };
     if ((changed || wantLeave) && busyHere()) { st.newerData = apply; showNewer(); }      // 主管正在操作：不重畫（輸入、對話框、捲動都不動），只插一行「有更新的資料［更新］」
     else if (changed || wantLeave) apply();
-    else { st.mirrorAt = d.mirror_at || st.mirrorAt; if (st.mirrorStale !== stillStale) { st.mirrorStale = stillStale; if (!busyHere()) render(); } }      // 操作中只改狀態、不重畫
+    else { st.mirrorAt = d.mirror_at || st.mirrorAt; const fd = st.mirrorFeed; setRo(roNow); if (st.mirrorStale !== stillStale || fd !== st.mirrorFeed) { st.mirrorStale = stillStale; if (!busyHere()) render(); } }      // 操作中只改狀態、不重畫
     if (stillStale) revalidateSoon(tok, n + 1);
   }
   async function load() {
     if (st.busy) return;                                      // 寫入途中不換資料（含「重新載入」鈕）
     const tok = ++st.tok;
     st.loading = true; st.error = null; st.ui = {}; st.peekAt = 0; st.peekSaved = null; st.checking = false; st.ckKeys = null; st.ckFail = '';
-    st.fine = new Set(); st.fineEls = new Map(); st.okOpen = false; st.doneOpen = false; st.todayView = null; st.slowLoad = false; st.newer = false; st.newerData = null; st.leaveLate = false; render();
+    st.fine = new Set(); st.fineEls = new Map(); st.okOpen = false; st.doneOpen = false; st.todayView = null; st.slowLoad = false; st.newer = false; st.newerData = null; st.leaveLate = false; st.freshAt = 0; st.freshErr = false; st.freshBusy = false; st.freshDone = false; render();
     setTimeout(() => { if (tok === st.tok && st.loading && live()) { st.slowLoad = true; render(); } }, 2500);      // 2.5 秒還沒好＝副本沒有、直接問打卡（冷資料）：說清楚在等什麼
     dropChecks();
     const waitsP = loadWaits();
@@ -378,7 +396,7 @@ export function renderQuick(ctx) {
     const round1 = Promise.all([st.manual ? null : readPend(opt), rd('mgr_req_pending', opt)]).catch(() => [null, null]);
     peekFirst(tok, () => fresh, round1).catch(() => {});
     // 副本已經知道要看哪一天：同時向打卡確認那天的名單，不等申請清單回來才開始（2026-11-10）
-    const preRead = (date) => { if (!date || st.dayPre.has(date)) return; const p = (async () => { const [d, rq2] = await Promise.all([rd('mgr_day', { date }), rd('mgr_req_day', { date })]); return { emps: Array.isArray(d.employees) ? d.employees : [], appr: apprFrom(rq2), failed: [].concat((d && d.failed) || [], (rq2 && rq2.failed) || []), elsewhere: Array.isArray(d && d.elsewhere) ? d.elsewhere : [], mirrorAt: (d && d.mirror_at) || 0, mirrorStale: !!((d && d.mirror_stale) || (rq2 && rq2.mirror_stale)) }; })(); p.catch(() => {}); st.dayPre.set(date, p); };
+    const preRead = (date) => { if (!date || st.dayPre.has(date)) return; const p = (async () => { const [d, rq2] = await Promise.all([rd('mgr_day', { date }), rd('mgr_req_day', { date })]); return { emps: Array.isArray(d.employees) ? d.employees : [], appr: apprFrom(rq2), failed: [].concat((d && d.failed) || [], (rq2 && rq2.failed) || []), elsewhere: Array.isArray(d && d.elsewhere) ? d.elsewhere : [], mirrorAt: (d && d.mirror_at) || 0, mirrorStale: !!((d && d.mirror_stale) || (rq2 && rq2.mirror_stale)), mf: mirrorFlags(d, rq2) }; })(); p.catch(() => {}); st.dayPre.set(date, p); };
     if (st.manual) preRead(st.manual);
     else round1.then(([p, r]) => {
       if (tok !== st.tok || !live() || !p || p.snapshot_kind !== 'replica' || !r || !r.snapshot_at) return;
@@ -430,7 +448,7 @@ export function renderQuick(ctx) {
       st.fineEls = new Map(); st.fineNew = [];      // 先顯示（上次資料、額度還沒到）時建的細調卡不能沿用：最新資料、額度到了重建
       if (selected) {
         st.date = selected.date; st.emps = selected.day.emps; st.appr = selected.day.appr; st.people = selected.people;
-        st.elsewhere = S.all ? [] : (selected.day.elsewhere || []); st.mirrorAt = selected.day.mirrorAt || 0; st.mirrorStale = !!selected.day.mirrorStale;
+        st.elsewhere = S.all ? [] : (selected.day.elsewhere || []); st.mirrorAt = selected.day.mirrorAt || 0; st.mirrorStale = !!selected.day.mirrorStale; setRo(selected.day.mf);
       } else if (!st.manual && dates.length > scanDates.length) st.capped = true;
       const ok0 = st.openKey && st.people.find((p) => p.key === st.openKey);
       if (ok0) { st.fine.add(st.openKey); U(st.openKey).fold = false; st.scrollTo = st.openKey; if (ok0.status === 'ok') st.okOpen = true; if (ok0.status === 'done') st.doneOpen = true; }      // 點提醒名字跳來：核定通過、已核定的人也要看得到他的卡
@@ -1199,7 +1217,7 @@ export function renderQuick(ctx) {
     root.append(head);
     root.append(rejectBar((date) => gotoDate(date)));      // 背景送出被打卡系統退回的（考勤副本，2026-11-14）
     root.append(retEl, pendEl);      // 人資退回、本月待核定提醒（舊畫面搬來，2026-11-15）
-    if (st.loading && !stale) { root.append(h('div', 'card du-center', st.slowLoad ? '還在讀取：這天的資料 Mac mini 沒有存，要直接向打卡系統讀，最多約 15 秒…' : '載入中…', { id: 'dqLoading' })); return; }
+    if (st.loading && !stale) { root.append(h('div', 'card du-center', st.slowLoad ? (st.roSeen ? '還在讀取：這天的資料比較舊，要直接向打卡系統讀，最多約 15 秒…' : '還在讀取：這天的資料 Mac mini 沒有存，要直接向打卡系統讀，最多約 15 秒…') : '載入中…', { id: 'dqLoading' })); return; }
     if (st.error && !stale) { const c = h('div', 'card'); root.append(c); failBar(c, '考勤資料', st.error, load); return; }
     if (stale) {
       root.append(h('div', 'du-stale-note', st.leaveWait && !st.peekAt ? '假別額度還在讀取，讀到後就可以核定…' : st.error ? '讀不到最新資料，下面是' + snapLabel(st.peekAt) + '的舊資料，不能核定' : '這是' + snapLabel(st.peekAt) + '的資料，正在讀取最新資料，讀到後就可以核定…', { id: 'dqStale' }));
@@ -1214,7 +1232,7 @@ export function renderQuick(ctx) {
     if (st.failed.length) failedStores(root, st.failed, load);
     if (st.date && s) root.append(summaryEl(s, gray, phase));
     if (st.date && s && st.people.length) root.append(legendEl());
-    if (st.mirrorAt) root.append(h('div', 'du-mirror-at', '資料更新於 ' + snapLabel(st.mirrorAt) + '・從 Mac mini 讀取' + (st.mirrorStale ? '・打卡系統回應較慢，先顯示這份；送出時仍以打卡系統為準' : ''), { id: 'dqMirrorAt' }));
+    { const ml = mirrorLine({ at: st.mirrorAt, stale: st.mirrorStale, ro: st.mirrorRo, feed: st.mirrorFeed, freshAt: st.freshAt, freshBusy: st.freshBusy, freshErr: st.freshErr, onFresh: freshNow, id: 'dqMirrorAt' }); if (ml) root.append(ml); }
     if (st.newerData) requestAnimationFrame(showNewer);
     if (S.leaveErr && s && leaveWaitKeys().size) {      // 額度讀不到：說清楚、可以重試（2026-11-19）
       const lb = h('div', 'du-mirror-at', '假別額度讀不到：有請假的人先不能核定 ', { id: 'dqLeaveFail', role: 'status' });

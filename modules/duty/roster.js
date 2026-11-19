@@ -4,6 +4,7 @@ import { esc, confirmBox } from '../../js/ui.js';
 import { DZY_ORIGIN } from '../../js/config.js';
 import { S, dutyManager, call, h, failBar, viewNoHoursStore, supportText } from './state.js';
 import { clockLink } from './calc.js';
+import { xLine } from './mirror-line.js';      // 從副本給時的「資料更新於」（第 1 階段）
 
 export function renderRoster(ctx) {
   const el = ctx.el, dm = dutyManager(ctx.session), vo = viewNoHoursStore(ctx.session);      // vo＝這家店沒有可核工時的人、不是店長（只看或混合店）：名冊唯讀，也不顯示 LINE 綁定紀錄（那支讀取不開放只看）
@@ -58,7 +59,7 @@ export function renderRoster(ctx) {
     });
   }
   function load() {
-    call('mgr_roster').then(r => { if (!live()) return; q('#duRosterFail').innerHTML = ''; myName = String(r.manager_name || ''); drawRoster(r.roster || []);
+    call('mgr_roster').then(r => { if (!live()) return; q('#duRosterFail').innerHTML = ''; { const xl = xLine(r, 'duRosterAt'); if (xl) q('#duRosterFail').append(xl); } myName = String(r.manager_name || ''); drawRoster(r.roster || []);
       const bc = q('#bcSelect'); if (bc) bc.innerHTML = '<option value="">選擇同仁…</option>' + (r.roster || []).filter(x => x.active).map(x => `<option value="${esc(x.emp_id)}">${esc(x.name)}（${esc(x.emp_id)}）</option>`).join(''); },
       e => { if (live()) failBar(q('#duRosterFail'), '同仁名冊', e, load); });
   }
