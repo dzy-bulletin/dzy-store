@@ -7,6 +7,7 @@ export function setHooks(h) { hooks = { ...hooks, ...h }; }
 
 // 回傳 data；失敗丟 Error（.code=error 代碼，.message=後端白話訊息）
 // tokenOverride：用指定的 token 打（嵌入模式要登出「舊的」或「剛建的多餘」session 時用），不影響目前登入
+// opts.keepalive：頁面／iframe 在請求途中被拆掉也讓瀏覽器把它送完（嵌入登出用，2026-11-20）
 // opts.read：這支 POST 其實是讀取（例如考勤的讀取動作），新路出事時可以放心用舊路重送一次。GET 與 body.peek===true 自動算讀取
 export async function api(method, path, body, tokenOverride, opts) {
   const token = tokenOverride || hooks.getToken();
@@ -22,6 +23,7 @@ export async function api(method, path, body, tokenOverride, opts) {
           method,
           headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
           body: method === 'GET' ? undefined : JSON.stringify(body || {}),
+          ...(opts && opts.keepalive ? { keepalive: true } : {}),
         });
         const j = await r.json();
         return { value: j, fault: isGatewayError(r.status, j) };

@@ -6,6 +6,7 @@ import { moduleResetKey } from '../../js/auth.js';
 import { S, resetState, load, flushNow, paintStatus, retryAll, hookPage, dirtyCount } from './state.js';
 import { renderZone } from './count.js';
 import { renderPrice } from './price.js';
+import { resetSync } from './pricesync.js';
 import { renderPrint } from './print.js';
 import { renderHistory } from './history.js';
 import { renderImport } from './import.js';
@@ -38,7 +39,7 @@ export default {
   render(ctx) {
     ensureCss(); hookPage();
     const key = moduleResetKey(ctx.session);
-    if (S.key !== key) resetState(key);                              // 換了登入就重來，不留上一家店的資料
+    if (S.key !== key) { resetState(key); resetSync(); }                              // 換了登入就重來，不留上一家店的資料
     if (dirtyCount() > 0) flushNow();                                // 切頁立即存
     const draw = () => {
       if (!ctx.el.isConnected) return;

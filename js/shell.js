@@ -360,6 +360,14 @@ async function viewAdmin(s, tab, tok) {
 let SSO_ERR = '';        // 個人登入失敗的白話訊息（登入頁／嵌入等待畫面顯示）
 let PENDING = null;      // 多店要選時：{ select_token, stores }（只放記憶體，不進任何儲存）
 let SSO_BUSY = false;
+// 嵌入模式開機時 sessionStorage 裡已有登入（可能是上一個人留下的）：在收到管理系統的券、確認是誰之前，不畫模組內容，只畫「正在連線管理系統…」（2026-11-20）。
+// 握手成功（runTicket 採用結果）才放行；握手失敗、逾時就停在等待畫面＋「重新連線」，不退回去畫舊登入。
+// 「這個 iframe 已經握手驗過是誰」的記號放在 window.name（整頁重載會留著、換成新的 iframe 重掛就沒有）：握手後換人／換店的 location.reload() 不必再握手一次；管理系統重掛 iframe 一定要重新握手。
+let EMBED_HOLD = false;
+const EMBED_OK = 'dzystore-embed-ok';
+const markEmbedOk = () => { try { window.name = EMBED_OK; } catch (e) { /* 不能設就每次重載都再握手一次，只是慢一點 */ } };
+let WAIT_TIMER = 0, LAST_READY = 0;
+const WAIT_TIMEOUT_MS = 10000;
 let UI_READY = Promise.resolve();   // boot() 讀外觀設定那一次（runTicket 畫面前要等它）
 const TICKET_RE = /^[0-9a-f]{64}$/;
 
@@ -377,7 +385,7 @@ async function goDzyLogin() {
 // 兌換並採用。fromParent＝嵌入握手：已有登入時，伺服器回的 sub 相同就保留原本的（可能已換過店），不同就先登出舊的再換
 async function runTicket(ticket, fromParent) {
   if (SSO_BUSY) return;
-  const wasShowing = !!(PENDING || SSO_ERR);      // 選店畫面或錯誤畫面正顯示著：握手結果出來一定要重畫把它換掉
+  const wasShowing = !!(PENDING || SSO_ERR || EMBED_HOLD);      // 選店畫面或錯誤畫面正顯示著：握手結果出來一定要重畫把它換掉
   SSO_BUSY = true; SSO_ERR = '';
   let quiet = false;      // 同一個人同一家店、權限沒變的重新握手：只換了新 token，不重畫（整個模組被重建、副本重抓，主管看到畫面一直跳；2026-11-18）
   try {
@@ -391,12 +399,12 @@ async function runTicket(ticket, fromParent) {
       else { PENDING = { select_token: r.select_token, stores: list }; return; }
     }
     const { kept, changed } = await adoptResult(r, fromParent);
-    PENDING = null;
+    PENDING = null; EMBED_HOLD = false; if (fromParent) markEmbedOk();
     quiet = !!(fromParent && kept && !changed && !wasShowing);
     if (!kept && old) { location.hash = ONLY ? `#/${ONLY}/` : '#/'; location.reload(); return; }   // 換了人／換了登入方式：整頁重載，不留上一個人的畫面與暫存
     if (!kept) location.hash = ONLY ? `#/${ONLY}/` : '#/';
   } catch (e) {
-    if (getSession() && fromParent) console.error('嵌入重新握手失敗：' + e.message);   // 已有登入就不打擾，使用者繼續用目前的
+    if (getSession() && fromParent && !EMBED_HOLD) console.error('嵌入重新握手失敗：' + e.message);   // 已有登入就不打擾，使用者繼續用目前的（開機還在等第一次握手時除外：那個登入沒驗過，不能畫）
     else SSO_ERR = e.message;
   } finally { SSO_BUSY = false; if (!quiet) { await UI_READY; render(); } }      // 外觀設定還沒到就先等（握手跟讀外觀同時進行）
 }
@@ -409,7 +417,7 @@ async function onHash() {
 
 // ---------- 嵌入管理系統（?embed=dzy）：postMessage 握手 ----------
 // 載入後對 parent 送 ready；只收 origin 與 source 都對的訊息（照公告專區）。每次收到新券都會兌換，sub 不同就先登出舊 session。
-const sendReady = () => { try { window.parent.postMessage({ type: 'dzy-store-ready', v: 1 }, EMBED_ORIGIN); } catch (e) { /* parent 不接受就算了 */ } };
+const sendReady = () => { LAST_READY = Date.now(); try { window.parent.postMessage({ type: 'dzy-store-ready', v: 1 }, EMBED_ORIGIN); } catch (e) { /* parent 不接受就算了 */ } };
 function installEmbed() {
   document.body.classList.add('embed');
   if (ONLY) document.body.classList.add('embed-only', `embed-${ONLY}`);   // 考勤管理／排班管理：不顯示功能列
@@ -426,13 +434,37 @@ function installEmbed() {
   window.addEventListener('dzystore-nav', postNav);   // 模組改了分頁數字（出勤核定 setReqBadge）
   sendReady();
 }
+// 管理系統切走模組時送登出訊息，然後只等 150ms 就拆掉 iframe（dzy modules/storeops/embed.js）：登出訊息一到，上一個人的登入與調撥草稿就要「同步」從 sessionStorage 消失，
+// 不能等 /logout 請求回來（網路慢過 150ms，上一個人的東西會留在同分頁，換 B 登入時一度畫出 A 的畫面）。先記下舊 token、同步清掉、立刻換掉畫面，再帶舊 token 補打 /logout；
+// 失敗也無妨（伺服器 session 12 小時自然過期）。請求在路上時不重載，免得被重載中斷（最多等 3 秒）。（2026-11-20）
 async function embedLogout() {
-  PENDING = null; SSO_ERR = '';
-  if (getSession()) await logout();
+  PENDING = null; SSO_ERR = ''; EMBED_HOLD = false;
+  try { window.name = ''; } catch (e) { /* 同上 */ }
+  const old = getSession();
+  clearSession();
+  LAST_READY = Date.now();        // 這是在登出，不是要再要券（viewEmbedWait 會在沒登入時自動要券）
+  render();                       // 沒有登入了：立刻換成等待畫面，上一個人的畫面不留（也擋掉還在畫面上的輸入再把草稿存回去）
+  if (old && old.token) {
+    let tm;
+    try { await Promise.race([api('POST', '/logout', {}, old.token, { keepalive: true }), new Promise(r => { tm = setTimeout(r, 3000); })]); } catch (e) { /* 伺服器端自然過期 */ }
+    clearTimeout(tm);
+  }
   location.hash = '#/'; location.reload();
 }
 
+// 沒有登入、或開機還在等第一次握手：等管理系統給券。等太久（逾時）就顯示可操作的「重新連線」；沒登入的狀態被畫出來（例如登入超過 12 小時過期）也主動再跟管理系統要一張券，不會永遠卡著
+function armWaitTimer() {
+  if (WAIT_TIMER) return;
+  WAIT_TIMER = setTimeout(() => {
+    WAIT_TIMER = 0;
+    if (!(EMBED_HOLD || !getSession()) || SSO_ERR) return;
+    if (SSO_BUSY) return armWaitTimer();
+    SSO_ERR = '連線管理系統逾時，請按「重新連線」'; render();
+  }, WAIT_TIMEOUT_MS);
+}
 function viewEmbedWait() {
+  if (!SSO_ERR && !SSO_BUSY && !PENDING && Date.now() - LAST_READY > 3000) sendReady();
+  armWaitTimer();
   const main = frame(null, `<div class="page"><div class="lcard"><h1>${esc(UI.systemName)}</h1>
     <p class="muted" id="embedStatus" role="status">${esc(SSO_ERR || '正在連線管理系統…')}</p>
     ${SSO_ERR ? '<button class="lbtn plain" id="embedRetry" type="button">重新連線</button>' : ''}</div></div>`);
@@ -452,7 +484,7 @@ function viewSelect() {
         const old = getSession();
         const d = await ssoSelect(PENDING.select_token, b.dataset.store);
         await adoptResult(d, false);
-        PENDING = null;
+        PENDING = null; if (EMBED) markEmbedOk();      // 嵌入時會走到選店，表示管理系統的券已兌換過
         if (old) { location.hash = ONLY ? `#/${ONLY}/` : '#/'; location.reload(); return; }
         location.hash = ONLY ? `#/${ONLY}/` : '#/'; render();
       } catch (er) { setMsg(main.querySelector('#selErr'), er.message); if (er.code === 'AUTH') PENDING = null; }
@@ -534,7 +566,7 @@ export async function render() {
   const tok = ++renderToken;
   let s = getSession();
   if (PENDING) return viewSelect();
-  if (!s) return EMBED ? viewEmbedWait() : viewLogin();
+  if (!s || EMBED_HOLD) return EMBED ? viewEmbedWait() : viewLogin();
   if (s.mustChangePassword) return viewPassword(s);
   const r = route();
   // 同一個畫面重畫（存檔後、資料補抓後）：保留上下與表格左右捲動位置，不跳回最上面；換頁才回到頂端（2026-10-31 Eason）
@@ -586,8 +618,8 @@ async function boot() {
   // 外觀設定、身分重查、跟管理系統要入場券三件事同時進行（2026-11-02：原本一件做完才做下一件，每件都要等一趟網路）
   UI_READY = loadUi();
   window.addEventListener('hashchange', onHash);
-  if (EMBED) installEmbed();
-  await Promise.all([UI_READY, refreshMe()]);
+  if (EMBED) { EMBED_HOLD = !!getSession() && window.name !== EMBED_OK; installEmbed(); }      // 開機就有登入：先不畫，等管理系統的券確認是誰（EMBED_HOLD）
+  await Promise.all([UI_READY, EMBED_HOLD ? null : refreshMe()]);      // 還沒驗過是誰就不用舊 token 去重讀權限
   const t = takeTicketFromHash();                                  // 從管理系統帶券回來：先兌換再畫第一個畫面
   if (t === null) return render();
   if (t) await runTicket(t, false); else { SSO_ERR = '入場券格式不正確，請重新用管理系統帳號登入'; render(); }

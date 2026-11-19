@@ -111,6 +111,7 @@ export const mockPersona = () => { try { return localStorage.getItem('dzystore_m
 
 export async function handle(method, path, body, token) {
   await new Promise(r => setTimeout(r, 60));
+  if (path === '/logout' && window.__logoutMs) await new Promise(r => setTimeout(r, window.__logoutMs));      // e2e：模擬慢網路下 /logout 很晚才到伺服器
   const pth = path.split('?')[0];
   if (needPerson(pth, token)) { if (!PMP) PMP = whileLeaving(import('./mock-person.js')); PM = await PMP; } else PM = null;       // 先載入再讀資料庫，避免載入期間別的請求改掉 db
   db = null; load(); body = body || {};

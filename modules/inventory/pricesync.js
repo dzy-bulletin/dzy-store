@@ -13,6 +13,8 @@ const pctTxt = p => (p === null || p === undefined ? '' : (p > 0 ? '+' : '') + p
 const REASON = { jump10: '漲跌超過 1 成', jump50: '漲跌超過 5 成（請先看貨單照片）', first_price: '原本沒有價格', tax_unknown: '貨單沒寫稅額，不知道含不含稅', revert_conflict: '貨單取消入帳，要不要退回原價', recheck: '取消入帳後重算出來的，請確認' };
 const CHOICE = { apply: '套用', dismiss: '不改', taxfree: '這張是免稅，原價就是未稅', tax5: '含 5% 稅，扣掉再用' };
 
+// 換了登入（人、店、權限指紋，見 auth.js moduleResetKey）就整個重來：快取、分頁、「看過貨單照片」的記錄都不能留給下一個人——標紅的待確認要每個人自己看過照片才能套用
+export function resetSync() { PS.st = null; PS.at = 0; PS.sub = 'list'; PS.key = null; PS.seen = new Set(); }
 export async function loadSync(force) {
   const key = S.key;
   if (!force && PS.st && PS.key === key && Date.now() - PS.at < FRESH_MS) return PS.st;
