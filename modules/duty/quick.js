@@ -1,7 +1,7 @@
 // 考勤管理「手機一頁核定」（核定工時分頁在手機寬度 ≤860px 的新畫面；規格 docs/duty-quick/requirements.md，2026-11-09 Eason 定案）。
 // 一頁完成：沒問題的人一鍵核定、有異常的人一人一張卡按一下完成、少打卡又沒單的人先擋住。舊畫面（approve.js）完整保留當退路。
 // 規則都在 quick-calc.js（純函式，有單元測試）；這裡只負責讀資料、畫畫面、依序呼叫既有的 mgr_approve／mgr_req_decide／mgr_req_proxy。
-import { S, call, callAll, h, failBar, failedStores, supportTag, loadLeave, staleLeave, leaveFor, canWriteRow, brk, brkOf, dutyManager, dutyHours, viewNoHoursStore, snapLabel, checkOnce, reqShown, dropChecks } from './state.js';
+import { S, call, callAll, h, failBar, failedStores, supportTag, loadLeave, staleLeave, leaveFor, canWriteRow, brk, brkOf, dutyManager, dutyHours, viewNoHoursStore, snapLabel, checkOnce, reqShown, dropChecks, readPend, pendTake, pendDrop } from './state.js';
 import * as T from './timeline-calc.js';
 import { fineCard, checkCards, pendingPanel, returnsPanel, elsewhereCards, FULL_UNTIL, leaveFreshOk } from './approve.js';
 import * as C from './calc.js';
@@ -375,7 +375,7 @@ export function renderQuick(ctx) {
     let fresh = false;
     st.dayPre = new Map();
     const opt = { peek: true };
-    const round1 = Promise.all([st.manual ? null : rd('mgr_pending_approvals', opt), rd('mgr_req_pending', opt)]).catch(() => [null, null]);
+    const round1 = Promise.all([st.manual ? null : readPend(opt), rd('mgr_req_pending', opt)]).catch(() => [null, null]);
     peekFirst(tok, () => fresh, round1).catch(() => {});
     // 副本已經知道要看哪一天：同時向打卡確認那天的名單，不等申請清單回來才開始（2026-11-10）
     const preRead = (date) => { if (!date || st.dayPre.has(date)) return; const p = (async () => { const [d, rq2] = await Promise.all([rd('mgr_day', { date }), rd('mgr_req_day', { date })]); return { emps: Array.isArray(d.employees) ? d.employees : [], appr: apprFrom(rq2), failed: [].concat((d && d.failed) || [], (rq2 && rq2.failed) || []), elsewhere: Array.isArray(d && d.elsewhere) ? d.elsewhere : [], mirrorAt: (d && d.mirror_at) || 0, mirrorStale: !!((d && d.mirror_stale) || (rq2 && rq2.mirror_stale)) }; })(); p.catch(() => {}); st.dayPre.set(date, p); };
@@ -389,11 +389,11 @@ export function renderQuick(ctx) {
       const leaveReady = loadLeave().catch(() => null);          // 不等額度才去抓名單；分類前（下面 readDay 那裡）才要到齊
       let leaveDone = false; leaveReady.then(() => { leaveDone = true; });
       // 待核定的日子只用來決定先看哪一天：有副本就用副本；申請清單要最新，不用副本
-      const pendP = st.manual ? Promise.resolve(null) : round1.then(([p]) => (p && p.snapshot_kind === 'replica' ? p : rd('mgr_pending_approvals')));
+      const pendP = st.manual ? Promise.resolve(null) : round1.then(([p]) => (p && p.snapshot_kind === 'replica' ? p : readPend()));      // 副本有就用副本；月初上個月不在這裡等：本月先畫，prev_due 由 pendTake 另外問、晚到補進清單（2026-11-20）
       const [pend, rq] = await Promise.all([pendP, rd('mgr_req_pending')]);
       fresh = true;
       st.reqStale = !!(rq && rq.mirror_stale);
-      if (pend && Array.isArray(pend.items) && tok === st.tok) { S.pend = pend.items; S.pendFailed = pend.failed || []; pendPanel.draw(); }      // 本月待核定提醒：用同一份
+      if (pend && Array.isArray(pend.items) && tok === st.tok) { pendTake(pend, () => { if (live()) { pendPanel.draw(); render(); } }); pendPanel.draw(); }      // 本月待核定提醒：用同一份（月初上個月另外讀、晚到補進來）
       else if (tok === st.tok) pendPanel.load();
       if (tok !== st.tok || !live()) return;
       st.pending = Array.isArray(rq && rq.items) ? rq.items : [];
@@ -1283,7 +1283,19 @@ export function renderQuick(ctx) {
     // 未出勤（沒打卡、也沒排上班）：舊畫面有列，要能在細調核整天請假或出差（2026-11-15 e2e 抓到新頁漏了）
     const absent = st.people.filter((p) => p.status === 'absent');
     if (absent.length) { root.append(h('div', 'dq-sec muted', '未出勤 ' + absent.length + ' 人（沒打卡、沒排上班；要核整天請假或出差按手動修改）')); absent.forEach((p) => root.append(miniCard(p, '未出勤'))); }
-    if (!st.date && !st.failed.length && !st.capped) { root.append(h('div', 'dq-alldone', Q.allDoneText(st.skipN))); if (st.todayView) root.append(todaySection()); }
+    if (!st.date && !st.failed.length && !st.capped) {
+      // 月初：上個月的待核定還在讀、讀不到、或讀回來還有——都不能只說「都核定完了」（2026-11-20 驗收）；有人先跳過時照舊那句
+      let pk = '', pn = 0;
+      if (!st.skipN) {
+        if (S.pendPrevWait) pk = 'wait';
+        else if (S.pendPrevFail) pk = 'miss';
+        else if (S.pendPrev) { pn = C.pendGroups(S.pend || [], it => canWriteRow('hours', it.emp_id, it.store)).mine.filter(g => String(g.date).slice(0, 7) === S.pendPrev).length; if (pn) pk = 'has'; }
+      }
+      const note = C.prevNoteText(pk, pn);
+      if (pk === 'wait' || pk === 'has') root.append(h('div', 'dq-prevnote', note, { role: 'status' }));
+      else { root.append(h('div', 'dq-alldone', Q.allDoneText(st.skipN))); if (pk === 'miss') root.append(h('div', 'dq-prevnote', note, { role: 'status' })); }
+      if (st.todayView) root.append(todaySection());
+    }
     if (st.capped) root.append(h('div', 'dq-done', '還有更早的日期沒看完，按上方「前一天」繼續'));
 
     // 其他申請：沒有掛在今天卡片上的待審申請
@@ -1340,7 +1352,7 @@ export function renderQuick(ctx) {
       recompute(); render(); return;
     }
     retPanel.load();
-    if (S.pend) { const n = S.pend.length; S.pend = S.pend.filter((it) => !(it.date === d.date && String(it.emp_id) === String(d.emp_id) && (it.store || '') === (d.store || ''))); if (S.pend.length !== n) pendPanel.draw(); }
+    if (pendDrop(d)) pendPanel.draw();
     st.toast = '已核定 ' + ((empOf(key) || {}).name || '') + '（手動修改送出）';
     setTimeout(() => { if (!live() || st.busy) return; st.fine.delete(key); st.fineEls.delete(key); reconcile().then(() => loadWaits()).catch(() => {}).then(() => afterChange()); }, 1200);      // 先讓主管看到細調裡的結果
   });

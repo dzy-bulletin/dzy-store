@@ -1,7 +1,7 @@
 // 核定工時：照原系統 ~/mala-clock-in/manager.html 搬。日期列（前一天／後一天／今天）、本月待核定提醒、員工卡（收合展開、時段、
 // 核定時數即時算、休息、假別、出差、遲到分鐘）、送出核定。外觀換成營運系統風格，規則與文案不改。
 import { confirmBox } from '../../js/ui.js';
-import { S, dutyManager, call, callAll, brk, brkOf, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow, canVoidRow, supportTag, rememberOne, snapLabel, tipText, checkOnce, reqShown, refreshReqBadge, reqCanDecide } from './state.js';
+import { S, dutyManager, call, callAll, readPend, pendTake, pendDrop, brk, brkOf, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow, canVoidRow, supportTag, rememberOne, snapLabel, tipText, checkOnce, reqShown, refreshReqBadge, reqCanDecide } from './state.js';
 import { buildReqItem } from './request.js';
 import { approvedSegTag, proxyOtSegs, SEG_MAX_OT_ADMIN } from './req-group.js';
 import { corePeriods, OVER_BLOCK_MIN, otSuggestText, cardDiffs, cardLabel, cardReasonText } from './core-calc.js';
@@ -42,9 +42,7 @@ export function renderApprove(ctx) {
   box.addEventListener('emp-approved', e => {
     loadReturns();      // 重核後人資退回就結案（伺服器做），清單重讀
     const d = e.detail; if (!d || !S.pend) return;
-    const n = S.pend.length;
-    S.pend = S.pend.filter(it => !(it.date === d.date && String(it.emp_id) === String(d.emp_id) && (it.store || '') === (d.store || '')));
-    if (S.pend.length !== n) drawPending();
+    if (pendDrop(d)) drawPending();
   });
 
   // ---------- 某天的名單（manager.html:1540–1590、1840–1930）----------
@@ -263,20 +261,23 @@ export function renderApprove(ctx) {
 export function pendingPanel(pendEl, onPick) {
   const el = pendEl;
   function loadPending() {
-    (S.all ? callAll('mgr_pending_approvals') : call('mgr_pending_approvals')).then(r => { if (!el.isConnected) return; S.pend = Array.isArray(r.items) ? r.items : []; S.pendFailed = r.failed || []; drawPending(); },
+    readPend().then(r => { if (!el.isConnected) return; pendTake(r, () => { if (el.isConnected) drawPending(); }); drawPending(); },
       e => { if (el.isConnected) failBar(pendEl, '本月待核定提醒', e, loadPending); });
   }
+  const lateHint = () => h('div', 'du-pa-late', '上個月的還在讀取，請稍等…', { role: 'status' });
+  const missHint = () => h('div', 'du-pa-miss', C.PREV_MISS_TEXT, { role: 'status' });
   function drawPending() {
     pendEl.innerHTML = '';
     const items = S.pend || [];
     failedStores(pendEl, S.pendFailed, loadPending);
-    if (!items.length) return;
+    if (!items.length) { if (S.pendPrevWait) pendEl.append(lateHint()); else if (S.pendPrevFail) pendEl.append(missHint()); return; }      // 本月沒有、上個月還在讀（或讀不到）：只留一行提示
     // 天數只算核得了的（2026-11-10）：那天全部是只能看的人（督導看區內門市、原單位主管看支援帳號…）不是你的待辦，
     // 不算天數、列在最後面。首頁待辦是同一個算法（calc.js pendGroups），兩邊的天數才對得起來
     const { mine, ro } = C.pendGroups(items, it => canWriteRow('hours', it.emp_id, it.store));
     const groups = mine.concat(ro);
     const card = h('div', 'du-pa');
-    card.append(h('div', 'du-pa-title', mine.length ? '本月還有 ' + mine.length + ' 天沒核定' : '本月沒有要你核定的日子'));
+    card.append(h('div', 'du-pa-title', mine.length ? C.pendTitle(mine, S.pendPrev || '') : '本月沒有要你核定的日子'));
+    if (S.pendPrevWait) card.append(lateHint()); else if (S.pendPrevFail) card.append(missHint());      // 月初：上個月沒核定的清單還在讀，讀到會補在前面（2026-11-20）      // 月初會併上個月（「11 月還有 2 天、本月還有 1 天沒核定」，2026-11-19）
     if (mine.length) card.append(h('div', 'du-pa-sub', '點名字直接跳到那天核定'));
     const shown = S.pendAll ? groups : groups.slice(0, 5);
     const roNote = () => h('div', 'du-pa-ronote', mine.length ? '另有 ' + ro.length + ' 天只能看，不算在上面的天數裡' : '以下 ' + ro.length + ' 天只能看（不是你要核定的）');

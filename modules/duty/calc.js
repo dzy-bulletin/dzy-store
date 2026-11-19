@@ -36,6 +36,28 @@ export function pendGroups(items, canWrite) {
   const pick = (g) => ({ date: g.date, names: g.names });
   return { mine: groups.filter(g => g.can).map(pick), ro: groups.filter(g => !g.can).map(pick) };
 }
+/**
+ * 待核定提醒的標題（2026-11-19 Eason，考勤驗收 11-10 不符 5）：每月 1～5 號伺服器會把上個月沒核定的天併在前面、回 prev_ym。
+ *   groups＝pendGroups 的 mine；prevYm＝回應的 prev_ym（沒有＝''）。上個月的天標「11 月」，其他照舊叫「本月」：
+ *   只有本月 →「本月還有 3 天沒核定」（跟以前一字不差）；兩個月都有 →「11 月還有 2 天、本月還有 1 天沒核定」。
+ */
+export function pendTitle(groups, prevYm) {
+  const isPrev = (g) => !!prevYm && String(g.date).slice(0, 7) === prevYm;
+  const p = groups.filter(isPrev).length, c = groups.length - p;
+  const parts = [];
+  if (p) parts.push(Number(prevYm.slice(5, 7)) + ' 月還有 ' + p + ' 天');
+  if (c) parts.push('本月還有 ' + c + ' 天');
+  return parts.join('、') + '沒核定';
+}
+// 月初（每月 1～5 日）本月沒有待辦時，畫面中央那一行（取代「到昨天為止都核定完了」；2026-11-20 驗收）：
+//   wait＝上個月的還在讀取；miss＝上個月讀不到；has＝上個月讀回來、還有 n 天沒核定（點上方提醒去核）；其他回空字串（照常顯示都核定完了）
+export const PREV_MISS_TEXT = '上個月的資料這次讀不到，請用上方日期選到上個月確認';
+export function prevNoteText(kind, n) {
+  if (kind === 'wait') return '本月到昨天為止都核定完了；上個月的還在讀取，請稍等…';
+  if (kind === 'miss') return PREV_MISS_TEXT;
+  if (kind === 'has' && n > 0) return '本月到昨天為止都核定完了；上個月還有 ' + n + ' 天沒核定，請點上方的提醒看名單、再點名字去核定';
+  return '';
+}
 // manager.html:1772–1775：'2026-08-01T21:43:12+08:00' → '8/1 21:43'
 export function tsLabel(ts) {
   ts = String(ts || '');

@@ -7,12 +7,12 @@ import { viewCanWrite } from './calc.js';
 const FLAG = 'dzystore_dutyok';
 // 管理者（2026-10-11 Eason：看得到所有門市、也能代核）：asStore＝正在看的門市代號，每次呼叫自動帶上；stores＝各店總覽讀到的門市清單。
 export const S = { key: null, admin: false, asStore: '', asName: '', stores: null, meta: { clockStore: '', label: '', breakStart: '', breakEnd: '' }, date: null, dayCache: {}, dayTok: 0,
-  pend: null, pendAll: false, focusEmp: null, elsewhere: [], rerender: null, leave: null, leaveP: null,
+  pend: null, pendGen: 0, pendPrevWait: false, pendPrevFail: false, pendAll: false, focusEmp: null, elsewhere: [], rerender: null, leave: null, leaveP: null,
   all: false, metaBy: {}, leaveBy: {}, recent: {}, reqPre: null, dqFull: false };   // all＝個人登入「全部門市」模式（2026-10-19）；metaBy／leaveBy＝各店的休息帶與假別額度（以營運系統門市代號為鍵）
 
 export function reset(key) {
   S.key = key; S.asStore = ''; S.asName = ''; S.stores = null; S.meta = { clockStore: '', label: '', breakStart: '', breakEnd: '' }; S.date = null; S.dayCache = {}; S.dayTok++;
-  S.pend = null; S.pendAll = false; S.focusEmp = null; S.elsewhere = []; S.leave = null; S.leaveP = null; S.reqCount = 0; S.reqAt = 0; S.metaBy = {}; S.leaveBy = {}; S.recent = {}; S.reqPre = null; S.dqFull = false;
+  S.pend = null; S.pendPrev = ''; S.pendPrevWait = false; S.pendPrevFail = false; S.pendGen = (S.pendGen || 0) + 1; S.pendAll = false; S.focusEmp = null; S.elsewhere = []; S.leave = null; S.leaveP = null; S.reqCount = 0; S.reqAt = 0; S.metaBy = {}; S.leaveBy = {}; S.recent = {}; S.reqPre = null; S.dqFull = false;
   S.leaveMirrorStale = false; S.leaveErr = false; S.leaveStale = false;      // 換登入／換模式：上一個人的額度狀態不留（第三輪審查）
 }
 
@@ -42,6 +42,46 @@ export async function callAll(op, body) {
   const r = await call('all', Object.assign({ op }, body || {}));
   if (r && Array.isArray(r.stores) && S.key === k && S.all) for (const st of r.stores) if (st.ok && st.meta) S.metaBy[st.store] = st.meta;
   return r;
+}
+// ---- 本月待核定提醒＋月初的上個月（2026-11-20「先畫本月，上個月晚到再補」）----
+// 以前月初（每月 1～5 號）伺服器把上個月的天併在同一個回應裡，上游慢時整頁要等上個月那次讀取才往下載。
+// 現在讀待核定一律帶 split:1：伺服器只回本月，月初多標 prev_due（上個月的年月）；上個月由這裡另外帶 ym 問（不走副本、直接問打卡），
+// 回來才補進清單，還在讀時 S.pendPrevWait＝true（畫面在標題下面顯示一行提示）；逾時、失敗、舊版打卡端不認得 ym 都不擋本月，但畫面會明說「上個月的資料這次讀不到」（S.pendPrevFail）。
+export function readPend(body) {
+  const b = Object.assign({ split: 1 }, body || {});
+  return S.all ? callAll('mgr_pending_approvals', b) : call('mgr_pending_approvals', b);
+}
+const pendKey = it => (it.store || '') + '|' + it.date + '|' + String(it.emp_id);
+// 收下本月那份待核定（r＝readPend 的回應，不含 prev_ym 的新版）並開始補上個月；redraw＝補進來或失敗時重畫提醒。
+// 本月那份換了（重新讀、換門市、換登入）→ 之前還在路上的上個月回應作廢（S.pendGen／S.key／S.asStore／S.all 任一變了都不收）
+export function pendTake(r, redraw) {
+  S.pend = Array.isArray(r.items) ? r.items : []; S.pendFailed = r.failed || [];
+  S.pendPrev = typeof r.prev_ym === 'string' ? r.prev_ym : ''; S.pendPrevWait = false; S.pendPrevFail = false; S.pendGone = new Set();
+  const gen = ++S.pendGen;
+  const due = !S.pendPrev && typeof r.prev_due === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(r.prev_due) ? r.prev_due : '';
+  if (!due) return;
+  S.pendPrevWait = true;
+  const key = S.key, as = S.asStore, all = S.all;
+  const still = () => S.pendGen === gen && S.key === key && S.asStore === as && S.all === all;
+  readPend({ ym: due }).then(p => {
+    if (!still()) return;
+    S.pendPrevWait = false;
+    if (p && Array.isArray(p.items) && !p.ym_unsupported && !(Array.isArray(p.failed) && p.failed.length)) {      // 有門市讀不到：整份上個月不收（跟伺服器舊的併法一樣）；ym_unsupported（舊版打卡端回本月）靠下面的月份過濾擋掉
+      const have = new Set(S.pend.map(pendKey));
+      const add = p.items.filter(x => x && typeof x.date === 'string' && x.date.slice(0, 7) === due && !have.has(pendKey(x)) && !S.pendGone.has(pendKey(x)));
+      S.pend = add.concat(S.pend); S.pendPrev = due;
+    } else S.pendPrevFail = true;      // 讀不到（有門市失敗、舊版打卡端不認得 ym）：畫面要明說，不能讓人以為上個月沒有待辦（2026-11-20 驗收）
+    redraw();
+  }, () => { if (!still()) return; S.pendPrevWait = false; S.pendPrevFail = true; redraw(); });
+}
+// 核定成功後把那一筆從提醒拿掉（記下來，晚到的上個月回應不會把剛核完的又加回來）；回 true＝清單有變
+export function pendDrop(d) {
+  if (!S.pend) return false;
+  const same = it => it.date === d.date && String(it.emp_id) === String(d.emp_id) && (it.store || '') === (d.store || '');
+  const n = S.pend.length;
+  S.pend = S.pend.filter(it => !same(it));
+  (S.pendGone = S.pendGone || new Set()).add(pendKey({ store: d.store, date: d.date, emp_id: d.emp_id }));
+  return S.pend.length !== n;
 }
 // 每一列自己的店（全部門市時列上有 store）：休息帶與假別額度各用各的店
 // 單一門市也可能有別家的列（總部那組直接列在央廚打卡的人，2026-11-02）：列上有 store 就用那家的

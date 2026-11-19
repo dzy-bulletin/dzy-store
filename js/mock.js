@@ -213,6 +213,18 @@ function route(method, p, q, b, token) {
       const w = window; w.__dutyInflight = (w.__dutyInflight || 0) + 1; w.__dutyMax = Math.max(w.__dutyMax || 0, w.__dutyInflight);
       return new Promise(res => setTimeout(() => { try { res(duty(m[2], mx, s, b)); } finally { w.__dutyInflight--; } }, w.__dutyDelay));
     }
+    if (m[1] === 'duty' && m[2] === 'mgr_pending_approvals' && window.__dutyPrev && !(b && b.__pv)) {      // e2e（2026-11-20 月初先畫本月、上個月晚到再補，mod_duty_late）：window.__dutyPrev＝{ ym, items 或 byStore:{店:items}, ms 或 msBy:{店:毫秒}, seq:[{ms,items}…], fail, curEmpty（本月沒有待核定）}
+      const w = window, pv = w.__dutyPrev, as = (b && b.asStore) || (mx && mx.code) || '';
+      if (b && b.ym === pv.ym) {      // 上個月那次：不走副本、慢慢回（或失敗）
+        (w.__dutyPrevReads = w.__dutyPrevReads || []).push({ store: as, at: Date.now() });
+        const sq = Array.isArray(pv.seq) ? pv.seq[Math.min(w.__dutyPrevReads.length - 1, pv.seq.length - 1)] : null;      // seq：依第幾次讀取各自的延遲與內容（驗同一家店重新讀之後，舊的那次晚到不蓋新的）
+        const ms = sq ? sq.ms : pv.msBy && pv.msBy[as] !== undefined ? pv.msBy[as] : (pv.ms || 0);
+        const items = sq ? sq.items : pv.byStore ? (pv.byStore[as] || []) : (pv.items || []);
+        return new Promise(res => setTimeout(() => res(pv.fail ? fail('TIMEOUT', '打卡系統回應太久，請稍後再試') : ok({ ym: pv.ym, today: pv.ym + '-28', items: items.map(x => ({ ...x })) })), ms));
+      }
+      return Promise.resolve(route(method, p, q, Object.assign({}, b, { __pv: 1 }), token)).then(x => { if (x && x.ok && x.data && Array.isArray(x.data.items)) { x.data.prev_due = pv.ym; if (pv.curEmpty) x.data.items = []; } return x; });      // 本月那次：照常回，月初多標 prev_due
+    }
+    if (m[1] === 'duty' && (m[2] === 'mgr_req_pending' || m[2] === 'mgr_day') && window.__dutyPrev && window.__dutyPrev.curEmpty && !(b && b.__pv)) return Promise.resolve(route(method, p, q, Object.assign({}, b, { __pv: 1 }), token)).then(x => { if (x && x.ok && x.data) { if (Array.isArray(x.data.items)) x.data.items = []; if (Array.isArray(x.data.employees)) x.data.employees = []; } return x; });      // curEmpty：本月沒有待核定、沒有待審申請、昨天沒有要核的人（讓核定頁真的落到「到昨天為止都核定完了」那一畫面）
     if (m[1] === 'duty' && b && b.peek === true) {                              // 示範／e2e：window.__dutySnapAt 有值＝Mac mini 有上次資料，馬上回、不受延遲和故障影響
       if (!window.__dutySnapAt || m[2] === 'all') return ok({ snapshot_at: null });
       const peeked = dutyDo(dutyDb(), m[2], Object.assign({}, b, { peek: undefined }));

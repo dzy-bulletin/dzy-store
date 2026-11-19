@@ -12,7 +12,7 @@ function loadStores() {
 }
 
 export const COLS = [
-  { k: 'approve', label: '本月沒核定', unit: '天', action: 'mgr_pending_approvals', count: r => (Array.isArray(r && r.items) ? new Set(r.items.map(x => x && x.date)).size : null) },
+  { k: 'approve', label: '還沒核定', unit: '天', action: 'mgr_pending_approvals', count: r => (Array.isArray(r && r.items) ? new Set(r.items.map(x => x && x.date)).size : null) },
   { k: 'request', label: '待審申請', unit: '筆', action: 'mgr_req_pending', count: r => (Array.isArray(r && r.items) ? reqTodo(r.items).length : null) },      // 跟進店後「申請審核」分頁的徽章同一個算法（只算按得下去的；本人自己送的 self、只給最小列的 hours_only 不算；2026-11-15：原本連代開審核中的也算，總覽 6 筆、進店 4 筆）
   { k: 'device', label: '待核准手機', unit: '支', action: 'mgr_pending_devices', count: r => (Array.isArray(r && r.pending) ? r.pending.length : null) },
 ];
@@ -24,7 +24,7 @@ export function renderOverview(ctx) {
   el.innerHTML = '';
   const card = h('div', 'card');
   card.append(h('h2', null, '各店出勤核定狀況'));
-  { const t = h('p', 'hint'); t.append(tipText('各店本月沒核定、待審、等核准的件數', '點數字或「進入」可以直接看那家店，也可以替該店核定。')); card.append(t); }
+  { const t = h('p', 'hint'); t.append(tipText('各店還沒核定（每月 1～5 號含上個月）、待審、等核准的件數', '點數字或「進入」可以直接看那家店，也可以替該店核定。')); card.append(t); }
   const box = h('div', 'du-ov'); card.append(box);
   const row = h('div', 'row mt');
   const reload = h('button', 'btn sm ghost', '重新整理', { type: 'button', id: 'duOvReload' });

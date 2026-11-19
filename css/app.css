@@ -209,6 +209,7 @@ select{min-height:44px}
 .du-pa-group{display:flex;gap:10px;align-items:flex-start;padding:5px 0;border-top:1px dashed var(--line)}
 .du-pa-date{flex:none;width:76px;font-weight:700;font-size:13px;padding-top:6px}
 .du-pa-names{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+.du-pa-late,.du-pa-miss{font-size:14px;font-weight:600;color:var(--warn,#8a5a00);padding:4px 0 6px}   /* 月初：上個月沒核定的還在讀（2026-11-20）；折起來時也看得到 */
 .du-pa-ronote{font-size:12px;color:var(--muted);padding:7px 0 3px;border-top:1px dashed var(--line)}   /* 本月待核定：只能看的日子不算天數（2026-11-10） */
 .du-chip{font:inherit;font-size:13px;font-weight:700;padding:6px 12px;min-height:34px;border-radius:20px;border:1px solid var(--pink);background:#fff;color:var(--red);cursor:pointer}
 .du-chip:hover{background:#fff1ee}
@@ -665,6 +666,7 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
 .dq-toggle{font:inherit;min-height:50px;border:1px solid var(--line);border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 14px;font-weight:700;margin-top:4px;cursor:pointer}
 .dq-rq{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
 /* 還沒核定、有待審單（2026-11-18）：卡片上的提示＋直接列待審單給核准／退回 */
+.dq-prevnote{background:#fff4e0;color:var(--warn,#8a5a00);border-radius:14px;padding:18px 16px;text-align:center;font-size:16px;font-weight:700;line-height:1.6;overflow-wrap:anywhere}   /* 月初：上個月的待核定還在讀／讀不到／還有，取代「都核定完了」（2026-11-20 驗收） */
 .dq-pendnote{background:#fff4e0;color:var(--warn,#8a5a00);border-radius:8px;padding:8px 10px;font-size:13px;font-weight:600}
 .dq-pendreqs{display:flex;flex-direction:column;gap:8px}
 .dq-pendreqs .dq-rq{border-style:dashed}
