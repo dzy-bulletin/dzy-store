@@ -8,8 +8,8 @@ import { canEdit } from './state.js';
 import { kindBox, bindKind } from './fixed.js';
 import { moduleResetKey } from '../../js/auth.js';
 
-export const H = { key: null, period: null, data: null, loading: null, who: null, emp: null, sel: null, shEdit: null, msg: '', err: '' };
-export function resetSelf(key) { Object.assign(H, { key, period: null, data: null, loading: null, who: null, emp: null, sel: null, shEdit: null, msg: '', err: '' }); }
+export const H = { key: null, period: null, data: null, loading: null, who: null, emp: null, sel: null, shEdit: null, msg: '', err: '', list: null, listAt: 0, listLoading: null, stMsg: '', stErr: '' };
+export function resetSelf(key) { Object.assign(H, { key, period: null, data: null, loading: null, who: null, emp: null, sel: null, shEdit: null, msg: '', err: '', list: null, listAt: 0, listLoading: null, stMsg: '', stErr: '' }); }
 
 async function load() {
   if (!H.period) H.period = defaultSelfPeriod();
@@ -140,10 +140,13 @@ function canFill(D) {
 
 function drawSelf(ctx) {
   const el = ctx.el, D = H.data;
-  const emp = H.emp && D.me.includes(H.emp) ? H.emp : D.me[0];      // 一人有多個總部員編：上方可切換（H.emp）
+  // 「同仁」開關關掉的員編（D.off）：不排進總部班表，只顯示提示、不能存（伺服器 selfSave 也擋）。一人有多個總部員編時，其餘開著的照常用
+  const offMe = D.off || [], meOn = D.me.filter((x) => !offMe.includes(x));
+  const emp = H.emp && meOn.includes(H.emp) ? H.emp : (meOn[0] || D.me[0]);      // 一人有多個總部員編：上方可切換（H.emp）
   const row = D.staff.find((s) => s.emp_id === emp);
   if (!row) {
-    el.innerHTML = '<div class="card"><p class="hint" style="margin:0" id="hqNoMe">你在這家店還沒有打卡員編，請洽總部。</p></div>'
+    el.innerHTML = (offMe.includes(emp) ? '<div class="card"><p class="hint" style="margin:0" id="hqOff">你目前不在總部班表中，請洽排班負責人。</p></div>'
+      : '<div class="card"><p class="hint" style="margin:0" id="hqNoMe">你在這家店還沒有打卡員編，請洽總部。</p></div>')
       + (shiftsInSelf(ctx.session) ? `<div class="card"><div id="hqMsg" class="${H.err ? 'err' : 'okmsg'}" role="status">${esc(H.err || H.msg || '')}</div></div>` + shiftCardHtml(D) : '');
     bindShiftCard(ctx, el, D);
     return;
@@ -161,7 +164,7 @@ function drawSelf(ctx) {
   const hint = editable
     ? '<p class="hint mt">點日期選班別或休假，存了就生效，約 1 分鐘內送到 LINE。四週變形：這一期（28 天）要有 4 天例假、4 天休息日，每兩週至少 2 天例假、最多連上 12 天；不合規定的地方會在上面紅字提醒。</p>'
     : `<p class="hint mt" id="hqLocked">${parseLabel(H.period) < parseLabel(D.curPeriod || 'T01') ? '這一期已經過了，只能看不能改。' : `下一期開始前 ${SELF_OPEN} 天起才能填。`}</p>`;
-  const empPick = D.me.length > 1 ? `<div class="row mt"><label class="sc-chk" for="hqEmpSel">員編</label><select id="hqEmpSel" aria-label="要看哪個員編的班表">${D.me.map((x) => `<option value="${esc(x)}" ${x === emp ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div>` : '';
+  const empPick = meOn.length > 1 ? `<div class="row mt"><label class="sc-chk" for="hqEmpSel">員編</label><select id="hqEmpSel" aria-label="要看哪個員編的班表">${meOn.map((x) => `<option value="${esc(x)}" ${x === emp ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div>` : '';
   const lockNote = row.lockBefore && periodDates(H.period)[0] < row.lockBefore ? `<p class="hint" id="hqLockNote">${md(row.lockBefore)} 以前的班在${esc(row.lockStore || '打卡的店')}，這裡只能看。</p>` : '';
   el.innerHTML = head(D, `${row.name}・${emp}`, `${empPick}<div class="sc-state mt">${fillTag}</div>${acts}${hint}${lockNote}`)
     + resultsHtml(D.results, emp)
@@ -209,6 +212,47 @@ function drawSelf(ctx) {
     if (!Object.keys(out).length) { say('這一期已經是空白的'); return ctx.rerender(); }
     if (!(await confirmBox(`把 ${H.period} 這一期全部清空？請假也會一起清掉，清完再用「填入空白的天」重新填。`, '全部清空'))) return;   // 跟門市同一種確認框（2026-11-05 Fable 審查）
     await save(out, '已清空這一期，用「填入空白的天」重新填；約 1 分鐘內送到 LINE');
+  });
+}
+
+// ---------------------------------------------------------------- 同仁（誰排進總部班表）
+// 2026-11-20 Eason：每位總部在職同仁一個開關，開＝排進總部班表、關＝從總部班表拿掉（部屬班表、「班表空白」提醒都不再列他；本人的「我的班表」只顯示提示）。
+// 只有排班負責人（scheduleAdmin：主管、人資主管、管理員）看得到這個分頁，伺服器也擋。只是顯示開關：已排的班留著、不動打卡帳號、不設離職日；再打開原樣回來。
+const loadList = async () => { H.list = await call('selfStaffList', {}); H.listAt = Date.now(); return H.list; };
+export function renderHqStaff(ctx) {
+  const key = ctx.session.token || ctx.session.code;
+  if (H.key !== key) resetSelf(key);
+  const draw = () => { if (ctx.el.isConnected) drawHqStaff(ctx); };
+  if (H.list && Date.now() - (H.listAt || 0) < 30000) return draw();      // 30 秒內重畫直接用；回到這個分頁超過 30 秒就重讀（名冊同步可能帶進新同仁）
+  ctx.el.innerHTML = '<div class="card"><p class="hint" style="margin:0">讀取中…</p></div>';
+  if (!H.listLoading) H.listLoading = loadList().finally(() => { H.listLoading = null; });
+  return H.listLoading.then(draw, (e) => {
+    if (!ctx.el.isConnected) return;
+    ctx.el.innerHTML = `<div class="card"><div class="err" id="hqStLoadErr" role="alert">${esc(e.message)}</div><button class="btn mt" id="hqStRetry" type="button">重新讀取</button></div>`;
+    ctx.el.querySelector('#hqStRetry').onclick = () => ctx.rerender();
+  });
+}
+function drawHqStaff(ctx) {
+  const el = ctx.el, L = H.list, staff = L.staff || [];
+  const nOn = staff.filter((s) => s.on).length;
+  const rows = staff.map((s) => `<div class="sc-drow fx-row hq-strow${s.on ? '' : ' hq-stoff'}" data-emp="${esc(s.emp_id)}"><span class="sc-dn">${esc(s.name)}<small class="sc-al">${esc(s.emp_id)}${s.away ? `・班表在${esc(s.away)}` : ''}</small></span>
+      <span class="sc-dv"><label class="sc-chk"><input type="checkbox" class="hq-on" data-emp="${esc(s.emp_id)}" ${s.on ? 'checked' : ''} aria-label="${esc(s.name)} 排進總部班表">${s.on ? '排進總部班表' : '不排班'}</label></span></div>`).join('');
+  el.innerHTML = `<div class="card"><h2>總部同仁</h2><p class="hint" id="hqStSum">${staff.length} 位在職，${nOn} 位排進總部班表${staff.length - nOn ? `、${staff.length - nOn} 位不排` : ''}。</p>
+      <p class="hint">打開＝這位同仁出現在總部班表（部屬班表、「班表空白」提醒）；關掉＝從總部班表拿掉，他自己的「我的班表」會顯示「你目前不在總部班表中」、不能填。只是顯示開關：他已經排好的班不會刪，打卡帳號也不動；再打開，班表原樣回來。</p>
+      <div id="hqStMsg" class="${H.stErr ? 'err' : 'okmsg'}" role="status">${esc(H.stErr || H.stMsg || '')}</div>
+      <div class="sc-dlist" id="hqStaffList">${rows || '<p class="hint" style="margin:0" id="hqStEmpty">還沒有同仁。</p>'}</div></div>`;
+  el.querySelectorAll('input.hq-on').forEach((cb) => {
+    cb.onchange = async () => {
+      cb.disabled = true;
+      const name = (staff.find((x) => x.emp_id === cb.dataset.emp) || {}).name || cb.dataset.emp, on = cb.checked;
+      try {
+        await call('selfStaffSet', { emp_id: cb.dataset.emp, on });
+        H.data = null;      // 部屬班表要重讀
+        await loadList();
+        H.stErr = ''; H.stMsg = on ? `已把 ${name} 排進總部班表` : `已把 ${name} 從總部班表拿掉（已排的班保留，再打開就回來）`;
+      } catch (e) { H.stMsg = ''; H.stErr = e.message; try { await loadList(); } catch (e2) { /* 留原畫面 */ } }
+      ctx.rerender();
+    };
   });
 }
 

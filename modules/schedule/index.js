@@ -7,7 +7,7 @@ import { renderBoard } from './board.js';
 import { renderNeeds } from './needs.js';
 import { renderStaff } from './staff.js';
 import { renderShifts } from './shifts.js';
-import { renderSelf, renderApprove } from './self.js';
+import { renderSelf, renderApprove, renderHqStaff } from './self.js';
 import { renderFixed, renderFixedStaff } from './fixed.js';
 import { renderLockLog } from './locklog.js';
 import { ssoSwitch, setSession, toSession, pickSchedStore, moduleResetKey } from '../../js/auth.js';
@@ -40,7 +40,7 @@ export function tabsFor(s) {
   const mode = (s && s.schedMode) || 'store';
   const cross = Object.keys(GO).filter((id) => GO[id][0] !== mode && !!pickSchedStore(s, GO[id][0])).map((id) => ({ id, label: GO[id][1] }));
   let own;
-  if (mode === 'self') own = [].concat(s.schedSelfOn ? [{ id: 'self', label: '我的班表' }] : [], s.schedApproveOn ? [{ id: 'approve', label: '部屬班表' }] : s.shiftAdmin && !s.schedSelfOn ? [{ id: 'approve', label: '總部班別' }] : []);      // 總部總監沒有自己的員編：總部班別卡放在部屬核准（2026-10-30）
+  if (mode === 'self') own = [].concat(s.schedSelfOn ? [{ id: 'self', label: '我的班表' }] : [], s.schedApproveOn ? [{ id: 'approve', label: '部屬班表' }] : s.shiftAdmin && !s.schedSelfOn ? [{ id: 'approve', label: '總部班別' }] : [], s.scheduleAdmin ? [{ id: 'hqstaff', label: '同仁' }] : []);      // 總部總監沒有自己的員編：總部班別卡放在部屬核准（2026-10-30）；「同仁」開關分頁只給排班負責人（2026-11-20）
   else if (mode === 'fixed') own = [{ id: 'fixed', label: '央廚班表' }].concat(s.scheduleAdmin ? [{ id: 'fixedstaff', label: '固定班別' }, { id: 'shifts', label: '班別設定' }] : []);   // 班別設定：央廚自己的班別時段（2026-10-25 Eason）
   else own = STORE_TABS;
   const all = own.concat(cross);
@@ -64,6 +64,7 @@ export default {
     if (GO[ctx.tab]) return goCross(ctx);
     if (ctx.tab === 'self') return renderSelf(ctx);
     if (ctx.tab === 'approve') return renderApprove(ctx);
+    if (ctx.tab === 'hqstaff') return renderHqStaff(ctx);
     if (ctx.tab === 'fixed') return renderFixed(ctx);
     if (ctx.tab === 'fixedstaff') return renderFixedStaff(ctx);
     if (ctx.tab === 'locklog') return renderLockLog(ctx);           // 只讀，看得到班表的人都看得到（不套 lockDown：篩選欄要能用）

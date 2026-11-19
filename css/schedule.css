@@ -156,6 +156,7 @@ button.hq-day{cursor:pointer}
 .hq-na{background:transparent}
 .sc-drow.hq-emp.sel{border-color:var(--black);box-shadow:inset 0 0 0 1px var(--black)}
 .sc-drow.fx-row{cursor:default;grid-template-columns:1fr auto;align-items:center}
+.sc-drow.hq-stoff .sc-dn{color:var(--muted,#7a746b)}
 .sc-c.man::after{content:"・";position:absolute;top:0;right:2px;color:#c98a2b;font-weight:700}
 @media (max-width:520px){.hq-cal{border-spacing:2px}.hq-day{min-height:50px;font-size:10px}.hq-day .hq-v{font-size:11px}}
 
