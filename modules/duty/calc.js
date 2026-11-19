@@ -590,7 +590,7 @@ export function crossOt(emp, ownH, ownFs) {
   else if (abs) text += '；' + abs.label + '的 ' + abs.h + ' 小時裡有 ' + atSup + ' 小時是加班，加班單開在' + abs.label + (here > 0.005 ? '；這家另外要開 ' + here + ' 小時加班單' : '，這家不用開');
   return { text, comb, need, absLabel: abs ? abs.label : '', atSup, here };
 }
-/** 核定說明：有跨店提醒時，拿掉只看本店的「比班表多…不用加班單」，換成跨店那句 */
+/** 核定說明：有跨店提醒時，拿掉只看本店的「班表外多做…不用加班單」（core-calc.js 的說明；結尾要維持「不用加班單）」，下面用它認），換成跨店那句 */
 export function crossNotes(emp, notes, ownH, ownFs) {
   const list = Array.isArray(notes) ? notes.slice() : [];
   const x = crossOt(emp, ownH, ownFs);

@@ -708,6 +708,8 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
 .du-verdict{border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:7px;margin:4px 0 10px;overflow-wrap:anywhere}
 .du-verdict.ok{background:#e6f3ea;border:1px solid #bcd9c2}
 .du-verdict.gray{background:#f1efec;border:1px solid var(--line)}
+.du-verdict.warn{background:#fff4d6;border:1px solid #e3c870}
+.du-verdict.warn .du-verdict-t{color:#7a5200}
 .du-verdict-t{font-size:15.5px;font-weight:700}
 .du-verdict.ok .du-verdict-t{color:var(--ok)}
 .du-verdict.gray .du-verdict-t{color:var(--bad)}

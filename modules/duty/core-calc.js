@@ -112,7 +112,7 @@ export function corePeriods(o) {
   // 排休（plan.work === false：休息日／例假整天算加班）不算這種，照舊只算加班單那段
   const noSched = !S.length && !(o.plan && o.plan.work === false);
   const reqs = Array.isArray(o.reqs) ? o.reqs : [];
-  const otRaw = reqs.filter((r) => r.kind === 'ot').map((r) => span(toMin(r.start), toMin(r.end)));
+  const otRaw = reqs.filter((r) => r.kind === 'ot' && r.pending !== true).map((r) => span(toMin(r.start), toMin(r.end)));      // 只算已核准（2026-11-19 防呆，同下面假單；待審單不算進核定，要先審單）
   const lvReqs = reqs.filter((r) => r && (r.kind === 'leave' || r.kind === 'trip') && r.pending !== true);      // 只算已核准（呼叫端本來就只給已核准的；防呆）
   const lvSpan = (r) => (toMin(r.start) != null && toMin(r.start) === toMin(r.end) ? null : span(toMin(r.start), toMin(r.end)));      // 起訖相同（11:00–11:00）＝沒有時段，忽略（同打卡端；原本被當成 24 小時）
   const LVraw = lvReqs.map(lvSpan).filter((x) => x && x[1] > x[0]);
@@ -318,7 +318,7 @@ export function corePeriods(o) {
   if (otOnly) notes.push('這天沒有班表：照打卡算，已核准加班單 ' + OT.map(([a, b]) => toHm(a) + '–' + toHm(b)).join('、') + ' 是其中的加班時段（跨店同一天合計超過 8 小時的部分照加班歸屬由這家吸收）');
   for (const x of (otOnly ? [] : minus(WnoBrk, FREE.length ? FREE : WnoBrk))) if (x[1] - x[0] > TOL) notes.push(toHm(x[0]) + '–' + toHm(x[1]) + ' 超過當天 8 小時、沒有加班單，不算');
   const freeMin = total(freeExtra);
-  if (freeMin > 0) notes.push('比班表多 ' + Math.round(freeMin / 6) / 10 + ' 小時（當天沒滿 8 小時，不用加班單）');
+  if (freeMin > 0) notes.push('班表外多做 ' + Math.round(freeMin / 6) / 10 + ' 小時（全天合計沒超過 8 小時，不用加班單）');
   for (const x of raw) if (x.fromReq.out && S.length && x.out != null && x.out > S[S.length - 1][1] + TOL && !OT.some((y) => x.out <= y[1] + TOL)) {
     const tail = '–' + toHm(x.out) + ' 超過當天 8 小時、沒有加班單，不算';
     for (let i = notes.length - 1; i >= 0; i--) if (notes[i].endsWith(tail)) notes.splice(i, 1);      // 同一段改用忘打卡單的說法，不重複

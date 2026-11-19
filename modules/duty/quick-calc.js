@@ -254,6 +254,14 @@ export const reqLine = (r) => {
   const head = (C.REQ_KIND_LABEL[r.kind] || '') + '單', sm = stripDate(r.summary);
   return r.hours_only || !sm ? head : head + '：' + sm + (r.reason ? '（' + r.reason + '）' : '');      // hours_only＝只在工時名單的人只看得到有一張單，沒有內容（伺服器 duty.js 最小列）
 };
+/**
+ * 這天待審的單分兩種（2026-11-19 抽出來共用：classifyRaw 判斷「有待審單／等上層審核」與 approve.js 細調卡擋核定用同一個條件，不各寫一套）。
+ *   mine＝還沒審、這位主管審得了（pending && decidable）；upper＝還沒審、這位主管審不了（pending && !decidable：本人的單、要上層審的、只給最小列的）
+ */
+export function pendSplit(reqs) {
+  const list = Array.isArray(reqs) ? reqs : [];
+  return { mine: list.filter((r) => r && r.pending && r.decidable), upper: list.filter((r) => r && r.pending && !r.decidable) };
+}
 const missUsed = (periods, r) => {
   const has = (f) => periods.some(f);
   if (r.miss_type === 'out') return has((p) => p.end === r.end);
@@ -287,7 +295,7 @@ function classifyRaw(inp) {
   const reqs = inp.reqs || [];
   const key = keyOf(emp);
   const base = { key, name: emp.name, empId: emp.emp_id, store: emp.store || '', date, status: '', tag: '', planText: '', punchText: '', note: '', chk: '', hours: null, payload: null, actions: [], skipped: !!skipped, reqId: null,
-    hasPend: reqs.some((r) => r && r.pending && r.decidable) };      // 有這位主管審得了的待審單（2026-11-18 第 7 題）：不送檢查、不進一鍵核定（classify 結尾標 pendNote，標籤照原本）
+    hasPend: pendSplit(reqs).mine.length > 0 };      // 有這位主管審得了的待審單（2026-11-18 第 7 題）：不送檢查、不進一鍵核定（classify 結尾標 pendNote，標籤照原本）
   const pv = C.planPrefill(emp, emp.plan, brk);
   base.planText = pv.mode === 'plan' ? pv.text.replace(/^班表 /, '') : (pv.text || '沒有班表');      // 已核定的人也要寫班表（2026-11-16：原本在已核定分支之後才算，已核定卡片時間軸有班表、文字卻寫「沒有班表」）
   // 休息日／例假出勤要在班表文字標出來（2026-11-15 Eason）；放在已核定分支之前，已核定的人也要標（2026-11-17 Eason：吳佳宜 11/1 已核定卡片看不出是休息日加班）
@@ -314,8 +322,8 @@ function classifyRaw(inp) {
 
   if ((emp.dup_groups || []).length) return full('重複打卡', '有重複打卡，要選以哪張為準');
   if (C.leavesOf(emp).length) return full('已有假別記錄', '這天已經記過假別');
-  if (reqs.some((r) => r.pending && !r.decidable)) {
-    const r = reqs.find((q) => q.pending && !q.decidable);
+  if (pendSplit(reqs).upper.length) {
+    const r = pendSplit(reqs).upper[0];
     return Object.assign(base, { status: 'blocked', tag: '等上層審核', note: (r.hours_only ? '這天有一張' + reqLine(r) + '在審核中，內容你沒有權限看，' : reqLine(r) + ' ') + '要由上層主管審核，審完才能核定', actions: [skip('先跳過，等上層審核')] });
   }
   // 已核准、有填時段的假單／出差單（2026-11-18 Eason，docs/approve-once/）：預檢帶假別，打卡系統說會過才進一鍵核定（quick.js checkOk）；前端先擋的留在逐筆確認、不送檢查

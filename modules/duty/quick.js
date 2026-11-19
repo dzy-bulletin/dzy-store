@@ -42,7 +42,7 @@ const MODE_KEY = 'dzystore_dutymode';
 function modeGet() { try { return localStorage.getItem(MODE_KEY) === 'detail'; } catch (e) { return false; } }
 function modePut(d) { try { localStorage.setItem(MODE_KEY, d ? 'detail' : 'simple'); } catch (e) {} }
 // 時間軸：一個人那天的班表（虛線）、打卡（灰條）、單（框）、差異（色塊）。資料由 timeline-calc.js 算，這裡只畫
-const TL_KIND = { short: '遲到、早退或缺勤', miss: '忘打卡（還沒補單）', missok: '忘打卡（已補單）', leave: '請假', leavepend: '請假（假單待審）', trip: '出差', trippend: '出差（出差單待審）', comp: '補休', comppend: '補休（假單待審）', extra: '比班表多（當天沒滿 8 小時，不用加班單）', ot: '加班、沒有加班單（超過 8 小時）', otok: '加班（有加班單）', rest: '兩段班中間的空檔' };
+const TL_KIND = { short: '遲到、早退或缺勤', miss: '忘打卡（還沒補單）', missok: '忘打卡（已補單）', leave: '請假', leavepend: '請假（假單待審）', trip: '出差', trippend: '出差（出差單待審）', comp: '補休', comppend: '補休（假單待審）', extra: '班表外多做（全天合計沒超過 8 小時，不用加班單）', ot: '加班、沒有加班單（超過 8 小時）', otok: '加班（有加班單）', rest: '兩段班中間的空檔' };
 export function timelineEl(m, label) {
   const wrap = h('div', 'tl');
   const track = h('div', 'tl-track', null, { role: 'img', 'aria-label': label || '時間軸' });
@@ -541,8 +541,9 @@ export function renderQuick(ctx) {
     if (!c) {
       const emp = empOf(p.key); if (!emp) return null;
       const date = st.date;
-      const pend = reqShown(st.pending).filter((it) => it.date === date && Q.keyOf(it) === p.key && !st.handled.has(hid(it)));
-      c = fineCard(emp, date, { reqs: st.appr[p.key] || [], pending: pend, current: () => live() && st.date === date, defer: true });
+      const pendAll = st.pending.filter((it) => it.date === date && Q.keyOf(it) === p.key && !st.handled.has(hid(it)));      // 連審不了的（本人的、要上層審的）也帶進去：細調卡擋核定要看全部待審單（2026-11-19）
+      const pend = reqShown(pendAll);
+      c = fineCard(emp, date, { reqs: st.appr[p.key] || [], pending: pend, pendingAll: pendAll, current: () => live() && st.date === date, defer: true });
       st.fineEls.set(p.key, c); st.fineNew.push(c);
     }
     const w = h('div', 'dq-fine'); w.append(c);
@@ -968,7 +969,7 @@ export function renderQuick(ctx) {
   // 時間軸顏色說明（2026-11-15 Eason：「班別的時段要有顏色說明，避免主管看不懂」）
   function legendEl() {
     const box = h('div', 'dq-legend', null, { id: 'dqLegend', 'aria-label': '時間軸顏色說明' });
-    [['tl-lg-plan', '班別（班表）'], ['tl-punch', '出勤'], ['tl-away', '在別店打卡（由那家店核定）'], ['tl-extra', '比班表多（沒滿 8 小時，不用單）'], ['tl-otok', '加班（有單）'], ['tl-ot', '加班沒單（要補單）'],
+    [['tl-lg-plan', '班別（班表）'], ['tl-punch', '出勤'], ['tl-away', '在別店打卡（由那家店核定）'], ['tl-extra', '班表外多做（沒超過 8 小時，不用單）'], ['tl-otok', '加班（有單）'], ['tl-ot', '加班沒單（要補單）'],
       ['tl-trip', '出差'], ['tl-missok', '忘打卡（已補單）'], ['tl-miss', '忘打卡（還沒補單）'], ['tl-short', '遲到、早退、缺勤'], ['tl-leave', '請假'], ['tl-comp', '補休'], ['tl-rest', '兩段班中間的空檔'], ['tl-lg-pend', '斜線＝單還在審']].forEach(([cls, t]) => {
       const it = h('span', 'dq-lgi'); it.append(h('i', 'dq-sw ' + cls, null, { 'aria-hidden': 'true' }), h('span', null, t)); box.append(it);
     });

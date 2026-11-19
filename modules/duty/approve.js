@@ -1,14 +1,14 @@
 // 核定工時：照原系統 ~/mala-clock-in/manager.html 搬。日期列（前一天／後一天／今天）、本月待核定提醒、員工卡（收合展開、時段、
 // 核定時數即時算、休息、假別、出差、遲到分鐘）、送出核定。外觀換成營運系統風格，規則與文案不改。
 import { confirmBox } from '../../js/ui.js';
-import { S, dutyManager, call, callAll, brk, brkOf, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow, canVoidRow, supportTag, rememberOne, snapLabel, tipText, checkOnce, reqShown, refreshReqBadge } from './state.js';
+import { S, dutyManager, call, callAll, brk, brkOf, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow, canVoidRow, supportTag, rememberOne, snapLabel, tipText, checkOnce, reqShown, refreshReqBadge, reqCanDecide } from './state.js';
 import { buildReqItem } from './request.js';
 import { approvedSegTag, proxyOtSegs, SEG_MAX_OT_ADMIN } from './req-group.js';
 import { corePeriods, OVER_BLOCK_MIN, otSuggestText, cardDiffs, cardLabel, cardReasonText } from './core-calc.js';
 import * as C from './calc.js';
 import { api } from '../../js/api.js';
 import { leaveOverText } from './core-calc.js';      // 2026-11-18 第 5 題提醒（另起一行：上面那行同時有別的分支在改）
-import { planFlags, REASONS } from './quick-calc.js';
+import { planFlags, REASONS, pendSplit } from './quick-calc.js';
 import { ssoSwitch, setSession, toSession } from '../../js/auth.js';
 import { renderQuick, backBar, e2eNoCore } from './quick.js';
 import { canBg, watchJob, refreshJobs, rejectBar } from './bg.js';
@@ -197,9 +197,10 @@ export function renderApprove(ctx) {
     (S.all ? callAll('mgr_req_pending', {}) : call('mgr_req_pending', {})).then(res => {
       if (!current()) return;
       const items = reqShown(res && res.items).filter(it => it.date === date);
-      const by = new Map();
+      const by = new Map(), byAll = new Map();      // byAll＝連本人自己的、只給最小列的（這位主管審不了）也算：擋核定要看全部待審單（2026-11-19）
       items.forEach(it => { const k = rowKey({ store: it.store || '', emp_id: it.emp_id }); if (!by.has(k)) by.set(k, []); by.get(k).push(it); });
-      box.querySelectorAll('.du-card').forEach(c => { if (c.__applyPending) c.__applyPending(by.get(c.dataset.empId) || []); });
+      ((res && Array.isArray(res.items) ? res.items : []).filter(it => it && it.date === date)).forEach(it => { const k = rowKey({ store: it.store || '', emp_id: it.emp_id }); if (!byAll.has(k)) byAll.set(k, []); byAll.get(k).push(it); });
+      box.querySelectorAll('.du-card').forEach(c => { if (c.__applyPending) c.__applyPending(by.get(c.dataset.empId) || [], byAll.get(c.dataset.empId) || []); });
     }, () => {});
   }
   dateIn.onchange = () => { if (dateIn.value) loadDay(dateIn.value); };
@@ -334,7 +335,7 @@ function renderEmployees(box, date, employees, failed, retry) {
   const pendingLeft = () => [].filter.call(list.querySelectorAll('.du-card'), c => c.__pending && !c.__absent).length;
   const recount = () => {      // 送出前檢查的結果也算進來：「送出會被擋 N 人・可以送出 N 人」
     const pend = [].filter.call(list.querySelectorAll('.du-card'), c => c.__pending && !c.__absent);
-    const bad = pend.filter(c => c.__check && c.__check.ok === false).length, good = pend.filter(c => c.__check && c.__check.ok === true).length;
+    const bad = pend.filter(c => c.__check && c.__check.ok === false).length, good = pend.filter(c => c.__check && c.__check.ok === true && !(c.__pendBlocked && c.__pendBlocked())).length;
     count.innerHTML = '共 ' + employees.length + ' 人・待核定 <b>' + pend.length + '</b> 人' + (good ? '・<b class="du-cok">核定通過 ' + good + ' 人</b>' : '') + (bad ? '・<b class="du-cbad">還不能核定 ' + bad + ' 人</b>' : '');
   };
   recount();
@@ -396,7 +397,7 @@ export function fineCard(emp, date, o) {
   card.classList.add('du-fine');
   card.__setExpanded(true);
   if (card.__applyReq) card.__applyReq((o && o.reqs) || []);
-  if (card.__applyPending) card.__applyPending((o && o.pending) || []);
+  if (card.__applyPending) card.__applyPending((o && o.pending) || [], o && o.pendingAll);
   if (!(o && o.defer)) { const box = h('div'); box.append(card); runChecks(box, date, o && o.current); }
   return card;
 }
@@ -410,15 +411,18 @@ function buildCard(emp, date) {
   const br = brkOf(emp);
   const readOnly = !canWriteRow('hours', emp.emp_id, emp.store);      // 不在核定工時名單（只看）：不出現送出核定，欄位不可改
   const card = h('div', 'du-card'); card.dataset.empId = rowKey(emp); if (emp.store) card.dataset.store = emp.store;
+  // 這天還有待審的申請不能核定（2026-11-19）：__pendMine＝這位主管審得了的、__pendUpper＝要上層審的；__recalc 0 沒事／1 剛審完、重讀那天已核准的申請／2 讀好了、重新檢查中（沒回到 0 都不給核定）
+  card.__pendMine = []; card.__pendUpper = []; card.__recalc = 0;
+  const recalcDone = () => { if (card.__recalc !== 2) return false; card.__recalc = 0; return true; };
   // 改了時段、假別、遲到、原因：停手 1 秒只重算這一位（整天那次跑完 __checkOn 才開始；卡片初始化時呼叫會直接略過）
   function queueCheck(now) {
-    if (!card.__checkOn || !card.__checkItem) return;
+    if (!card.__checkOn || !card.__checkItem) { if (recalcDone()) card.__pendRelease(); return; }
     clearTimeout(card.__checkTimer);
     card.__checkTimer = setTimeout(() => {
-      const it = card.__checkItem(); if (!it) return;
+      const it = card.__checkItem(); if (!it) { if (recalcDone()) card.__pendRelease(); return; }
       const seq = (card.__checkSeq = (card.__checkSeq || 0) + 1);
       card.__checking(true);
-      checkOnce(date, emp.store || '', [it]).then(rs => { if (seq !== card.__checkSeq || !card.isConnected) return; card.__setCheck(rs ? rs.find(r => r.emp_id === String(emp.emp_id)) || null : null); });
+      checkOnce(date, emp.store || '', [it]).then(rs => { if (seq !== card.__checkSeq || !card.isConnected) return; recalcDone(); card.__setCheck(rs ? rs.find(r => r.emp_id === String(emp.emp_id)) || null : null); });
     }, now ? 50 : 1000);
   }
   card.__segments = emp.segments || [];
@@ -699,6 +703,40 @@ function buildCard(emp, date) {
   let editOpen = false;
   const editEls = () => [periodRows, totalBox, moreBtn, actions].concat(moreBox.hidden ? [] : [moreBox]);
   const setEdit = on => { editOpen = on; editEls().forEach(x => { x.hidden = !on; }); if (!on) moreBox.hidden = true; else { try { if (localStorage.getItem('dzystore_dutymore') === '1') moreBox.hidden = false; } catch (e) {} } };
+  // ---- 這天還有待審的申請：不能核定（2026-11-19）。打卡端不擋待審單（檢查會說可以），所以這裡不看檢查結果：只要還有待審單就換成黃色提示、核定鈕與送出鈕停用。
+  //      沒權限核定的人（readOnly）本來就沒有送出鈕，不顯示。判斷「待審單」與一頁核定共用 quick-calc.js pendSplit。
+  const PEND_TITLE = '這天還有待審的申請：審完才能送出核定';
+  const pendBlocked = () => !readOnly && (card.__pendMine.length > 0 || card.__pendUpper.length > 0 || card.__recalc > 0);
+  card.__pendBlocked = pendBlocked;
+  const pendWord = it => (C.REQ_KIND_LABEL[it.kind] || '') + '單' + (it.start && it.end ? ' ' + it.start + '–' + it.end : '');
+  const pendVerdict = () => {
+    const mine = card.__pendMine, up = card.__pendUpper;
+    verdict.hidden = false; verdict.textContent = ''; verdict.className = 'du-verdict warn du-verdict-pend';
+    mini.className = 'du-mini pending'; mini.textContent = mine.length || up.length ? '有待審單' : '重新計算中…';
+    if (mine.length) {
+      verdict.append(h('div', 'du-verdict-t', '這天還有 ' + mine.length + ' 張申請沒審：請先在上面核准或退回，審完會自動重新計算'));
+      if (up.length) verdict.append(h('div', 'du-verdict-n', '另外還有 ' + up.length + ' 張申請在等上層審核（' + up.map(pendWord).join('、') + '），審完才能核定'));
+    } else if (up.length) verdict.append(h('div', 'du-verdict-t', '這天還有 ' + up.length + ' 張申請在等上層審核，審完才能核定（' + up.map(pendWord).join('、') + '）'));
+    else verdict.append(h('div', 'du-verdict-t', '單審完了，正在用最新的申請重新計算…'));
+    const acts = h('div', 'du-pre-acts');
+    const go = h('button', 'btn du-verdict-go', '核定（審完單才能按）', { type: 'button' }); go.disabled = true;
+    acts.append(go);
+    if (card.__pending && !emp.approved) {
+      const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '手動改時段', { type: 'button' });
+      adj.onclick = () => { setEdit(!editOpen); adj.textContent = editOpen ? '收起' : '手動改時段'; };
+      acts.append(adj);
+    }
+    verdict.append(acts);
+    submit.disabled = true; submit.title = PEND_TITLE;
+    if (card.__pending && !emp.approved) setEdit(editOpen);
+    card.dispatchEvent(new CustomEvent('emp-checked', { bubbles: true }));
+  };
+  // 不再擋了（審完、重新檢查完）：還沒核定的卡片照最新的檢查結果重畫；已核定的卡片只收掉提示、送出鈕恢復
+  card.__pendRelease = () => {
+    if (card.__pending && !emp.approved) { card.__setCheck(card.__check); return; }
+    verdict.hidden = true; verdict.textContent = ''; verdict.className = 'du-verdict';
+    submit.disabled = false; if (submit.title === PEND_TITLE) submit.title = '';
+  };
   card.__propose = () => {
     if (readOnly || !card.__pending || emp.approved || e2eNoCore()) return;
     const pr = corePeriods({ segs: C.segsWithDupPicks(emp.segments, dupGroups, dupPicks), plan: emp.plan, reqs: card.__dayReqs || [], brk: br });
@@ -725,8 +763,10 @@ function buildCard(emp, date) {
     preBox.hidden = true; preBox.className = 'du-pre'; preBox.textContent = '';
     submit.classList.remove('du-submit-warn'); submit.disabled = false;
     verdict.hidden = true; verdict.textContent = ''; verdict.className = 'du-verdict';
-    if (!card.__pending) return;
+    if (submit.title === PEND_TITLE) submit.title = '';
+    if (!card.__pending) { if (pendBlocked()) pendVerdict(); return; }
     if (submit.textContent === '仍要送出' || /^確認沒加班/.test(submit.textContent)) submit.textContent = '送出核定';
+    if (pendBlocked()) { pendVerdict(); return; }      // 還有待審單：不看檢查結果（不亮綠燈、不給核定鈕）
     const ck = card.__check;
     if (!ck) { setBadge(null, initLeaves); setEdit(true); card.dispatchEvent(new CustomEvent('emp-checked', { bubbles: true })); return; }
     if (e2eNoCore()) {      // 示範模式舊測試：只標右上角、照舊可以送出
@@ -998,6 +1038,7 @@ function buildCard(emp, date) {
   }
 
   submit.onclick = async () => {
+    if (pendBlocked()) { pendVerdict(); return say('bad', '✕ 這天還有待審的申請，審完才能核定'); }      // 所有送出的路（送出鈕、綠燈「核定 N 小時」、手動改時段後的送出、重新核定）都從這裡過
     if (/^確認沒加班/.test(submit.textContent) && !card.__notCount) return say('bad', '✕ 請先選不算工時的原因（會留在核定紀錄）');
     // 硬擋（Eason 2026-08-22「硬擋，不給送出」，manager.html:1296–1320）：額度用完、期限過了的假別不給送出。
     // 下拉的 disabled 只擋滑鼠，程式指定仍設得進去，所以送出前用同一份資料再判一次；原本就選著這個假別的既有紀錄放行，否則已超額的人連重送核定都做不了
@@ -1085,23 +1126,33 @@ function buildCard(emp, date) {
   //      預填只是畫面上的值，主管按送出核定才算數（核准申請本身不寫入核定）。加班在上班日接在班表後面（2026-11-09）；
   //      班表排休那天（2026-10-29）加班申請的時段就是當天工時 → 依加班申請預填、標「來自加班申請」，並收掉補申請提示。
   // 卡片裡審申請（第 2 項）：核准後重讀那天已核准的申請、重新預填，再重算送出前檢查
-  card.__applyPending = list => {
+  card.__applyPending = (list, all) => {
     const old = body.querySelector('.du-inreq'); if (old) old.remove();
+    // 這天還有哪些待審單：list＝列在卡片裡的（自己看得到、不是本人送的）、all＝連本人的、只給最小列的也算（沒給就用 list）
+    const was = pendBlocked();
+    const sp = pendSplit((all || list || []).map(it => Object.assign({}, it, { pending: true, decidable: reqCanDecide(it) })));
+    card.__pendMine = sp.mine; card.__pendUpper = sp.upper;
+    if (pendBlocked()) pendVerdict(); else if (was) card.__pendRelease();
     if (!list.length) return;
     const box2 = h('div', 'du-inreq');
     box2.append(h('div', 'du-inreq-k', '這天還沒審的申請（' + list.length + ' 張）'));
     list.forEach(it => box2.append(buildReqItem(it, decision => {
       S.reqAt = 0; refreshReqBadge();      // 申請審核分頁的數字跟著更新
-      if (decision !== 'approve') { queueCheck(true); return; }
+      // 這張審完了（核准或退回）：從待審名單拿掉；單都審完（上層那種也沒有）才恢復，但要等重讀申請、重新檢查完（__recalc）才給核定，不拿審單前的結果亮燈
+      card.__pendMine = card.__pendMine.filter(x => !(String(x.id) === String(it.id) && (x.store || '') === (it.store || '')));
+      if (!card.__pendMine.length && !card.__pendUpper.length) card.__recalc = 1;
+      if (pendBlocked()) pendVerdict();
+      const rechecking = () => { if (card.__recalc === 1) card.__recalc = 2; queueCheck(true); };
+      if (decision !== 'approve') { rechecking(); return; }
       call('mgr_req_day', Object.assign({ date }, emp.store ? { store: emp.store } : {})).then(res => {
         const by = (emp.store && res && res.by_store && res.by_store[emp.store]) ? res.by_store[emp.store].by_emp : (res && res.by_emp);
         card.__reqApplied = false;
         card.__applyReq((by && by[emp.emp_id]) || []);
         if (card.__propose) card.__propose();      // 核准的單算進「打卡＋單」
-        queueCheck(true);
-      }, () => queueCheck(true));
+        rechecking();
+      }, rechecking);
     })));
-    body.insertBefore(box2, preBox);
+    body.insertBefore(box2, verdict);      // 待審單放在提示上面（提示寫「在上面核准或退回」）
   };
   card.__applyReq = reqs => {
     card.__dayReqs = reqs || [];
