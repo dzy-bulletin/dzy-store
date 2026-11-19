@@ -13,6 +13,7 @@ export const S = { key: null, admin: false, asStore: '', asName: '', stores: nul
 export function reset(key) {
   S.key = key; S.asStore = ''; S.asName = ''; S.stores = null; S.meta = { clockStore: '', label: '', breakStart: '', breakEnd: '' }; S.date = null; S.dayCache = {}; S.dayTok++;
   S.pend = null; S.pendAll = false; S.focusEmp = null; S.elsewhere = []; S.leave = null; S.leaveP = null; S.reqCount = 0; S.reqAt = 0; S.metaBy = {}; S.leaveBy = {}; S.recent = {}; S.reqPre = null; S.dqFull = false;
+  S.leaveMirrorStale = false; S.leaveErr = false; S.leaveStale = false;      // 換登入／換模式：上一個人的額度狀態不留（第三輪審查）
 }
 
 // ---- 全部門市（個人登入、可核的人分布在兩家以上打卡店；2026-10-19）----
@@ -76,7 +77,8 @@ export async function call(action, body) {
   if (!READS.has(action)) { S.recent = {}; S.reqPre = null; checkMemo.clear(); }      // 寫入之後：記住的送出前檢查結果作廢
   try {
     const k = S.key, st = S.asStore;
-    const r = await api('POST', '/m/duty/' + action, st ? Object.assign({}, body || {}, { asStore: st }) : (body || {}), undefined, { read: READS.has(action) });
+    const b0 = Object.assign({ mf: 1 }, body || {});      // 寫入也帶（2026-11-19 審查 R2：伺服器看到新前端的核定一定要有 base_ver、calc_ver）      // mf：這個前端會處理「伺服器先給副本」（mirror_stale）並背景再問（2026-11-19；沒帶的舊前端伺服器照舊等新的）
+    const r = await api('POST', '/m/duty/' + action, st ? Object.assign({}, b0, { asStore: st }) : b0, undefined, { read: READS.has(action) });
     if (r && r.meta && action !== 'mgr_approve_check' && S.key === k && S.asStore === st) S.meta = r.meta;      // 送出前檢查在背景跑、可能晚到：不拿它的休息帶蓋掉剛讀到的
     // 考勤副本（2026-11-14）：Mac mini 副本讀的資料標 __mirror；有 ver 的人核定時可以背景送（bg.js canBg）
     if (r && r.mirror_at) for (const f of ['employees', 'items']) if (Array.isArray(r[f])) for (const x of r[f]) if (x && typeof x === 'object') x.__mirror = true;
@@ -187,7 +189,7 @@ export function loadLeave() {
     const p = callAll('payroll_leave_options').then(r => {
       if (S.key !== k || S.leaveP !== p) return null;
       const by = {}; for (const [c, v] of Object.entries((r && r.by_store) || {})) if (v && Array.isArray(v.types)) by[c] = v;
-      S.leaveBy = by; S.leave = Object.keys(by).length ? by : null; if (!S.leave) S.leaveP = null; return S.leave;
+      S.leaveBy = by; S.leave = Object.keys(by).length ? by : null; if (!S.leave) S.leaveP = null; S.leaveMirrorStale = !!(r && r.mirror_stale); if (S.leave) S.leaveErr = false; return S.leave;
     }, () => { if (S.key === k && S.leaveP === p) S.leaveP = null; return null; });
     S.leaveP = p;
   }
@@ -197,11 +199,13 @@ export function loadLeave() {
     const p = call('payroll_leave_options').then(r => {
       if (same() && S.leaveP === p) {
         S.leave = r && Array.isArray(r.types) ? r : null; if (!S.leave) S.leaveP = null;
+        S.leaveMirrorStale = !!(r && r.mirror_stale);                    // 上游慢、伺服器先給副本的額度（2026-11-18）：一頁核定背景再問一次（quick.js revalidate）
+        S.leaveErr = false;
         const by = {}; for (const [c, v] of Object.entries((r && r.by_store) || {})) if (v && Array.isArray(v.types)) by[c] = v;
         S.leaveBy = by;                                                   // 總部那組併進來的別家（by_store）
       }
       return same() ? S.leave : null; },
-      () => { if (same() && S.leaveP === p) S.leaveP = null; return null; });
+      () => { if (same() && S.leaveP === p) { S.leaveP = null; S.leaveErr = true; } return null; });      // leaveErr：讀不到額度（一頁核定讓有請假的人先等、可以重試，2026-11-19）
     S.leaveP = p;
   }
   return S.leaveP;

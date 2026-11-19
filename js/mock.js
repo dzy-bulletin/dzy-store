@@ -218,6 +218,29 @@ function route(method, p, q, b, token) {
       if (peeked && peeked.ok && peeked.data) { peeked.data.snapshot_at = window.__dutySnapAt; if (window.__dutySnapReplica) peeked.data.snapshot_kind = 'replica'; }
       return peeked;
     }
+    if (m[1] === 'duty' && window.__dutyUpMs) (window.__dutyReads = window.__dutyReads || []).push({ a: m[2], date: (b && b.date) || '', store: (b && (b.asStore || b.store)) || '', fresh: !!(b && b.fresh), at: Date.now() });      // e2e：記讀了什麼（驗換頁後背景再問不再發）
+    if (m[1] === 'duty' && window.__dutyUpMs) {      // e2e（2026-11-18 核定工時 3 秒內，mod_duty_fast）：模擬打卡上游延遲 __dutyUpMs；__dutyMirrorFirst＝伺服器副本先給
+      const w = window, MF = ['mgr_day', 'mgr_req_day', 'mgr_pending_approvals', 'mgr_req_pending', 'payroll_leave_options'];
+      const cold = !!(b && typeof b.date === 'string' && w.__dutyColdBefore && b.date < w.__dutyColdBefore);      // 副本範圍外的日子（冷資料）
+      const leaveHard = m[2] === 'payroll_leave_options' && w.__dutyLeaveHard;      // 假別額度剛收到跟假別有關的變動：伺服器照舊等新的
+      if (w.__dutyLeaveFail && m[2] === 'payroll_leave_options') return new Promise((res) => setTimeout(() => res(fail('TIMEOUT', '打卡系統回應太久，請稍後再試')), 300));
+      if (b && b.fresh === true) return new Promise((res) => setTimeout(() => res(duty(m[2], mx, s, b)), w.__dutyFreshMs || 200));      // 送出前重讀：直接問打卡（不給副本）
+      const onlyActs = Array.isArray(w.__dutyStaleActs) ? w.__dutyStaleActs : null;      // 只有這幾支先給副本舊值（例：名單是新的、已核准申請是舊的，審查 R1）
+      if (onlyActs && MF.includes(m[2]) && !onlyActs.includes(m[2])) return duty(m[2], mx, s, b);      // 其他支：馬上回新的
+      if (w.__dutyMirrorFirst && MF.includes(m[2]) && !cold && !(b && b.ym) && !leaveHard && (!onlyActs || onlyActs.includes(m[2]))) {      // 副本馬上回；第一次問之後 __dutyUpMs 內都標 mirror_stale 而且是「第一次問到的那份」（舊值，之後資料變了也一樣），之後是新的
+        w.__dutyMF = w.__dutyMF || {}; w.__dutyMFData = w.__dutyMFData || {};
+        const key = ((me && me.code) || '') + '|' + (b && b.asStore || '') + '|' + m[2] + '|' + ((b && b.date) || ''), t0 = w.__dutyMF[key] || (w.__dutyMF[key] = Date.now());
+        return Promise.resolve(duty(m[2], mx, s, b)).then((x) => {
+          if (!(x && x.ok && x.data && typeof x.data === 'object')) return x;
+          const st = Date.now() - t0 < w.__dutyUpMs;
+          if (st && w.__dutyMFData[key]) x = JSON.parse(w.__dutyMFData[key]); else if (st) w.__dutyMFData[key] = JSON.stringify(x);
+          x.data.mirror_at = st ? t0 - 60000 : Date.now(); if (st) x.data.mirror_stale = true; else delete x.data.mirror_stale;
+          return x;
+        });
+      }
+      if (m[2] === 'mgr_approve_check' && w.__dutyCheckMs !== undefined) return new Promise((res) => setTimeout(() => res(duty(m[2], mx, s, b)), w.__dutyCheckMs));
+      if (MF.includes(m[2]) || ['mgr_approve_check', 'mgr_roster'].includes(m[2])) return new Promise((res) => setTimeout(() => res(duty(m[2], mx, s, b)), w.__dutyUpMs));
+    }
     if (m[1] === 'duty' && window.__dutyDelays && window.__dutyDelays[m[2]]) {      // e2e：指定動作拖慢（驗名單先顯示）
       return new Promise(res => setTimeout(() => res(duty(m[2], mx, s, b)), window.__dutyDelays[m[2]]));
     }
@@ -596,6 +619,7 @@ function dutyAll(b, s, me) {
     d.calls[b.op] = (d.calls[b.op] || 0) + 1;
     if ((db.dutyDown || []).includes(st.code)) { out.failed.push({ store: st.code, storeName: st.name, message: '打卡系統暫時沒有回應，請稍後再試' }); out.stores.push({ store: st.code, storeName: st.name, ok: false }); continue; }
     const r = withFake(st.code, () => dutyDo(d, b.op, Object.assign(b.date !== undefined ? { date: b.date } : b.ym !== undefined ? { ym: b.ym } : {}, who ? { __who: who } : {})));
+    if (r.ok && b.op === 'mgr_day' && Array.isArray(r.data.employees)) { r.data.employees.forEach(e => { e.ver = mverOf(d, r.data.date, e.emp_id); e.calc_ver = mcalcOf(d, e.emp_id); }); noteSeen(st.code, r.data.date, r.data.employees); }      // 全部門市的名單也帶版本（2026-11-19）
     if (r.ok) markSupport(per, st.code, b.op, r.data);
     if (r.ok && b.op === 'mgr_req_month') { monthFilter(per, st.code, r.data); out.unmatched += r.data.unmatched; if (out.ym === undefined) out.ym = r.data.ym; }
     if (r.ok && b.op === 'mgr_req_pending' && Array.isArray(d.selfEmps) && d.selfEmps.length) r.data.items = r.data.items.map(it => (d.selfEmps.includes(String(it.emp_id)) ? { ...it, self: true } : it));
@@ -761,6 +785,7 @@ function duty(action, me, s, b) {
     b = Object.assign({}, b); delete b.asStore;
   }
   if (action === 'all') return dutyAll(b, s, me);
+  if (['mgr_req_decide', 'mgr_req_decide_batch', 'mgr_req_void', 'mgr_req_proxy'].includes(action)) window.__pgCache = {};      // 會動到申請的寫入（含逾時、失敗：可能其實寫進去了）：丟掉核定前問過的待審清單（同伺服器 pendGateDrop）
   // 個人登入帶 store＝全部門市的寫入／附件：目標店必須在他可核的店裡（同 server/proxy/duty.js），整店功能不給跨店
   let tgt = '';
   if (me.person && typeof b.store === 'string' && b.store && b.store.toUpperCase() !== s.code) {
@@ -787,13 +812,50 @@ function duty(action, me, s, b) {
   // 考勤副本（2026-11-14，server/duty-mirror.js）：e2e 設 d.mirror＝true 才開（個人登入）。讀取帶 mirror_at、mgr_day 每人帶 ver；
   // 帶 bg 的核定／核准先回 queued，下一次 mirror_jobs 才真的做（跟伺服器背景送一樣慢一拍）；ver 對不上＝退回
   const runD = (a2, b2) => (tgt ? withFake(tgt, () => dutyDo(d, a2, b2)) : dutyDo(d, a2, b2));
-  if (action === 'mirror_jobs' || action === 'mirror_ack') return d.mirror && me.person ? mockMirror(d, action, b, runD) : ok({ on: false, items: [], acked: 0 });
-  if (d.mirror && me.person) { const mm = mockMirror(d, action, b, runD); if (mm) return mm; }
-  const r = runD(action, b);
-  if (d.mirror && me.person && r.ok && ['mgr_day', 'mgr_req_pending', 'mgr_req_day', 'mgr_pending_approvals'].includes(action)) {
-    r.data.mirror_at = Date.now();
-    if (action === 'mgr_day') r.data.employees.forEach(e => { e.ver = mverOf(d, r.data.date, e.emp_id); });
+  // 伺服器最後一道（2026-11-19 第三輪審查，server/proxy/duty.js pendGate）：新版前端（mf）的核定，這天這個人還有待審單就退回（背景送出時在 mockMirror 再看一次）；
+  //   規則同 web/modules/duty/pend-gate.js pendingFor。e2e 設 window.__dutyPendGateFail＝true 模擬「待審清單讀不到」
+  //   第四輪（2026-11-20）：之前問過的清單只有「在看到這個版本之後才問的」、10 秒內才共用（同伺服器 pendDecide）；window.__dutyPendGateFetch＝真的去問的次數
+  const gKey = tgt || (me && me.code) || '';
+  const pendGateMock = (bb) => {
+    if (window.__dutyPendGateFail) return fail('CONFLICT', '待審的申請暫時讀不到（打卡系統沒有回應），為了避免核錯這次沒有送出，請稍後再按一次');
+    const W = window, seen = (W.__pgSeen || {})[gKey + '|' + bb.date + '|' + bb.emp_id + '|' + bb.base_ver], need = seen === undefined ? Infinity : seen;
+    const c = (W.__pgCache || {})[gKey];
+    // 示範的版本（mverOf）不會因為申請單變動而變（打卡端的 ver 會）：這個人這天的申請跟問清單那時不一樣，就當成版本變了、重問
+    const sigOf = (list) => JSON.stringify((list || []).filter((r) => r.date === bb.date && String(r.emp_id) === String(bb.emp_id)).map((r) => [String(r.id), r.status]));
+    const reqsNow = () => (tgt ? [] : (d.reqs || []));
+    let items;
+    if (!tgt && c && c.startSeq > need && Date.now() - c.at < 10000 && sigOf(c.reqs) === sigOf(reqsNow())) items = c.items;      // 別家店（示範看不到那家的申請表變動）一律重問
+    else {
+      const startSeq = (W.__pgSeq = (W.__pgSeq || 0) + 1); W.__dutyPendGateFetch = (W.__dutyPendGateFetch || 0) + 1;
+      const pr = runD('mgr_req_pending', {}); items = pr && pr.ok && Array.isArray(pr.data.items) ? pr.data.items : [];
+      (W.__pgCache = W.__pgCache || {})[gKey] = { startSeq, at: Date.now(), items, reqs: reqsNow().map((r) => ({ id: r.id, status: r.status, date: r.date, emp_id: r.emp_id })) };
+    }
+    const mine = items.filter((it) => it.date === bb.date && String(it.emp_id) === String(bb.emp_id));
+    if (!mine.length) return null;
+    const sending = (d.jobs || []).some((j) => j.act === 'mgr_req_decide' && j.state === 'pending' && mine.some((it) => String(it.id) === String(j.body.id)));      // 核准還在背景佇列
+    return fail('CONFLICT', sending ? '這天有申請的核准還在送出中，請稍候幾秒再核定' : '這天還有待審的申請，請先審單（審完才能核定）');
+  };
+  if (action === 'mirror_jobs' || action === 'mirror_ack') return d.mirror && me.person ? mockMirror(d, action, b, runD, pendGateMock) : ok({ on: false, items: [], acked: 0 });
+  if (action === 'mgr_approve') { (window.__dutySent = window.__dutySent || []).push(JSON.parse(JSON.stringify(b))); }      // e2e：送出的核定內容（驗每條路徑都帶 base_ver，2026-11-19）
+  if (action === 'mgr_approve' && !b.bg && typeof b.base_ver === 'string' && b.base_ver && b.base_ver !== mverOf(d, b.date, b.emp_id)) {      // 前景核定也比版本（同打卡端 dutyVerGuard_）
+    return fail('BAD_INPUT', '你打開之後，這位同仁這天的資料有變動（補了打卡、申請單有變化，或別人已經核定），請看過最新的再核定一次');
   }
+  if (action === 'mgr_approve' && typeof b.calc_ver === 'string' && b.calc_ver && b.calc_ver !== mcalcOf(d, b.emp_id)) {      // 班表版本（同伺服器 calcVerFor，2026-11-19 審查 R4）
+    return fail('CONFLICT', '這位同仁這天的班表（或正職設定）在你打開之後改過了，這次沒有送出，請重新整理看過再核定');
+  }
+  if (action === 'mgr_approve' && b.mf && !b.bg && !b.dry_run) { const g = pendGateMock(b); if (g) { (window.__dutyPendGated = window.__dutyPendGated || []).push(String(b.emp_id)); return g; } }
+  if (d.mirror && me.person) { const mm = mockMirror(d, action, b, runD, pendGateMock); if (mm) return mm; }
+  const r = runD(action, b);
+  if (r && r.ok && d.mirror) {      // 寫入成功＝那天那位的版本變了（同打卡端：核定、審單都會讓 dutyVerOf_ 變）
+    const bump = (date, emp) => { if (!date || !emp) return; d.mirrorVer = d.mirrorVer || {}; d.mirrorVer[date + emp] = (d.mirrorVer[date + emp] || 0) + 1; };
+    if (action === 'mgr_approve' && !b.bg) bump(b.date, b.emp_id);
+    if (action === 'mgr_req_decide' || action === 'mgr_req_void') { const q = (d.reqs || []).find((x) => String(x.id) === String(b.id)); if (q) bump(q.date, q.emp_id); }
+  }
+  if (d.mirror && me.person && r.ok && ['mgr_day', 'mgr_req_pending', 'mgr_req_day', 'mgr_pending_approvals'].includes(action)) {
+    if (!(b && b.fresh === true)) r.data.mirror_at = Date.now();      // 送出前重讀（fresh）＝直接問打卡，不是副本；版本照樣帶
+    if (d.mirrorStale) r.data.mirror_stale = true;      // 上游慢、先給的舊值（2026-11-18，e2e mod_duty_mirror）
+  }
+  if (r.ok && action === 'mgr_day' && Array.isArray(r.data.employees)) { r.data.employees.forEach(e => { e.ver = mverOf(d, r.data.date, e.emp_id); e.calc_ver = mcalcOf(d, e.emp_id); e.ver_req = true; }); noteSeen(tgt || (me && me.code) || '', r.data.date, r.data.employees); }      // 名單一律帶版本（同伺服器 with_ver、calc_ver、ver_req，2026-11-19）
   if (fault && fault.mode === 'partial' && r.ok) r.data.failed = [{ store: 'cf', storeName: '央廚', message: '打卡系統暫時沒有回應，請稍後再試' }];      // 部分門市讀不到（伺服器 failed 契約）
   if (r.ok && ms && ms.mine) {
     if (action === 'mgr_req_pending') r.data.items = r.data.items.map(it => (ms.mine(it.emp_id) ? { ...it, self: true } : it));
@@ -820,6 +882,7 @@ function mockMergeHome(per, action, b, data, els) {
     const sub = {}; if (b.date !== undefined || data.date) sub.date = data.date || b.date;
     if (b.ym !== undefined) sub.ym = b.ym;
     const r = withFake(code, () => dutyDo(d, action, sub));
+    if (r.ok && action === 'mgr_day' && Array.isArray(r.data.employees)) { r.data.employees.forEach(e => { e.ver = mverOf(d, r.data.date, e.emp_id); e.calc_ver = mcalcOf(d, e.emp_id); }); noteSeen(code, r.data.date, r.data.employees); }      // 併進來的別家也帶版本（2026-11-19）
     if (r.ok && action === 'mgr_req_month') monthFilter(per, code, r.data);
     if (!r.ok) { data.failed.push({ store: code, storeName: g.name, message: r.message || '暫時讀不到' }); data.home_stores.push({ store: code, storeName: g.name, ok: false }); continue; }
     markSupport(per, code, action, r.data);
@@ -833,13 +896,17 @@ function mockMergeHome(per, action, b, data, els) {
   }
 }
 // window.__mirrorBump[日期+員編]＝e2e 假裝「主管打開之後資料變了」（不用重新載入頁面）
+const mcalcOf = (d, emp) => { const t = JSON.stringify((d.plans && d.plans[emp]) || null); let h = 0; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0; return 'c' + (h >>> 0).toString(16); };      // 班表版本（示範）
+// 這個版本第一次回給畫面的那一刻（序號；同伺服器 noteVers，第四輪）
+function noteSeen(st, date, emps) { const W = window, q = (W.__pgSeq = (W.__pgSeq || 0) + 1); W.__pgSeen = W.__pgSeen || {}; for (const e of emps || []) { const k = st + '|' + date + '|' + e.emp_id + '|' + e.ver; if (W.__pgSeen[k] === undefined) W.__pgSeen[k] = q; } }
 const mverOf = (d, date, emp) => 'v' + (((d.mirrorVer || {})[date + emp] || 0) + ((window.__mirrorBump || {})[date + emp] || 0));
-function mockMirror(d, action, b, run) {
+function mockMirror(d, action, b, run, pendGate) {
   d.jobs = d.jobs || [];
   if (action === 'mirror_jobs') {
     for (const j of d.jobs) {
-      if (j.state !== 'pending') continue;
+      if (j.state !== 'pending' || window.__dutyJobsHold) continue;      // e2e：__dutyJobsHold＝背景佇列先不送（模擬核准還沒送到打卡）
       if (j.act === 'mgr_approve' && j.body.base_ver !== mverOf(d, j.body.date, j.body.emp_id)) { j.state = 'rejected'; j.msg = '你打開之後，這位同仁這天的資料有變動（補了打卡、申請單有變化，或別人已經核定），請看過最新的再核定一次'; continue; }
+      if (j.act === 'mgr_approve' && j.body.mf && pendGate) { const g = pendGate(j.body); if (g) { (window.__dutyPendGated = window.__dutyPendGated || []).push(String(j.body.emp_id)); j.state = 'rejected'; j.msg = g.message; continue; } }      // 背景真正送出前（同伺服器 send）
       const body = Object.assign({}, j.body); delete body.bg; delete body.base_ver;
       const r = run(j.act, body);
       if (r.ok) {

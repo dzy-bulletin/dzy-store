@@ -241,6 +241,10 @@ export function leaveOptionView(name, def, q) {
     if (!q.allowed) return { text: name + '（只有正職）', disabled: true };
     return { text: name + '（本月' + compBalWord(q) + '）', disabled: false };
   }
+  if (def && def.code === 'menstrual' && q && !q.comp) {   // 生理假改用「次」（2026-11-18 Eason：一天算一次、每年 3 次）；後端沒給次數就走下面舊顯示
+    const n = menstrualUsed(q);
+    if (n != null) return n >= MENSTRUAL_MAX_TIMES || q.blocked ? { text: name + '（今年已請 ' + n + '／' + MENSTRUAL_MAX_TIMES + ' 次，額度已用完）', disabled: true } : { text: name + '（今年已請 ' + n + '／' + MENSTRUAL_MAX_TIMES + ' 次）', disabled: false };
+  }
   if (!def || !q || q.cap_days == null) return { text: name, disabled: false };
   const remain = Math.round((q.remain_days || 0) * 10) / 10;
   if (q.blocked && QUOTA_SOFT_CODES.indexOf(def.code) >= 0) return { text: name + '（已超過 ' + q.cap_days + ' 日）', disabled: false };      // 事假用完不反灰，送出前確認
@@ -263,13 +267,14 @@ const menstrualUsed = q => { for (const k of ['used_days', 'used_n', 'used_times
 /** 申請審核：這張請假單能不能核准。回 '' ＝可以；否則是核准鈕要顯示的原因。
  *  只管生理假（已用次數 ≥ 3；後端沒給次數欄位時看 blocked）與家庭照顧假（這張單時數÷8 天 > remain_days；沒填時數時看 blocked）。事假與其他假別不擋 */
 export const REQ_QUOTA_BLOCK_TEXT = '額度已用完，不能核准';
+export const REQ_MENS_BLOCK_TEXT = '生理假今年已請滿 3 次，不能核准，請同仁改辦理病假';
 export function reqQuotaBlock(opts, it) {
   if (!it || it.kind !== 'leave' || !opts || !Array.isArray(opts.types)) return '';
   const def = leaveDefOf(opts, it.leave_type), q = def ? quotaOf(opts, String(it.emp_id), def.code) : null;
   if (!def || !q) return '';
   if (def.code === 'menstrual') {
     const n = menstrualUsed(q);
-    return (n != null ? n >= MENSTRUAL_MAX_TIMES : !!q.blocked) ? REQ_QUOTA_BLOCK_TEXT : '';
+    return (n != null ? n >= MENSTRUAL_MAX_TIMES : !!q.blocked) ? REQ_MENS_BLOCK_TEXT : '';
   }
   if (def.code === 'family') {
     const h = Number(it.hours), remain = Number(q.remain_days);

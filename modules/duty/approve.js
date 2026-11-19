@@ -9,6 +9,8 @@ import * as C from './calc.js';
 import { api } from '../../js/api.js';
 import { leaveOverText } from './core-calc.js';      // 2026-11-18 第 5 題提醒（另起一行：上面那行同時有別的分支在改）
 import { planFlags, REASONS, pendSplit } from './quick-calc.js';
+import { leaveIncrements, leaveShort } from './leave-batch.js';
+import { pendingFor } from './pend-gate.js';
 import { ssoSwitch, setSession, toSession } from '../../js/auth.js';
 import { renderQuick, backBar, e2eNoCore } from './quick.js';
 import { canBg, watchJob, refreshJobs, rejectBar } from './bg.js';
@@ -53,11 +55,24 @@ export function renderApprove(ctx) {
     (function next() {
       const d = targets.shift(); if (!d) return;
       if (!cacheable(d) || S.dayCache[d]) return next();
-      dayRead(d).then(r => { if (r && r.date && !(r.failed && r.failed.length)) S.dayCache[r.date] = r.employees; next(); }, () => next());      // 全部門市有店讀不到的那天不快取（讀不到的店不能被當成「這天沒人」記住）
+      dayRead(d).then(r => { if (r && r.date && !(r.failed && r.failed.length) && !r.mirror_stale) S.dayCache[r.date] = r.employees; next(); }, () => next());      // 全部門市有店讀不到的那天不快取（讀不到的店不能被當成「這天沒人」記住）
     })();
   }
   const dayRead = body => (S.all ? callAll('mgr_day', typeof body === 'string' ? { date: body } : body) : call('mgr_day', typeof body === 'string' ? { date: body } : body));
   // gate＝要等它到了才畫卡片的東西（假別額度）：跟名單同時抓，不再先抓完額度才去抓名單（2026-11-02 Eason：考勤每點一下都要等很久）
+  // 完整頁背景再問（2026-11-19）：伺服器先給副本時 6、15 秒再讀同一天；名單有差就在上方插一行「打卡系統有更新的資料［更新］」，按了才重讀（打字、選項不會被清掉）
+  function fullNewer(date, emps, tok) {
+    [6000, 15000].forEach((ms) => setTimeout(async () => {
+      if (tok !== S.dayTok || !live() || S.date !== date || document.querySelector('#duNewer')) return;
+      let r; try { r = await dayRead({ date }); } catch (e) { return; }
+      if (tok !== S.dayTok || !live() || S.date !== date || !r || !Array.isArray(r.employees)) return;
+      if (JSON.stringify(r.employees) === JSON.stringify(emps)) return;
+      const box0 = document.querySelector('#duMirrorAt'); if (!box0 || document.querySelector('#duNewer')) return;
+      const nb = h('div', 'du-mirror-at', '打卡系統有更新的資料 ', { id: 'duNewer', role: 'status' });
+      const b = h('button', 'btn ghost sm', '更新', { type: 'button', id: 'duNewerGo' }); b.onclick = () => { const y = window.scrollY; loadDay(date); requestAnimationFrame(() => window.scrollTo(0, y)); };
+      nb.append(b); box0.after(nb);
+    }, ms));
+  }
   function loadDay(dateOverride, gate) {
     const tok = ++S.dayTok;
     // 假別額度被清掉（核定過請假）時先重抓，再畫名單：不然新卡片拿不到額度，額度與期限的硬擋整批失效（2026-10-12 Codex 審查）
@@ -67,7 +82,7 @@ export function renderApprove(ctx) {
   function loadDayNow(dateOverride, tok, gate) {
     unStale();                     // 上一次的「先顯示上次」還沒換掉就換日期：先解除
     const wait = gate ? gate.then(() => null, () => null) : Promise.resolve(null);
-    S.dayMirrorAt = 0;
+    S.dayMirrorAt = 0; S.dayMirrorStale = false; S.dayReqStale = false; S.dayPendStale = false; S.dayReqs = {};
     if (dateOverride && S.dayCache[dateOverride]) {
       wait.then(() => { if (tok === S.dayTok && live()) { drawDay(dateOverride, S.dayCache[dateOverride], []); prefetch(dateOverride); } });
       return;
@@ -96,10 +111,11 @@ export function renderApprove(ctx) {
       fresh = true;
       if (tok !== S.dayTok || !live()) return;
       unStale();
-      S.dayMirrorAt = r.mirror_at || 0;      // 考勤副本讀的：卡片上方標「資料更新於」
+      S.dayMirrorAt = r.mirror_at || 0; S.dayMirrorStale = !!r.mirror_stale;      // 考勤副本讀的：卡片上方標「資料更新於」；上游慢先給的舊值另加一句（2026-11-18）
+      if (S.dayMirrorStale) fullNewer(r.date, r.employees, tok);      // 完整頁：背景再問，有差只顯示「有更新的資料［更新］」（不偷換畫面，2026-11-19）
       const failed = r.failed || [];          // 單一門市也可能有：總部那組併進來的別家讀不到（不快取、顯示提示）
       if (!S.all) S.elsewhere = Array.isArray(r.elsewhere) ? r.elsewhere : [];      // 捷徑卡（歸屬這組、在別家打卡的人）不隨日期變，快取的日子沿用
-      if (!failed.length) { if (cacheable(r.date)) S.dayCache[r.date] = r.employees; else S.recent[r.date] = r.employees; }
+      if (!failed.length && !r.mirror_stale) { if (cacheable(r.date)) S.dayCache[r.date] = r.employees; else S.recent[r.date] = r.employees; }      // 副本舊值不進快取（審查 R1：從快取打開會被當成新的直接可核定）
       if (!gateDone) { drawDay(r.date, r.employees, failed, true); markStale('假別額度還在讀取，讀到後就可以核定…'); }
       return wait.then(() => {            // 卡片的假別清單與額度檢查要用額度：到了才重畫成可操作的卡片，額度硬擋不會被繞過
         if (tok !== S.dayTok || !live()) return;
@@ -130,7 +146,7 @@ export function renderApprove(ctx) {
     const focus = S.focusEmp;
     renderEmployees(box, date, employees, failed, () => { loadPending(); loadDay(date); });
     if (quick) { S.focusEmp = focus; return; }
-    if (S.dayMirrorAt) box.prepend(h('div', 'du-mirror-at', '資料更新於 ' + snapLabel(S.dayMirrorAt) + '・從 Mac mini 讀取', { id: 'duMirrorAt' }));   // 先秀上次的資料：申請、班表等新資料到了再一起套；待核定提醒點的那位留給新資料打開
+    if (S.dayMirrorAt) box.prepend(h('div', 'du-mirror-at', '資料更新於 ' + snapLabel(S.dayMirrorAt) + '・從 Mac mini 讀取' + (S.dayMirrorStale ? '・打卡系統回應較慢，先顯示這份；送出時仍以打卡系統為準' : ''), { id: 'duMirrorAt' }));   // 先秀上次的資料：申請、班表等新資料到了再一起套；待核定提醒點的那位留給新資料打開
     applyDayRequests(date);
     applyDayPlan(date);
   }
@@ -155,6 +171,7 @@ export function renderApprove(ctx) {
     const tok = S.dayTok;
     const put = (store, byEmp) => Object.keys(byEmp || {}).forEach(id => {
       const key = rowKey({ store, emp_id: id });
+      S.dayReqs[key] = byEmp[id];      // 送出前重讀時比對（審查 R1）
       const card = [].filter.call(box.querySelectorAll('.du-card'), c => c.dataset.empId === key)[0];
       if (card && card.__applyReq) card.__applyReq(byEmp[id]);
     });
@@ -179,29 +196,55 @@ export function renderApprove(ctx) {
       box.prepend(bar);
     };
     // 全部門市：by_store[店].by_emp，各店的 emp_id 分開對（同號員編不會對錯人）
-    (pre || (S.all ? callAll('mgr_req_day', { date }) : call('mgr_req_day', { date }))).then(res => {
+    // 待審清單跟已核准申請同時讀（第三輪審查）：兩份都有結果才解鎖；待審清單讀不到＝每張卡都不能核定（fail-closed）、給重讀鈕
+    const pendP = readPending();
+    (pre || (S.all ? callAll('mgr_req_day', { date }) : call('mgr_req_day', { date }))).then(async res => {
       if (!current()) return;
-      unlock();
-      if (!res || !(S.all ? res.by_store : res.by_emp)) return block();
+      S.dayReqStale = !!(res && res.mirror_stale);      // 已核准申請是副本舊值：送出前要重讀（審查 R1：名單新、申請舊的組合）
+      if (!res || !(S.all ? res.by_store : res.by_emp)) { unlock(); return block(); }
       if (!S.all) put('', res.by_emp);
       Object.keys(res.by_store || {}).forEach(st => put(st, res.by_store[st] && res.by_store[st].by_emp));      // 全部門市各店；單一門市時是總部那組併進來的別家
       if (Array.isArray(res.failed) && res.failed.length) block(res.failed);
-      applyPendingReqs(date, current);      // 那天還沒審的申請放進各人卡片（第 2 項）
+      const pr = await pendP.then(r => ({ r }), e => ({ e }));
+      if (!current()) return;
+      unlock();
+      applyPendingReqs(date, current, pr);      // 那天還沒審的申請放進各人卡片（第 2 項）
       runChecks(box, date, current);      // 申請都套好、時段是最後的樣子：整天先跟打卡系統「只檢查」一次（2026-11-14 考勤管理好上手第 1 項）
     }, () => { if (current()) { unlock(); block(); } });
   }
+  const readPending = () => { const p = S.all ? callAll('mgr_req_pending', {}) : call('mgr_req_pending', {}); p.catch(() => {}); return p; };
 
   // 卡片裡審申請（2026-11-14 考勤管理好上手第 2 項）：那天還沒審的申請（只算自己看得到、不是自己送的）列進那位同仁的卡片，單筆核准／退回；
   // 批次與作廢留在申請審核分頁。核准後重讀那天已核准的申請、照舊預填，主管再按一次送出（不自動核定）
-  function applyPendingReqs(date, current) {
-    (S.all ? callAll('mgr_req_pending', {}) : call('mgr_req_pending', {})).then(res => {
-      if (!current()) return;
-      const items = reqShown(res && res.items).filter(it => it.date === date);
-      const by = new Map(), byAll = new Map();      // byAll＝連本人自己的、只給最小列的（這位主管審不了）也算：擋核定要看全部待審單（2026-11-19）
-      items.forEach(it => { const k = rowKey({ store: it.store || '', emp_id: it.emp_id }); if (!by.has(k)) by.set(k, []); by.get(k).push(it); });
-      ((res && Array.isArray(res.items) ? res.items : []).filter(it => it && it.date === date)).forEach(it => { const k = rowKey({ store: it.store || '', emp_id: it.emp_id }); if (!byAll.has(k)) byAll.set(k, []); byAll.get(k).push(it); });
-      box.querySelectorAll('.du-card').forEach(c => { if (c.__applyPending) c.__applyPending(by.get(c.dataset.empId) || [], byAll.get(c.dataset.empId) || []); });
-    }, () => {});
+  // pr＝{ r } 讀到的待審清單／{ e } 讀不到（第三輪審查：讀不到不再吞掉，該卡一律不能核定、可重讀）；沒傳＝現在讀一次
+  async function applyPendingReqs(date, current, pr) {
+    if (!pr) pr = await readPending().then(r => ({ r }), e => ({ e }));
+    if (!current()) return;
+    const res = pr.r;
+    const cards = [].slice.call(box.querySelectorAll('.du-card'));
+    const retry = () => { const n = box.querySelector('#duPendFail'); if (n) n.remove(); cards.forEach(c => c.__pendFail && c.__pendFail('待審的申請重新讀取中…', null)); applyPendingReqs(date, current); };
+    const failBar = names => {
+      if (box.querySelector('#duPendFail')) return;
+      const bar = h('div', 'du-fail', null, { id: 'duPendFail' });
+      bar.append(h('span', 'du-fail-msg', (names ? names + '的' : '') + '待審申請讀不到：還有沒審的單就不能核定，為了避免核錯，暫時不能送出核定'));
+      const again = h('button', 'btn sm ghost', '重新讀取待審申請', { type: 'button', id: 'duPendRetry' });
+      again.onclick = () => { again.disabled = true; again.textContent = '讀取中…'; retry(); };
+      bar.append(again);
+      box.prepend(bar);
+    };
+    const FAIL_MSG = '這天的待審申請讀不到，暫時不能核定（按上面「重新讀取待審申請」）';
+    if (pr.e || !res || !Array.isArray(res.items)) { cards.forEach(c => c.__pendFail && c.__pendFail(FAIL_MSG, retry)); failBar(''); return; }
+    S.dayPendStale = !!(res && res.mirror_stale);
+    const failedPre = (Array.isArray(res.failed) ? res.failed : []).map(f => f.store + '|');
+    const items = reqShown(res.items).filter(it => it.date === date);
+    const by = new Map(), byAll = new Map();      // byAll＝連本人自己的、只給最小列的（這位主管審不了）也算：擋核定要看全部待審單（2026-11-19）
+    items.forEach(it => { const k = rowKey({ store: it.store || '', emp_id: it.emp_id }); if (!by.has(k)) by.set(k, []); by.get(k).push(it); });
+    (res.items.filter(it => it && it.date === date)).forEach(it => { const k = rowKey({ store: it.store || '', emp_id: it.emp_id }); if (!byAll.has(k)) byAll.set(k, []); byAll.get(k).push(it); });
+    cards.forEach(c => {
+      if (failedPre.some(x => c.dataset.empId.startsWith(x))) { if (c.__pendFail) c.__pendFail(FAIL_MSG, retry); return; }      // 讀不到的那幾家店：那幾家的卡不能核定
+      if (c.__applyPending) c.__applyPending(by.get(c.dataset.empId) || [], byAll.get(c.dataset.empId) || []);
+    });
+    if (failedPre.length) failBar(res.failed.map(f => f.storeName).join('、'));
   }
   dateIn.onchange = () => { if (dateIn.value) loadDay(dateIn.value); };
   el.querySelector('#duPrev').onclick = () => { if (S.date) loadDay(C.addDaysStr(S.date, -1)); };
@@ -392,8 +435,40 @@ function periodRow(p, onChange) {
 
 // 新頁的「細調」（2026-11-15，docs/duty-timeline/）：舊畫面的整張卡片搬進新頁的時間軸卡片，展開就能改時段、假別、遲到分鐘、
 // 重複打卡、原因、作廢申請、代開…；規則一行都不重寫。reqs＝那天這個人已核准的申請，pending＝還沒審的；開好就先跟打卡系統檢查一次。
+// 完整頁送出前重讀（2026-11-19）：直接問打卡那天的名單（fresh），這位同仁的版本跟畫面上的不一樣＝資料變了，不送。回 true／不送的原因
+async function freshCheck(emp, date, card) {      // 名單、已核准申請、待審清單一起直接問打卡（審查 R1：任一份是副本舊值都要一起重讀比對；第三輪：待審清單也要）
+  const st = emp.store || undefined;
+  const [r, q, pd] = await Promise.all([call('mgr_day', { date, fresh: true, store: st }), call('mgr_req_day', { date, fresh: true, store: st }), call('mgr_req_pending', { fresh: true, store: st })]);
+  if (!pd || !Array.isArray(pd.items) || (Array.isArray(pd.failed) && pd.failed.length)) return '待審的申請讀不到，這次沒有送出，請稍後再試';
+  const pendNow = pendOf(pd.items, emp, date);
+  const pendShown = card ? (card.__pendAll || []) : [];
+  if (pendNow.length) { if (card && card.__applyPending) card.__applyPending(reqShown(pendNow), pendNow); return '這天還有待審的申請，請先審單'; }      // 剛送來的待審單：放進卡片、不送
+  if (pendShown.length) return '待審的申請剛有變動，請重新整理這天、確認後再送';
+  const cur = (r && Array.isArray(r.employees) ? r.employees : []).find((x) => String(x.emp_id) === String(emp.emp_id));
+  if (!cur) return '這位同仁這天的資料讀不到，這次沒有送出，請重新整理';
+  if (!emp.ver || !cur.ver || cur.ver !== emp.ver || JSON.stringify(cur.segments || []) !== JSON.stringify(emp.segments || []) || (cur.calc_ver || '') !== (emp.calc_ver || '')) return '資料剛更新，請重新整理這天、確認後再送';
+  const freshReqs = (q && q.by_emp && q.by_emp[String(emp.emp_id)]) || [];
+  const shown = (S.dayReqs || {})[rowKey({ store: emp.store || '', emp_id: emp.emp_id })] || [];
+  if (JSON.stringify(freshReqs) !== JSON.stringify(shown)) return '已核准的申請剛有變動，請重新整理這天、確認後再送';
+  return true;
+}
+// 這位同仁這天的待審單（同卡片 __applyPending 的 byAll：連本人的、只給最小列的都算；跟伺服器 server/duty-pend-gate.js 同一條規則）
+const pendOf = (items, emp, date) => pendingFor(items, emp.emp_id, date, emp.store || '');
+// 含請假的核定送出前（審查 R5；main 也沒有這道＝既有缺口）：直接問打卡最新的假別額度，讀不到或不夠就不送。原本就登記著的假別照舊放行（同畫面上的硬擋）
+export async function leaveFreshOk(emp, date, leaves, prevLeaves) {      // prevLeaves：原本登記的假別（同一假別時數增加的部分也要查）
+  const lv = leaveIncrements(leaves, prevLeaves);
+  if (!lv.length) return true;
+  let r;
+  try { r = await call('payroll_leave_options', { fresh: true, store: emp.store || undefined }); } catch (e) { return '假別額度讀不到，含請假的核定這次沒有送出，請稍後再試'; }
+  const LO = r && Array.isArray(r.types) ? r : null;
+  if (!LO) return '假別額度讀不到，含請假的核定這次沒有送出，請稍後再試';
+  const r2 = leaveShort(LO, emp.emp_id, lv, date);      // 跟一鍵整批同一個判斷：用完、期限、計時沒有補休，以及增加的時數超過剩餘（第三輪審查）
+  return r2.why || true;
+}
 export function fineCard(emp, date, o) {
   const card = buildCard(emp, date);
+  if (o && typeof o.beforeSubmit === 'function') card.__beforeSubmit = o.beforeSubmit;
+  if (o && typeof o.current === 'function') card.__current = o.current;      // 送出前最後檢查：還是目前這天（第三輪審查）
   card.classList.add('du-fine');
   card.__setExpanded(true);
   if (card.__applyReq) card.__applyReq((o && o.reqs) || []);
@@ -413,6 +488,8 @@ function buildCard(emp, date) {
   const card = h('div', 'du-card'); card.dataset.empId = rowKey(emp); if (emp.store) card.dataset.store = emp.store;
   // 這天還有待審的申請不能核定（2026-11-19）：__pendMine＝這位主管審得了的、__pendUpper＝要上層審的；__recalc 0 沒事／1 剛審完、重讀那天已核准的申請／2 讀好了、重新檢查中（沒回到 0 都不給核定）
   card.__pendMine = []; card.__pendUpper = []; card.__recalc = 0;
+  // __pendErr（第三輪審查）：待審清單還沒讀到／讀不到的原因。有就不能核定（fail-closed）；__applyPending 讀到清單才清掉，__pendRetry＝提示裡的重讀
+  card.__pendErr = '待審的申請讀取中，讀到後才能核定'; card.__pendRetry = null;
   const recalcDone = () => { if (card.__recalc !== 2) return false; card.__recalc = 0; return true; };
   // 改了時段、假別、遲到、原因：停手 1 秒只重算這一位（整天那次跑完 __checkOn 才開始；卡片初始化時呼叫會直接略過）
   function queueCheck(now) {
@@ -706,14 +783,18 @@ function buildCard(emp, date) {
   // ---- 這天還有待審的申請：不能核定（2026-11-19）。打卡端不擋待審單（檢查會說可以），所以這裡不看檢查結果：只要還有待審單就換成黃色提示、核定鈕與送出鈕停用。
   //      沒權限核定的人（readOnly）本來就沒有送出鈕，不顯示。判斷「待審單」與一頁核定共用 quick-calc.js pendSplit。
   const PEND_TITLE = '這天還有待審的申請：審完才能送出核定';
-  const pendBlocked = () => !readOnly && (card.__pendMine.length > 0 || card.__pendUpper.length > 0 || card.__recalc > 0);
+  const pendBlocked = () => !readOnly && (!!card.__pendErr || card.__pendMine.length > 0 || card.__pendUpper.length > 0 || card.__recalc > 0);
+  const pendWhy = () => (card.__pendMine.length || card.__pendUpper.length || !card.__pendErr ? '這天還有待審的申請，審完才能核定' : card.__pendErr);
   card.__pendBlocked = pendBlocked;
   const pendWord = it => (C.REQ_KIND_LABEL[it.kind] || '') + '單' + (it.start && it.end ? ' ' + it.start + '–' + it.end : '');
   const pendVerdict = () => {
     const mine = card.__pendMine, up = card.__pendUpper;
     verdict.hidden = false; verdict.textContent = ''; verdict.className = 'du-verdict warn du-verdict-pend';
-    mini.className = 'du-mini pending'; mini.textContent = mine.length || up.length ? '有待審單' : '重新計算中…';
-    if (mine.length) {
+    mini.className = 'du-mini pending'; mini.textContent = mine.length || up.length ? '有待審單' : card.__pendErr ? '待審單讀取中' : '重新計算中…';
+    if (!mine.length && !up.length && card.__pendErr) {      // 待審清單沒讀到（讀取中、讀不到、核准後重讀失敗）：不能核定
+      verdict.append(h('div', 'du-verdict-t', card.__pendErr));
+      if (card.__pendRetry) { const rb = h('button', 'btn sm ghost du-pend-retry', '重新讀取', { type: 'button' }); const f = card.__pendRetry; rb.onclick = () => { rb.disabled = true; f(); }; verdict.append(rb); }
+    } else if (mine.length) {
       verdict.append(h('div', 'du-verdict-t', '這天還有 ' + mine.length + ' 張申請沒審：請先在上面核准或退回，審完會自動重新計算'));
       if (up.length) verdict.append(h('div', 'du-verdict-n', '另外還有 ' + up.length + ' 張申請在等上層審核（' + up.map(pendWord).join('、') + '），審完才能核定'));
     } else if (up.length) verdict.append(h('div', 'du-verdict-t', '這天還有 ' + up.length + ' 張申請在等上層審核，審完才能核定（' + up.map(pendWord).join('、') + '）'));
@@ -732,6 +813,7 @@ function buildCard(emp, date) {
     card.dispatchEvent(new CustomEvent('emp-checked', { bubbles: true }));
   };
   // 不再擋了（審完、重新檢查完）：還沒核定的卡片照最新的檢查結果重畫；已核定的卡片只收掉提示、送出鈕恢復
+  card.__pendFail = (msg, retry) => { card.__pendErr = msg || '待審的申請讀不到，暫時不能核定'; card.__pendRetry = retry || null; if (!readOnly) pendVerdict(); };
   card.__pendRelease = () => {
     if (card.__pending && !emp.approved) { card.__setCheck(card.__check); return; }
     verdict.hidden = true; verdict.textContent = ''; verdict.className = 'du-verdict';
@@ -1038,7 +1120,7 @@ function buildCard(emp, date) {
   }
 
   submit.onclick = async () => {
-    if (pendBlocked()) { pendVerdict(); return say('bad', '✕ 這天還有待審的申請，審完才能核定'); }      // 所有送出的路（送出鈕、綠燈「核定 N 小時」、手動改時段後的送出、重新核定）都從這裡過
+    if (pendBlocked()) { pendVerdict(); return say('bad', '✕ ' + pendWhy()); }      // 所有送出的路（送出鈕、綠燈「核定 N 小時」、手動改時段後的送出、重新核定）都從這裡過
     if (/^確認沒加班/.test(submit.textContent) && !card.__notCount) return say('bad', '✕ 請先選不算工時的原因（會留在核定紀錄）');
     // 硬擋（Eason 2026-08-22「硬擋，不給送出」，manager.html:1296–1320）：額度用完、期限過了的假別不給送出。
     // 下拉的 disabled 只擋滑鼠，程式指定仍設得進去，所以送出前用同一份資料再判一次；原本就選著這個假別的既有紀錄放行，否則已超額的人連重送核定都做不了
@@ -1065,6 +1147,9 @@ function buildCard(emp, date) {
       if (s && e) periods.push({ start: s, end: e }); else if (s || e) half = true;
     });
     if (half) return say('bad', '✕ 有一段只填了上班或下班時間，請補齊兩邊，或按該段的 － 移除。');
+    // 第三輪審查：送出的內容以「現在畫面上的」為準；中間每個等待（確認框、重讀）之後都要跟這份一樣才送
+    const formNow = () => { const ps = []; periodRows.querySelectorAll('.du-prow').forEach(r => { const a = r.querySelector('.p-start').value, b = r.querySelector('.p-end').value; if (a && b) ps.push([a, b]); }); return JSON.stringify([ps, leaveList(), lateIn.value, diffIn.value.trim(), JSON.stringify(dupPicks || null)]); };
+    const form0 = formNow();
     if (lv.some(x => x.hours !== '' && Number(x.hours) < 0)) return say('bad', '✕ 請假時數不能是負數，請修正後再送出。');
     if (periods.length === 0) {                     // 沒填任何上班時段：有選假別＝整天請假（核定 0 小時）；否則就是漏填（manager.html:1340–1366）
       if (!lv.length) return say('bad', '✕ 請至少輸入一段上班時間；若是整天請假，請在「請假註記」選假別再送出。');
@@ -1090,6 +1175,26 @@ function buildCard(emp, date) {
       const skip = card.__noConfirm; card.__noConfirm = false;      // 「核定 N 小時」綠燈：已先檢查過會過，不跳確認框
       if (!skip && !await confirmBox(msg + '\n\n確定送出?', '送出')) return;
     }
+    // 畫面是伺服器先給的副本舊值（2026-11-19）：送出前先向打卡重讀這位同仁這天，跟畫面不一樣就不送（一頁核定由 quick.js 傳 __beforeSubmit；完整頁用 freshCheck）
+    {
+      const chk = card.__beforeSubmit || (S.dayMirrorStale || S.dayReqStale || S.dayPendStale || S.leaveMirrorStale ? () => freshCheck(emp, date, card) : null);
+      if (chk) {
+        submit.disabled = true; submit.textContent = '確認最新資料…';
+        let okGo = false, why = '';
+        try { const r = await chk(); okGo = r === true; why = typeof r === 'string' ? r : ''; } catch (e) { why = '讀不到打卡系統的最新資料，這次沒有送出，請稍後再試'; }
+        submit.disabled = false; submit.textContent = '重新送出核定';
+        if (!okGo) { say('bad', '✕ ' + (why || '資料剛更新，請確認後再送')); return; }
+      }
+      if (emp.ver_req && !(typeof emp.ver === 'string' && emp.ver)) { say('bad', '✕ 這位同仁這天的資料版本讀不到，這次沒有送出，請重新整理後再按一次'); return; }      // 一律要帶版本（審查 R2）
+      submit.disabled = true; submit.textContent = '確認最新資料…';
+      let lq; try { lq = await leaveFreshOk(emp, date, leaveList(), initLeaves); } catch (e) { lq = '假別額度讀不到，含請假的核定這次沒有送出，請稍後再試'; }
+      submit.disabled = false; submit.textContent = '重新送出核定';
+      if (lq !== true) { say('bad', '✕ ' + lq); return; }
+    }
+    // 最後一個 await 之後再檢查一次（第三輪審查）：卡片還在畫面上、還是目前這天；待審單（重讀時可能剛送來）；內容跟確認時一樣
+    if (!card.isConnected || (card.__current && !card.__current())) { say('bad', '✕ 畫面剛更新，這次沒有送出，請確認後再按一次'); return; }
+    if (pendBlocked()) { pendVerdict(); return say('bad', '✕ ' + pendWhy()); }
+    if (formNow() !== form0) { say('bad', '✕ 時段或假別剛有變動，這次沒有送出，請確認後再按一次'); return; }
     clearTimeout(card.__checkTimer); card.__checkSeq = (card.__checkSeq || 0) + 1;      // 送出了：還沒回來的檢查結果作廢，不蓋掉送出的結果
     submit.disabled = true; submit.textContent = '送出中…';
     const approveDate = date;                       // 送出當下鎖定日期，避免回呼時已切到別天
@@ -1097,7 +1202,9 @@ function buildCard(emp, date) {
       const payload = { store: emp.store, date: approveDate, emp_id: emp.emp_id, periods, late_min: lateIn.value, leaves: lv };
       if (diffIn.value.trim()) payload.diff_reason = diffIn.value.trim();
       if (dupGroups.length) payload.dup_ignore = C.dupIgnoreFrom(dupGroups, dupPicks);   // 有重複卡組才送（空陣列＝取消認定）；沒有就不送，打卡端沿用原本的
-      if (canBg(emp)) { payload.base_ver = emp.ver; payload.bg = true; }      // 資料是 Mac mini 副本讀的：先顯示、背景送，打卡端比對版本（2026-11-14）
+      if (typeof emp.ver === 'string' && emp.ver) payload.base_ver = emp.ver;      // 所有送出核定一律帶版本（2026-11-19；上面已擋：伺服器要求版本時沒有就不送）：畫面看的資料跟打卡端現在的不一樣就退回，不會照舊資料核定
+      if (typeof emp.calc_ver === 'string' && emp.calc_ver) payload.calc_ver = emp.calc_ver;      // 營運系統的班表版本（審查 R4）：伺服器比對當下班表
+      if (canBg(emp)) payload.bg = true;      // 資料是 Mac mini 副本讀的：先顯示、背景送（2026-11-14）
       const res = await call('mgr_approve', payload);
       delete S.dayCache[approveDate];
       if (res && res.queued) { bgQueued(res.job, approveDate, lv); return; }
@@ -1129,10 +1236,14 @@ function buildCard(emp, date) {
   card.__applyPending = (list, all) => {
     const old = body.querySelector('.du-inreq'); if (old) old.remove();
     // 這天還有哪些待審單：list＝列在卡片裡的（自己看得到、不是本人送的）、all＝連本人的、只給最小列的也算（沒給就用 list）
+    const onlyErr = !!card.__pendErr && !card.__pendMine.length && !card.__pendUpper.length && !card.__recalc;      // 只是「待審清單還沒讀到／讀不到」在擋
     const was = pendBlocked();
+    card.__pendErr = ''; card.__pendRetry = null; card.__pendAll = (all || list || []).slice();      // 讀到待審清單了
     const sp = pendSplit((all || list || []).map(it => Object.assign({}, it, { pending: true, decidable: reqCanDecide(it) })));
     card.__pendMine = sp.mine; card.__pendUpper = sp.upper;
-    if (pendBlocked()) pendVerdict(); else if (was) card.__pendRelease();
+    if (pendBlocked()) pendVerdict();
+    else if (was && onlyErr && !card.__check) { if (verdict.classList.contains('du-verdict-pend')) { verdict.hidden = true; verdict.textContent = ''; verdict.className = 'du-verdict'; setBadge(emp.approved, initLeaves); } submit.disabled = false; if (submit.title === PEND_TITLE) submit.title = ''; }      // 還沒檢查過：只收掉「讀取中」，等檢查結果再畫（不打開手動修改）
+    else if (was) card.__pendRelease();
     if (!list.length) return;
     const box2 = h('div', 'du-inreq');
     box2.append(h('div', 'du-inreq-k', '這天還沒審的申請（' + list.length + ' 張）'));
@@ -1144,13 +1255,20 @@ function buildCard(emp, date) {
       if (pendBlocked()) pendVerdict();
       const rechecking = () => { if (card.__recalc === 1) card.__recalc = 2; queueCheck(true); };
       if (decision !== 'approve') { rechecking(); return; }
-      call('mgr_req_day', Object.assign({ date }, emp.store ? { store: emp.store } : {})).then(res => {
-        const by = (emp.store && res && res.by_store && res.by_store[emp.store]) ? res.by_store[emp.store].by_emp : (res && res.by_emp);
-        card.__reqApplied = false;
-        card.__applyReq((by && by[emp.emp_id]) || []);
-        if (card.__propose) card.__propose();      // 核准的單算進「打卡＋單」
-        rechecking();
-      }, rechecking);
+      // 核准後重讀那天已核准的申請：讀不到就維持不能核定（第三輪審查；原本讀不到也解鎖），提示裡可重讀
+      const reload = () => {
+        card.__pendErr = ''; card.__pendRetry = null; card.__recalc = 1; if (pendBlocked()) pendVerdict();
+        call('mgr_req_day', Object.assign({ date }, emp.store ? { store: emp.store } : {})).then(res => {
+          if (!card.isConnected) return;
+          const by = (emp.store && res && res.by_store && res.by_store[emp.store]) ? res.by_store[emp.store].by_emp : (res && res.by_emp);
+          if (!by || (Array.isArray(res.failed) && res.failed.length)) throw new Error('部分讀不到');
+          card.__reqApplied = false;
+          card.__applyReq(by[emp.emp_id] || []);
+          if (card.__propose) card.__propose();      // 核准的單算進「打卡＋單」
+          rechecking();
+        }).catch(() => { if (card.isConnected) card.__pendFail('核准好了，但重新讀取已核准的申請失敗，暫時不能核定', reload); });
+      };
+      reload();
     })));
     body.insertBefore(box2, verdict);      // 待審單放在提示上面（提示寫「在上面核准或退回」）
   };

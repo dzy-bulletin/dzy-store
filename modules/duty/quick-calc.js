@@ -225,6 +225,9 @@ export const overText = (p) => (p && p.over ? '超過一天 ' + C.DAY_MAX_H + ' 
 // ---- 假別額度／期限（同 approve.js 送出前的硬擋；回字串＝擋下或要確認的原因，'' ＝可以）----
 export function leaveProblem(LO, empId, leaves, date) {
   if (!LO) return '';
+  // 生理假一天最多 8 小時（2026-11-18 規則；打卡端核定也擋，這裡先擋免得送出才被退回）
+  const mensH = (leaves || []).filter(L => L.type === '生理假').reduce((n, L) => n + (Number(L.hours) || 0), 0);
+  if (mensH > 8.001) return '生理假一天最多 8 小時，目前填了 ' + Math.round(mensH * 100) / 100 + ' 小時';
   for (const L of leaves || []) {
     const d0 = C.leaveDefOf(LO, L.type), q0 = d0 ? C.quotaOf(LO, String(empId), d0.code) : null;
     if (d0) {

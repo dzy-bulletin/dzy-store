@@ -661,6 +661,7 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
 .dq-todayh .dq-sec{flex:1 1 220px;min-width:0}
 .dq-todaygo{flex:0 0 auto}
 .dq-nav .dq-todaygo{flex:0 0 auto;padding:0 14px;white-space:nowrap}      /* 2026-11-19 搬到日期列：「後一天 ›」右邊 */
+.dq-newer{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:60;background:var(--card,#fff);border:1px solid var(--line);border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.15);padding:8px 12px;display:flex;align-items:center;gap:8px;font-size:14px;max-width:calc(100vw - 32px)}      /* 背景有新資料、主管正在操作時的提示（2026-11-19）：固定在下方，不推動版面 */
 .dq-toggle{font:inherit;min-height:50px;border:1px solid var(--line);border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 14px;font-weight:700;margin-top:4px;cursor:pointer}
 .dq-rq{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
 /* 還沒核定、有待審單（2026-11-18）：卡片上的提示＋直接列待審單給核准／退回 */
