@@ -61,14 +61,15 @@ export function secondHtml(shifts, cur, firstVal, id, stores) {
   return `<label class="sc-two" for="${id}">＋第二班</label><select id="${id}" aria-label="第二個班別"${on ? '' : ' disabled'}>${cur ? o.replace(`value="${esc(cur)}"`, `value="${esc(cur)}" selected`) : o}</select>`;
 }
 /** 格子可選的內容（班別、休息日、休息日加班（班別，2026-11-03 Eason：總部、央廚都照門市正職）、例假、特休、補休、國定假日假） */
-// 門市班（總部出差＋門市班，2026-11-07）：每家門市一組 optgroup，值「S:門市代號.班別」
-export const storeGroups = (stores, prefix) => (stores || []).map((x) => `<optgroup label="${esc(x.name)}（門市）">${x.shifts.map((s) => `<option value="${prefix}${esc(s.id)}">${esc(x.name)} ${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('')}</optgroup>`).join('');
+// 門市班（總部出差＋門市班，2026-11-07）：每家門市一組 optgroup，值「S:門市代號.班別」；ot＝休息日加班那一組（值「O:門市代號.班別」，2026-11-20）
+export const storeGroups = (stores, prefix, ot) => (stores || []).map((x) => `<optgroup label="${esc(x.name)}（門市${ot ? '・休息日加班' : ''}）">${x.shifts.map((s) => `<option value="${prefix}${esc(s.id)}">${esc(x.name)} ${esc(shiftCode(s.name))} ${esc(timeText(s))}${ot ? '（休息日加班）' : ''}</option>`).join('')}</optgroup>`).join('');
 export const isExt = (id) => typeof id === 'string' && id.indexOf('.') > 0;
 export function cellOptions(shifts, cur, withClear, stores) {
   const o = shifts.map((s) => `<option value="S:${esc(s.id)}">${esc(shiftCode(s.name))} ${esc(timeText(s))}</option>`).join('')
     + storeGroups(stores, 'S:')
     + '<option value="H">休息日</option>'
     + shifts.map((s) => `<option value="O:${esc(s.id)}">${esc(shiftCode(s.name))} ${esc(timeText(s))}（休息日加班）</option>`).join('')
+    + storeGroups(stores, 'O:', true)      // 總部同仁休息日去門市支援加班（2026-11-20 Eason）：存 {t:'H', s:'門市代號.班別'}，格子顯示門市班名＋橘色「休加」
     + '<option value="R">例假</option><option value="L:特">特休</option><option value="L:補">補休</option><option value="L:國">國定假日假</option>'
     + (withClear ? '<option value="CLEAR">清空</option>' : '');
   return cur ? o.replace(`value="${esc(cur)}"`, `value="${esc(cur)}" selected`) : o;
