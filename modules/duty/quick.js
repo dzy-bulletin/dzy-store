@@ -256,11 +256,11 @@ export function renderQuick(ctx) {
   }
   function todaySection() {
     const tv = st.todayView, box = h('div', 'dq-today', null, { id: 'dqToday' });
-    // 「核定今天」（2026-11-17 Eason）：都核完時上方日期欄本來就顯示今天，再選一次今天瀏覽器不會送出變更、「後一天」也是灰的＝進不了今天；這顆直接切到今天
+    // 「核定今天」（2026-11-17 Eason）：都核完時上方日期欄本來就顯示今天，再選一次今天瀏覽器不會送出變更、「後一天」也是灰的＝進不了今天；那顆直接切到今天。
+    // 2026-11-19 Eason：按鈕搬到最上面的日期列（navEl，「後一天 ›」右邊），這裡只留說明
     const head = h('div', 'dq-todayh');
-    head.append(h('div', 'dq-sec', '今天 ' + C.shortDate(tv.date) + ' 的出勤（這裡只看；已下班的要先核定，按「核定今天」）'));
-    const go = btn('dq-navb dq-todaygo', '核定今天', () => gotoDate(tv.date), { id: 'dqTodayGo' }); go.disabled = !!st.busy;
-    head.append(go); box.append(head);
+    head.append(h('div', 'dq-sec', '今天 ' + C.shortDate(tv.date) + ' 的出勤（這裡只看；已下班的要先核定，請按最上面日期旁的「核定今天」）'));
+    box.append(head);
     if (tv.loading) { box.append(h('div', 'dq-done', '讀取今天的出勤中…')); return box; }
     if (tv.error) { box.append(h('div', 'dq-done', '今天的出勤暫時讀不到，可以按「核定今天」再讀一次')); return box; }
     const byKey = new Map(tv.emps.map((e) => [Q.keyOf(e), e]));
@@ -518,6 +518,11 @@ export function renderQuick(ctx) {
     nav.append(di);
     if (st.manual) { const b = btn('dq-navb', '回待處理', backToAuto, { id: 'dqAuto' }); b.disabled = st.busy; nav.append(b); }
     nav.append(next);
+    // 「核定今天」（2026-11-19 Eason 搬到日期列）：出現條件同下方「今天的出勤」那塊（都核完、沒有讀不到的門市、沒有超出可看的日子、今天的名單已開始讀），停用條件同原本（送出中）
+    if (!st.date && !st.failed.length && !st.capped && st.todayView) {
+      const go = btn('dq-navb dq-todaygo', '核定今天', () => gotoDate(st.todayView.date), { id: 'dqTodayGo' }); go.disabled = !!st.busy;
+      nav.classList.add('dq-nav-go'); nav.append(go);
+    }
     return nav;
   }
 

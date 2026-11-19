@@ -660,6 +660,7 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
 .dq-todayh{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .dq-todayh .dq-sec{flex:1 1 220px;min-width:0}
 .dq-todaygo{flex:0 0 auto}
+.dq-nav .dq-todaygo{flex:0 0 auto;padding:0 14px;white-space:nowrap}      /* 2026-11-19 搬到日期列：「後一天 ›」右邊 */
 .dq-toggle{font:inherit;min-height:50px;border:1px solid var(--line);border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 14px;font-weight:700;margin-top:4px;cursor:pointer}
 .dq-rq{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
 /* 還沒核定、有待審單（2026-11-18）：卡片上的提示＋直接列待審單給核准／退回 */
@@ -802,6 +803,7 @@ body.embed .dq-legend{border-color:var(--dzy-line);border-radius:var(--dzy-radiu
 @media (max-width:640px){.dq-head .dq-nav{flex-wrap:nowrap}.dq-head .dq-date{flex:1.4;flex-basis:auto;order:0;min-width:0;padding:0 4px}.dq-head .dq-navb{flex:1;min-width:0;padding:0 4px;white-space:nowrap}}
 @media (max-width:640px){.dq-head .dq-navb{flex:none;min-width:44px;padding:0 10px}.dq-head .dq-date{flex:1}}
 @media (max-width:420px){.dq-head .dq-navt{display:none}.dq-head .dq-navb{min-width:48px;font-size:18px}}
+@media (max-width:640px){.dq-head .dq-nav.dq-nav-go{flex-wrap:wrap}.dq-head .dq-nav .dq-todaygo{flex:1 1 100%;order:9;font-size:15px}}      /* 手機放不下：換到日期列第二行、整列寬 */
 /* 班表時段改淺色實心底、刻度標班表起訖（2026-11-15 Eason） */
 .tl-plan{border:0;border-radius:4px;top:0;bottom:0;background:#e5dccf}
 .tl-axis span{transform:translateX(-50%)}
