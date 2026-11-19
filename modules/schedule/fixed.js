@@ -6,6 +6,7 @@ import { timeText, shiftCode } from './hours.js';
 import { call, cellInfo, cellOptions, cellOfValue, valueOfCell, otTag, md, resultsHtml, WD } from './hq.js';
 import { weekday, periodOf, periodNo, periodStart, periodEnd, periodDates, shiftPeriod, parseLabel, label, todayTaipei, addDays } from './period.js';
 import { stHidden, setStHidden, stToggleHtml } from './stview.js';
+import { moduleResetKey } from '../../js/auth.js';
 
 export const F = { key: null, period: null, data: null, loading: null, sel: null, msg: '', err: '' };
 // 設定頁（班別、站別）改了東西後，央廚班表／固定班別的快取要作廢，下次進去重讀（不然新站別、新班別要換期才看得到）
@@ -45,7 +46,7 @@ function bindPeriod(ctx, el) {
   if (n) n.onclick = () => go(1);
 }
 function shell(ctx, draw) {
-  const key = ctx.session.token || ctx.session.code;
+  const key = moduleResetKey(ctx.session);
   if (F.key !== key) resetFixed(key);
   if (F.data && F.period && F.data.period === F.period) return draw();
   ctx.el.innerHTML = '<div class="card"><p class="hint" style="margin:0">讀取中…</p></div>';

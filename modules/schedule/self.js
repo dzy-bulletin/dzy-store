@@ -6,6 +6,7 @@ import { call, calHtml, resultsHtml, issueMap, cellOptions, cellOfValue, valueOf
 import { weekday, periodOf, periodNo, periodStart, periodEnd, periodDates, shiftPeriod, parseLabel, diffDays, todayTaipei } from './period.js';
 import { canEdit } from './state.js';
 import { kindBox, bindKind } from './fixed.js';
+import { moduleResetKey } from '../../js/auth.js';
 
 export const H = { key: null, period: null, data: null, loading: null, who: null, emp: null, sel: null, shEdit: null, msg: '', err: '' };
 export function resetSelf(key) { Object.assign(H, { key, period: null, data: null, loading: null, who: null, emp: null, sel: null, shEdit: null, msg: '', err: '' }); }
@@ -121,7 +122,7 @@ function bindShiftCard(ctx, el, D) {
 // ---------------------------------------------------------------- 我的班表
 // 2026-11-03 Eason：總部改四週一期、存檔就生效（跟央廚一樣不用主管核准）；違反規定照存，上方提醒清單紅字
 export function renderSelf(ctx) {
-  const key = ctx.session.token || ctx.session.code;
+  const key = moduleResetKey(ctx.session);
   if (H.key !== key) resetSelf(key);
   return shell(ctx, () => { if (ctx.el.isConnected) drawSelf(ctx); });
 }
@@ -214,7 +215,7 @@ function drawSelf(ctx) {
 // ---------------------------------------------------------------- 部屬班表（唯讀）
 // 2026-11-03 起不用核准：主管（考勤核定他工時的人）、人資主管、管理員看部屬每一期填了多少、哪裡不合規定
 export function renderApprove(ctx) {
-  const key = ctx.session.token || ctx.session.code;
+  const key = moduleResetKey(ctx.session);
   if (H.key !== key) resetSelf(key);
   return shell(ctx, () => { if (ctx.el.isConnected) drawApprove(ctx); });
 }

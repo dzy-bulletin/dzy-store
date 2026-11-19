@@ -2,6 +2,7 @@
 // 看板帳密由伺服器代管（vault board:<門市代號>），門市點進來直接看到自己店的看板，不用再登入。
 // 看板回的是一整頁 HTML，放進 sandbox iframe（只給 allow-scripts：不給 same-origin＝看板的程式碰不到營運系統的登入資料；不給 popups＝不能開出不受限制的新視窗）。
 import { esc } from '../../js/ui.js';
+import { moduleResetKey } from '../../js/auth.js';
 
 if (!document.getElementById('bdCss')) {
   const l = document.createElement('link');
@@ -32,7 +33,7 @@ function draw(ctx, d) {
 }
 
 function load(ctx, refresh) {
-  const key = ctx.session.token || ctx.session.code;
+  const key = moduleResetKey(ctx.session);
   return ctx.api('POST', '/m/board/view', refresh ? { refresh: true } : {}).then(d => {
     cache = { key, html: d.html, at: d.at };
     if (ctx.el.isConnected) draw(ctx, cache);
@@ -48,7 +49,7 @@ export default {
   id: 'board',
   tabs: [{ id: 'view', label: '看板' }],
   render(ctx) {
-    const key = ctx.session.token || ctx.session.code;
+    const key = moduleResetKey(ctx.session);
     if (cache && cache.key === key) return draw(ctx, cache);
     cache = null;
     ctx.el.innerHTML = '<div class="card"><p class="hint" style="margin:0">讀取中…</p></div>';

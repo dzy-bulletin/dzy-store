@@ -2,6 +2,7 @@
 // 登入、節點、pin 都由營運系統處理（門市代號→調撥節點在後台「門市對照」設定，pin 在伺服器 vault），這裡不碰。
 // 會計專區（月報、差異原因維護、改 pin）與總部管理總覽不在本系統。
 import { esc } from '../../js/ui.js';
+import { moduleResetKey } from '../../js/auth.js';
 import { S, resetState, loadBoot, msgOf } from './state.js';
 import { renderTodo } from './todo.js';
 import { renderForm } from './form.js';
@@ -19,7 +20,7 @@ export default {
   id: 'transfer',
   tabs: [{ id: 'todo', label: '待辦' }, { id: 'new', label: '開單' }, { id: 'query', label: '查單' }],
   render(ctx) {
-    const key = ctx.session.token || ctx.session.code;
+    const key = moduleResetKey(ctx.session);
     if (S.key !== key) resetState(key, ctx.session.code);                  // 換了登入就重來，不留上一個人的單
     if (S.tab !== ctx.tab) { S.tab = ctx.tab; S.docNo = ''; S.doc = null; S.mode = ''; }   // 換分頁就離開詳情
     if (ctx.tab !== 'new') S.editNo = '';

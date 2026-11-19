@@ -1,6 +1,7 @@
 // 收支登記（多店版）：門市記當天現金支出與收入。流程與規則照原系統 ~/mala-cashbook（Eason 拍板過的設計全部保留，見各檔註解），
 // 外觀換成營運系統薪資風格；登入、通行碼、店別都由營運系統處理，這裡不碰。三個分頁：記帳／明細／月結。
 import { esc } from '../../js/ui.js';
+import { moduleResetKey } from '../../js/auth.js';
 import { S, resetState, loadAll, monthOf, todayISO, msgOf } from './state.js';
 import { renderEntry } from './entry.js';
 import { renderList, readMsg } from './list.js';
@@ -12,7 +13,7 @@ export default {
   id: 'cashbook',
   tabs: [{ id: 'entry', label: '記帳' }, { id: 'list', label: '明細' }, { id: 'close', label: '月結' }],
   render(ctx) {
-    const key = ctx.session.token || ctx.session.code;
+    const key = moduleResetKey(ctx.session);
     if (S.key !== key) resetState(key);                  // 換了登入就重來，不留上一個人的帳
     const draw = () => { if (ctx.el.isConnected) (VIEWS[ctx.tab] || renderEntry)(ctx); };
     if (S.loaded) return draw();

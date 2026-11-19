@@ -10,7 +10,7 @@ import { renderShifts } from './shifts.js';
 import { renderSelf, renderApprove } from './self.js';
 import { renderFixed, renderFixedStaff } from './fixed.js';
 import { renderLockLog } from './locklog.js';
-import { ssoSwitch, setSession, toSession, pickSchedStore } from '../../js/auth.js';
+import { ssoSwitch, setSession, toSession, pickSchedStore, moduleResetKey } from '../../js/auth.js';
 
 const VIEWS = { board: renderBoard, needs: renderNeeds, staff: renderStaff, shifts: renderShifts };
 
@@ -67,7 +67,7 @@ export default {
     if (ctx.tab === 'fixed') return renderFixed(ctx);
     if (ctx.tab === 'fixedstaff') return renderFixedStaff(ctx);
     if (ctx.tab === 'locklog') return renderLockLog(ctx);           // 只讀，看得到班表的人都看得到（不套 lockDown：篩選欄要能用）
-    const key = ctx.session.token || ctx.session.code;
+    const key = moduleResetKey(ctx.session);
     if (S.key !== key) reset(key);                                   // 換了登入就重來，不留上一家店的資料
     const draw = () => {
       if (!ctx.el.isConnected) return;

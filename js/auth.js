@@ -10,7 +10,13 @@ export function getSession() {
   } catch (e) { return null; }
 }
 export function setSession(s) { try { sessionStorage.setItem(KEYS.session, JSON.stringify(s)); } catch (e) {} }
-export function clearSession() { try { sessionStorage.removeItem(KEYS.session); sessionStorage.removeItem('dzystore_dutyok'); sessionStorage.removeItem('dzystore_dutyone'); } catch (e) {} }
+// 登出／換人／登入失效：連調撥草稿（鍵名 dzystore_xfer_form: 開頭，含上線前帶 token 的舊格式）一起丟——門市平板多人共用，主動登出就不留上一個人填到一半的單。
+// 同一人沒登出、token 自動換新（adoptResult keepSame 那條）不會走到這裡，草稿才留得住。
+export const XFER_DRAFT_PREFIX = 'dzystore_xfer_form:';
+export function clearSession() {
+  try { sessionStorage.removeItem(KEYS.session); sessionStorage.removeItem('dzystore_dutyok'); sessionStorage.removeItem('dzystore_dutyone'); } catch (e) {}
+  try { Object.keys(sessionStorage).filter(k => k.startsWith(XFER_DRAFT_PREFIX)).forEach(k => sessionStorage.removeItem(k)); } catch (e) {}
+}
 export function rememberedCode() { try { return localStorage.getItem(KEYS.code) || ''; } catch (e) { return ''; } }
 
 export function initAuth(onLost, onMust) {
@@ -55,6 +61,21 @@ export function sessionFingerprint(s) {
   if (!s) return '';
   const o = { ...s }; delete o.token; delete o.expiresAt;
   return JSON.stringify(canon(o));
+}
+// 各模組的「重設鍵」（鍵一變，模組就把畫面狀態、快取、草稿全部清掉重來）。個人登入：人＋店＋權限指紋——重新握手／續期只換 token、
+// 同一人同一店同權限就不變，填到一半的東西不會不見；換人、換店、權限變了照樣重來。門市帳號（共用店帳號，沒有 person）：照舊用 token。
+// 只拿來比對「還是不是同一個登入」；打 API 用的 token 一律由 api.js 讀 sessionStorage 裡最新的，不要拿這個鍵去打 API。
+// 個人登入的鍵不含 token；門市帳號的鍵就是 token——不可存進草稿／快取內容，要當儲存鍵名時先用 keyDigest 轉短碼。（2026-11-20 從核定工時 duty 抽出，七個模組統一）
+export function moduleResetKey(se) {
+  if (!se) return '';
+  return se.person ? 'p|' + se.person.sub + '|' + se.code + '|' + sessionFingerprint(se) : (se.token || se.code);
+}
+// 重設鍵 → 短碼（兩組 32 位元雜湊，輸出 16 字元）：當 sessionStorage 鍵名用，不把 token 原文或一長串指紋寫進鍵名
+export function keyDigest(key) {
+  let a = 0x811c9dc5, b = 0x01000193 ^ 0x5bd1e995;
+  const s = String(key);
+  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); a = Math.imul(a ^ c, 0x01000193) >>> 0; b = Math.imul(b + c + i, 0x85ebca6b) >>> 0; b = (b ^ (b >>> 13)) >>> 0; }
+  return a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0');
 }
 // 採用新的登入結果。目前已有別的登入（別的人、或門市帳號）→ 先把舊 session 在伺服器端登出再換；
 // 嵌入模式每次握手都會收到新券：伺服器回的 sub 跟目前相同（而且是同一家店）→ 採用新 token、把舊 token 登出（新 token 帶最新權限；

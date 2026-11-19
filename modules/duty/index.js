@@ -10,7 +10,7 @@ import { renderAuditLog } from './auditlog.js';
 import { renderQr } from './qr.js';
 import { api } from '../../js/api.js';
 import { busy, setMsg } from '../../js/ui.js';
-import { getSession, sessionFingerprint } from '../../js/auth.js';
+import { getSession, moduleResetKey } from '../../js/auth.js';
 
 // 旗標：'1'＝已解鎖；'m'＝已用預設 0000 解鎖、但還沒改成自己的（只能看到改密碼表單）。登出時 clearSession 會一併清掉。
 const KEY = 'dzystore_dutyok';
@@ -36,7 +36,7 @@ export default {
   renderGate(ctx) { flag() === 'm' ? changeForm(ctx) : unlockForm(ctx); },
   render(ctx) {
     // 個人登入：人＋店＋權限指紋（2026-11-18：嵌入重新握手只換 token，同一人同一店同權限不重來；換人、換店、權限變了照樣重來）。門市帳號：照舊用 token
-    const se = ctx.session, key = se.person ? 'p|' + se.person.sub + '|' + se.code + '|' + sessionFingerprint(se) : (se.token || se.code);
+    const key = moduleResetKey(ctx.session);
     if (S.key !== key) reset(key);                      // 換了登入就重來，不留上一個人的資料
     S.rerender = ctx.rerender;
     if (ctx.tab !== 'approve') S.dqFull = false;        // 離開核定工時分頁：手機回來時一律是一頁核定，完整頁只算那一次

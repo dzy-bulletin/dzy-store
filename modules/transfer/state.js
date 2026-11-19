@@ -1,5 +1,6 @@
 // 門市調撥模組的共用狀態與呼叫層。分頁切換時畫面會整個重畫，所以資料與草稿放在這裡（模組層），不放 DOM。
 import { api } from '../../js/api.js';
+import { getSession, keyDigest } from '../../js/auth.js';
 
 export const S = {
   key: null, code: '', loaded: false, loading: null, me: null, nodes: [], reasons: [], mem: [], cats: ['食材', '包材', '雜貨'], today: '',
@@ -12,8 +13,24 @@ const FORM_KEY = 'dzystore_xfer_form';
 const nameKey = () => 'dzystore_xfer_name_' + (S.code || '');
 export const getName = () => { try { return localStorage.getItem(nameKey()) || ''; } catch (e) { return ''; } };
 export const setName = v => { try { localStorage.setItem(nameKey(), v); } catch (e) {} };
-export const saveForm = () => { try { sessionStorage.setItem(FORM_KEY + ':' + S.key, JSON.stringify(S.form)); } catch (e) {} };
-const loadForm = () => { try { return JSON.parse(sessionStorage.getItem(FORM_KEY + ':' + S.key) || 'null'); } catch (e) { return null; } };
+// 草稿存在 sessionStorage，鍵名＝FORM_KEY＋重設鍵的短碼（2026-11-20：個人登入的重設鍵是人＋店＋權限指紋，換 token 不變，草稿讀得回來；
+// 鍵名只放短碼，不放 token 原文也不放一長串指紋）
+const formKey = () => FORM_KEY + ':' + keyDigest(S.key);
+export const saveForm = () => { try { sessionStorage.setItem(formKey(), JSON.stringify(S.form)); } catch (e) {} };
+const loadForm = () => {
+  try {
+    const raw = sessionStorage.getItem(formKey());
+    if (raw) return JSON.parse(raw);
+    // 一次性搬移：上線前草稿的鍵名是 FORM_KEY＋token 原文。讀不到新鍵就找舊鍵（目前這個登入的 token），搬到新鍵並刪掉舊鍵
+    const t = (getSession() || {}).token;
+    if (!t) return null;
+    const legacyKey = FORM_KEY + ':' + t, old = sessionStorage.getItem(legacyKey);
+    if (!old) return null;
+    const v = JSON.parse(old);
+    sessionStorage.setItem(formKey(), old); sessionStorage.removeItem(legacyKey);
+    return v;
+  } catch (e) { return null; }
+};
 
 export function resetState(key, code) {
   Object.assign(S, { key, code: code || '', loaded: false, loading: null, me: null, nodes: [], reasons: [], mem: [], today: '', tab: '', form: null, editNo: '', docNo: '', doc: null, mode: '', from: '',

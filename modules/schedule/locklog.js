@@ -3,6 +3,7 @@
 import { esc } from '../../js/ui.js';
 import { call } from './state.js';
 import { periodStart, periodEnd, parseLabel } from './period.js';
+import { moduleResetKey } from '../../js/auth.js';
 
 export const ACTION_LABEL = { lock: '鎖定', unlock: '解除鎖定' };
 const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
@@ -29,7 +30,7 @@ export function filterLog(log, f) {
 
 let LL = null;   // { key, log, err, f }
 export function renderLockLog(ctx) {
-  const key = ctx.session.token || ctx.session.code;
+  const key = moduleResetKey(ctx.session);
   if (!LL || LL.key !== key) LL = { key, log: null, err: '', f: { period: '', action: '', who: '' } };
   const st = LL, el = ctx.el;
   el.innerHTML = '<div class="card"><p class="hint" style="margin:0" id="llWait">讀取中…</p></div>';

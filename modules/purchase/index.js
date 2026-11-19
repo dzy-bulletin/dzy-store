@@ -2,6 +2,7 @@
 // 兩個分頁：上傳／我的貨單。照片縮圖要帶入口通行證，所以用 fetch 帶標頭取 Blob，不把 token 放網址。
 import { api, apiUpload, apiBlob } from '../../js/api.js';
 import { esc, busy, setMsg, fmtTime } from '../../js/ui.js';
+import { moduleResetKey } from '../../js/auth.js';
 
 const MAX_PHOTOS = 6;
 const MAX_SIDE = 2400, JPEG_QUALITY = 0.85;   // 前端壓縮規則：長邊 2400px、JPEG 0.85（同原上傳頁）
@@ -199,5 +200,5 @@ async function renderMine(ctx) {
 export default {
   id: 'purchase',
   tabs: [{ id: 'upload', label: '上傳' }, { id: 'mine', label: '我的貨單' }],
-  render(ctx) { resetFor(ctx.session.token || ctx.session.code); return ctx.tab === 'mine' ? renderMine(ctx) : renderUpload(ctx); },
+  render(ctx) { resetFor(moduleResetKey(ctx.session)); return ctx.tab === 'mine' ? renderMine(ctx) : renderUpload(ctx); },
 };

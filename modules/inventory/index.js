@@ -2,6 +2,7 @@
 // 六個分頁：攤車庫存／現場庫存／商品價格／列印與匯出／歷史／從舊版匯入。功能與計算照正本，存檔改成伺服器（停手 3 秒自動存）。
 import { esc, confirmBox } from '../../js/ui.js';
 import { api } from '../../js/api.js';
+import { moduleResetKey } from '../../js/auth.js';
 import { S, resetState, load, flushNow, paintStatus, retryAll, hookPage, dirtyCount } from './state.js';
 import { renderZone } from './count.js';
 import { renderPrice } from './price.js';
@@ -36,7 +37,7 @@ export default {
   tabs: [{ id: 'cart', label: '攤車庫存' }, { id: 'stock', label: '現場庫存' }, { id: 'price', label: '商品價格' }, { id: 'print', label: '列印與匯出' }, { id: 'history', label: '歷史' }, { id: 'import', label: '從舊版匯入' }],
   render(ctx) {
     ensureCss(); hookPage();
-    const key = ctx.session.token || ctx.session.code;
+    const key = moduleResetKey(ctx.session);
     if (S.key !== key) resetState(key);                              // 換了登入就重來，不留上一家店的資料
     if (dirtyCount() > 0) flushNow();                                // 切頁立即存
     const draw = () => {
