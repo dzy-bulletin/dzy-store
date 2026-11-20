@@ -1221,21 +1221,22 @@ function dutyDo(d, action, b) {
     const openT01 = taipeiDay(0) <= '2026-11-28' && dt >= '2026-11-01';
     const lim = 4;
     if ((openT01 || !(dt < taipeiDay(-lim))) && !(emp.no_line && dt <= taipeiDay(0))) return fail('BAD_INPUT', `${lim} 天內請同仁自己在 LINE 申請；超過 ${lim} 天才能代開`);
-    // 加班兩段（2026-11-18 一次填兩段，Requests.gs segments 分支）：只有加班；兩段都過才寫兩張、同一個 group，任一段不過一張都不寫；代開上限 10 小時（單張與合計）
+    // 加班多段（2026-11-18 一次填兩段、2026-11-21 加班最多四段，Requests.gs segments 分支）：只有加班；各段都過才寫好幾張、同一個 group，任一段不過一張都不寫；代開上限 10 小時（單張與合計）
     if (Array.isArray(b.segments)) {
-      if (String(b.kind) !== 'ot') return fail('BAD_INPUT', '只有加班單可以分兩段');
-      if (b.segments.length !== 2) return fail('BAD_INPUT', '分段要剛好兩段');
+      if (String(b.kind) !== 'ot') return fail('BAD_INPUT', '只有加班單可以分段');
+      if (b.segments.length < 2) return fail('BAD_INPUT', '分段至少要兩段（只有一段請直接填開始、結束）');
+      if (b.segments.length > 4) return fail('BAD_INPUT', '加班一次最多填四段時間');
       if (b.start || b.end) return fail('BAD_INPUT', '分段時不要同時送 start／end');      // 前端兩段只送 segments：舊打卡端不認時才會因缺時間被擋，不會默默只開第一張
       const hm = x => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(x || '')); return m ? +m[1] * 60 + +m[2] : null; };
       const sg = b.segments.map(x => { const a = hm(x && x.start), e0 = hm(x && x.end); return a === null || e0 === null ? null : { start: x.start, end: x.end, a, e: e0 <= a ? e0 + 1440 : e0 }; });
       if (sg.some(x => !x)) return fail('BAD_INPUT', '請填時間');
       sg.sort((x, y) => x.a - y.a);
-      if (sg[1].a <= sg[0].e) return fail('BAD_INPUT', sg[1].a === sg[0].e ? '兩段時間剛好接在一起，請填成一段' : '兩段時間重疊了');
+      for (let i = 1; i < sg.length; i++) if (sg[i].a <= sg[i - 1].e) return fail('BAD_INPUT', (sg.length === 2 ? '兩段' : '相鄰兩段') + (sg[i].a === sg[i - 1].e ? '時間剛好接在一起，請填成一段' : '時間重疊了'));
       const total = Math.round(sg.reduce((t, x) => t + (x.e - x.a) / 60, 0) * 100) / 100;
-      if (total > 10) return fail('BAD_INPUT', '兩段合計 ' + total + ' 小時，店長代開最多 10 小時');
+      if (total > 10) return fail('BAD_INPUT', ['', '', '兩', '三', '四'][sg.length] + '段合計 ' + total + ' 小時，店長代開最多 10 小時');
       const grp = 'G' + (d.reqs.length + 1), at = new Date().toISOString(), made = sg.map((x, i) => ({ id: 'P' + (d.reqs.length + 1 + i), created_at: at, emp_id: emp.emp_id, name: emp.name, kind: 'ot', date: b.date, leave_type: '', start: x.start, end: x.end, hours: Math.round((x.e - x.a) / 60 * 100) / 100, miss_type: '', reason, attach_id: '', status: 'pending', upper_kind: 'director', proxy_by: b.__who ? b.__who.by : MGR, group: grp, seg: i + 1 }));
       made.forEach(r => d.reqs.push(r));
-      return ok({ id: made[0].id, ids: made.map(r => r.id), group: grp, requests: made.map(r => reqPublic(r)), summary: parseInt(b.date.slice(5, 7), 10) + '/' + parseInt(b.date.slice(8, 10), 10) + ' 加班兩段 ' + made.map(r => r.start + '–' + r.end).join('、') + '（共 ' + total + ' 小時）（主管代開）' });
+      return ok({ id: made[0].id, ids: made.map(r => r.id), group: grp, requests: made.map(r => reqPublic(r)), summary: parseInt(b.date.slice(5, 7), 10) + '/' + parseInt(b.date.slice(8, 10), 10) + ' 加班' + ['', '', '兩', '三', '四'][made.length] + '段 ' + made.map(r => r.start + '–' + r.end).join('、') + '（共 ' + total + ' 小時）（主管代開）' });
     }
     const r = { id: 'P' + (d.reqs.length + 1), created_at: new Date().toISOString(), emp_id: emp.emp_id, name: emp.name, kind: String(b.kind || 'miss'), date: b.date, leave_type: '', start: b.start || '', end: b.end || '', hours: null, miss_type: b.miss_type || '', reason, attach_id: '', status: 'pending', upper_kind: 'director', proxy_by: b.__who ? b.__who.by : MGR };
     d.reqs.push(r);

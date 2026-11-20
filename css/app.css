@@ -594,11 +594,11 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
 .du-proxy-row [hidden] { display: none; }
 .du-proxy-why { width: 100%; box-sizing: border-box; }
 .du-proxy [hidden] { display: none; }
-/* 代開加班第二段（2026-11-18 一次填兩段）：「＋ 加第二段」、第二段時間列、兩段合計 */
+/* 代開加班第二～第四段（2026-11-18 一次填兩段、2026-11-21 加班最多四段）：「＋ 加第N段」、第二～四段時間列（.du-proxy-segx，第二段另外還有 .du-proxy-seg2）、合計 */
 .du-proxy-add2 { justify-self: start; }
-.du-proxy-seg2 { background: #fff4d6; border-radius: 8px; padding: 6px 8px; }
-.du-proxy-seg2 .seg-k { flex-basis: 100%; font-size: 12px; font-weight: 700; color: #8a6100; }
-.du-proxy-seg2 input[type=time] { min-height: 40px; font-size: 16px; }
+.du-proxy-segx { background: #fff4d6; border-radius: 8px; padding: 6px 8px; }
+.du-proxy-segx .seg-k { flex-basis: 100%; font-size: 12px; font-weight: 700; color: #8a6100; }
+.du-proxy-segx input[type=time] { min-height: 40px; font-size: 16px; }
 .du-proxy-segsum { background: #fff4d6; color: #6b4c00; border-radius: 7px; padding: 6px 9px; font-weight: 700; font-size: 13.5px; }
 .du-proxy-segsum.bad { background: #fdecea; color: var(--bad); }
 

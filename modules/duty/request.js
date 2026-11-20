@@ -168,7 +168,7 @@ function buildGroup(its, card, title) {
   wrap.__refresh = () => {
     if (card.__batching || wrap.__gone) return;
     const left = els.filter(el => el.querySelector('.du-rq-ok')).length;
-    if (left >= 2) return;
+    if (left >= 2) { gbtn.textContent = left === 2 ? '兩筆一起核准' : left + ' 筆一起核准'; return; }      // 三、四段拆出去處理掉幾張後，按鈕的張數跟著剩下的
     if (left === 0) { wrap.classList.add('done'); return; }      // 兩張都處理完（一起核准）：框留著給主管看結果
     wrap.__gone = true;      // 只剩一張：拆組，剩下那張照現在的樣子
     els.forEach(el => {

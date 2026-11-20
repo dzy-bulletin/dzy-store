@@ -3,7 +3,7 @@
 import { confirmBox } from '../../js/ui.js';
 import { S, dutyManager, call, callAll, readPend, pendTake, pendDrop, brk, brkOf, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow, canVoidRow, supportTag, rememberOne, snapLabel, tipText, checkOnce, reqShown, refreshReqBadge, reqCanDecide } from './state.js';
 import { buildReqItem } from './request.js';
-import { approvedSegTag, proxyOtSegs, SEG_MAX_OT_ADMIN } from './req-group.js';
+import { approvedSegTag, proxyOtSegs, segWord, SEG_MAX_OT_ADMIN } from './req-group.js';
 import { corePeriods, OVER_BLOCK_MIN, otSuggestText, cardDiffs, cardLabel, cardReasonText } from './core-calc.js';
 import * as C from './calc.js';
 import { api } from '../../js/api.js';
@@ -1060,15 +1060,22 @@ function buildCard(emp, date) {
     [['', '出差地點'], ...TRIP_PLACES.map(v => [v, v]), [TRIP_OTHER, '其他（自己填）']].forEach(([v, t]) => plPick.append(h('option', null, t, { value: v })));
     const pl = h('input', 'du-proxy-pl', null, { type: 'text', maxlength: '40', placeholder: '其他地點（例如：廠商）', 'aria-label': '其他出差地點' });
     const la = h('span', 'du-proxy-la'), lb = h('span', 'du-proxy-lb');
-    // 加班第二段（2026-11-18 一次填兩段）：只有加班單有；兩段送出後打卡端拆成兩張、標同一次送出。請假、出差本來只填時數，不分段（Eason N3）
-    let two = false;
-    const a2 = h('input', 'du-proxy-a2', null, { type: 'time', 'aria-label': '第二段加班開始' }), b2 = h('input', 'du-proxy-b2', null, { type: 'time', 'aria-label': '第二段加班結束' });
-    const rm2 = h('button', 'du-proxy-rm2 btn sm ghost', '移除第二段', { type: 'button' });
-    const seg2 = h('div', 'du-proxy-row du-proxy-seg2'); seg2.append(h('span', 'seg-k', '第二段'), h('span', null, '加班開始'), a2, h('span', null, '加班結束'), b2, rm2);
+    // 加班第二～第四段（2026-11-18 一次填兩段；2026-11-21 加班最多四段）：只有加班單有；多段送出後打卡端拆成好幾張、標同一次送出。請假、出差本來只填時數，不分段（Eason N3）
+    //   extra＝已加的段數（0～3）；第 k 段（k＝2～4）的欄位 class：du-proxy-a{k}／du-proxy-b{k}、整列 du-proxy-seg{k}、移除鈕 du-proxy-rm{k}；「＋ 加第N段」鈕 class 一直是 du-proxy-add2
+    let extra = 0;
+    const SEG_NAMES = ['第一段', '第二段', '第三段', '第四段'];
+    const rowsX = [0, 1, 2].map(i => {
+      const k = i + 2;
+      const ai = h('input', 'du-proxy-a' + k, null, { type: 'time', 'aria-label': SEG_NAMES[i + 1] + '加班開始' }), bi = h('input', 'du-proxy-b' + k, null, { type: 'time', 'aria-label': SEG_NAMES[i + 1] + '加班結束' });
+      const rm = h('button', 'du-proxy-rm' + k + ' btn sm ghost', '移除' + SEG_NAMES[i + 1], { type: 'button' });
+      const row = h('div', 'du-proxy-row du-proxy-segx du-proxy-seg' + k); row.append(h('span', 'seg-k', SEG_NAMES[i + 1]), h('span', null, '加班開始'), ai, h('span', null, '加班結束'), bi, rm);
+      return { a: ai, b: bi, rm, row };
+    });
     const add2 = h('button', 'du-proxy-add2 btn sm ghost', '＋ 加第二段', { type: 'button' });
     const segSum = h('div', 'seg-sum du-proxy-segsum');
     const why = h('input', 'du-proxy-why', null, { type: 'text', maxlength: '100', placeholder: '原因（必填）' });
     const go = h('button', 'btn', '送出（幫同仁開單，等總監審核）', { type: 'button' });
+    const curSegs = () => [{ start: a.value, end: b.value }].concat(rowsX.slice(0, extra).map(r => ({ start: r.a.value, end: r.b.value })));
     const sync = () => {
       const k = kind.value, ot = k === 'ot', miss = k === 'miss', m = mt.value;
       mt.hidden = !miss; lt.hidden = k !== 'leave'; hr.hidden = k !== 'leave' && k !== 'trip'; plPick.hidden = k !== 'trip'; pl.hidden = k !== 'trip' || plPick.value !== TRIP_OTHER;
@@ -1076,22 +1083,26 @@ function buildCard(emp, date) {
       lb.textContent = ot ? '加班結束' : m === 'break' ? '休息開始（下班）' : '實際下班';
       la.hidden = a.hidden = !(ot || miss) || (miss && m === 'out');
       lb.hidden = b.hidden = !(ot || miss) || (miss && m === 'in');
-      add2.hidden = !ot || two; seg2.hidden = !ot || !two;
+      const two = extra > 0;
+      add2.hidden = !ot || extra >= 3; add2.textContent = '＋ 加' + SEG_NAMES[extra + 1];
+      rowsX.forEach((r, i) => { r.row.hidden = !ot || i >= extra; });
       // 合計列：兩段一直顯示；只填一段時，開始、結束都填了就顯示「加班 N 小時」（2026-11-20：原本只有兩段才有，改了時間沒有任何數字跟著變）
       const one1 = ot && !two && !!a.value && !!b.value;
       segSum.hidden = !ot || !(two || one1);
       if (ot && (two || one1)) {
-        const v = proxyOtSegs(two ? [{ start: a.value, end: b.value }, { start: a2.value, end: b2.value }] : [{ start: a.value, end: b.value }], SEG_MAX_OT_ADMIN);
+        const v = proxyOtSegs(curSegs(), SEG_MAX_OT_ADMIN);
         segSum.className = 'seg-sum du-proxy-segsum' + (v.ok || !v.total ? '' : ' bad');
         const over = !v.ok && v.total > SEG_MAX_OT_ADMIN && /店長代開最多/.test(v.msg);   // 合計超過上限：一句講完，不重複上限
-        const lead = two ? '兩段共 ' : '加班 ';
+        const lead = two ? segWord(extra + 1) + '共 ' : '加班 ';
         segSum.textContent = over ? lead + v.total + ' 小時，超過店長代開上限 ' + SEG_MAX_OT_ADMIN + ' 小時'
           : lead + v.total + ' 小時（店長代開上限 ' + SEG_MAX_OT_ADMIN + ' 小時）' + (v.ok || !v.total ? '' : '：' + v.msg);
       }
     };
-    add2.onclick = () => { two = true; sync(); a2.focus(); };
-    rm2.onclick = () => { two = false; a2.value = b2.value = ''; sync(); };
-    [a, b, a2, b2].forEach(x => { x.addEventListener('input', sync); x.addEventListener('change', sync); });      // 有些手機的時間欄只在選好收起時才發 change，兩個都接
+    add2.onclick = () => { if (extra >= 3) return; extra++; sync(); rowsX[extra - 1].a.focus(); };
+    // 移除第 k 段：後面的往前補（填的時間跟著往前），最後一列清空收起來
+    rowsX.forEach((r, i) => { r.rm.onclick = () => { for (let j = i; j < extra - 1; j++) { rowsX[j].a.value = rowsX[j + 1].a.value; rowsX[j].b.value = rowsX[j + 1].b.value; } rowsX[extra - 1].a.value = rowsX[extra - 1].b.value = ''; extra--; sync(); }; });
+    const timeInputs = [a, b]; rowsX.forEach(r => { timeInputs.push(r.a, r.b); });
+    timeInputs.forEach(x => { x.addEventListener('input', sync); x.addEventListener('change', sync); });      // 有些手機的時間欄只在選好收起時才發 change，兩個都接
     // 被擋的原因是正職上班日不滿 8 小時（2026-11-13）：先選好假單、補休、還差的時數（往上取到半小時）
     const gapM = /正職上班日要滿 8 小時[^。]*?還差 ([\d.]+) 小時/.exec(String(why0 || ''));
     if (gapM) {
@@ -1107,20 +1118,21 @@ function buildCard(emp, date) {
       if (k === 'leave') { if (!lt.value) { say('bad', '✕ 請選假別'); return; } p.leave_type = lt.value; }
       if (k === 'leave' || k === 'trip') { if (!(Number(hr.value) > 0)) { say('bad', '✕ 請填時數'); return; } p.hours = Number(hr.value); }
       if (k === 'trip') { const place = plPick.value === TRIP_OTHER ? pl.value.trim() : plPick.value; if (!plPick.value) { say('bad', '✕ 請選出差地點'); return; } if (!place) { say('bad', '✕ 請填出差地點'); return; } p.place = place; p.why = p.reason; }
-      const twoSeg = k === 'ot' && two;
+      const twoSeg = k === 'ot' && extra > 0;      // 兩段以上（最多四段）
       if (!twoSeg) {      // 只填一段：送出的內容、檢查跟以前完全一樣
         if (!a.hidden) p.start = a.value;
         if (!b.hidden) p.end = b.value;
       }
       if ((!a.hidden && !a.value) || (!b.hidden && !b.value)) { say('bad', '✕ 請填時間'); return; }
       let segTxt = '';
-      if (twoSeg) {      // 兩段：先在這裡擋掉明顯錯的（重疊、相接、合計超過代開上限）；打卡端還會再驗一次，任一段不過兩張都不開
-        if (!a2.value || !b2.value) { say('bad', '✕ 請填第二段的時間'); return; }
-        const v = proxyOtSegs([{ start: a.value, end: b.value }, { start: a2.value, end: b2.value }], SEG_MAX_OT_ADMIN);
+      if (twoSeg) {      // 多段：先在這裡擋掉明顯錯的（重疊、相接、合計超過代開上限）；打卡端還會再驗一次，任一段不過張數都不開
+        const miss = rowsX.slice(0, extra).findIndex(r => !r.a.value || !r.b.value);
+        if (miss >= 0) { say('bad', '✕ 請填' + SEG_NAMES[miss + 1] + '的時間'); return; }
+        const v = proxyOtSegs(curSegs(), SEG_MAX_OT_ADMIN);
         if (!v.ok) { say('bad', '✕ ' + v.msg); return; }
         const sorted = v.norm.slice().sort((x, y) => x.a - y.a);
         p.segments = sorted.map(x => ({ start: x.start, end: x.end }));      // 不再另送 start／end：舊的打卡端不認 segments 時會因缺時間而擋，不會默默只開一張
-        segTxt = C.shortDate(d) + ' 加班兩段 ' + sorted.map(x => x.start + '–' + x.end).join('、') + '（共 ' + v.total + ' 小時）（主管代開）';
+        segTxt = C.shortDate(d) + ' 加班' + segWord(sorted.length) + ' ' + sorted.map(x => x.start + '–' + x.end).join('、') + '（共 ' + v.total + ' 小時）（主管代開）';
       }
       if (!p.reason) { say('bad', '✕ 幫同仁開單要寫原因'); return; }
       go.disabled = true; go.textContent = '送出中…';
@@ -1133,7 +1145,7 @@ function buildCard(emp, date) {
     proxyBox.append(h('div', 'du-proxy-lead', (noLine ? '這位同仁沒綁 LINE，自己補不了單。' : '這天已超過 ' + PROXY_AFTER_DAYS + ' 天，同仁自己補不了單。') + '可以幫同仁開單，幫同仁開的單要由總監（品牌總監／廚藝總監；總部是人資主管）核准。'),
       h('div', 'du-proxy-row', null), why, go);
     proxyBox.children[1].append(kind, mt, lt, hr, plPick, pl, la, a, lb, b);
-    proxyBox.insertBefore(seg2, why); proxyBox.insertBefore(segSum, why); proxyBox.insertBefore(add2, seg2);
+    rowsX.forEach(r => { proxyBox.insertBefore(r.row, why); }); proxyBox.insertBefore(add2, why); proxyBox.insertBefore(segSum, why);
     sync();
     result.after(proxyBox);
   };

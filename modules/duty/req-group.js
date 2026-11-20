@@ -1,10 +1,10 @@
-// 「同一次送出」（2026-11-18 一次填兩段）：同仁一天兩段加班／請假／出差一次送出，打卡端拆成兩張普通的單、標上同一個組別。
+// 「同一次送出」（2026-11-18 一次填兩段；2026-11-21 加班最多四段）：同仁一天兩段（加班最多四段）加班／請假／出差一次送出，打卡端拆成好幾張普通的單、標上同一個組別。
 // 這支只做「畫面分組」的純函式（沒有 DOM、不碰網路；node 測試直接 require）：核定、預檢、薪資都不看這個欄位，一行都不動。
 // 欄位：打卡端 reqPublic_ 回 group（同一次送出的標記）與 seg（第幾段）；舊資料沒有這兩欄＝照舊單張顯示。
 // 也收 grp（試算表欄位名）——兩種寫法都認，免得後端對外欄位名改了畫面就失靈。
 
-export const SEG_MAX_OT_ADMIN = 10;   // 店長代開加班兩段合計上限小時（Eason 2026-11-18 N1 再確認：代開也是 10 小時）；要改只改這一個數字（mock.js 示範後端、打卡端各有自己的一份）
-export const SEG_MAX_PROXY_SEGS = 2;  // 一次最多兩段（第三段照現在另送一張）
+export const SEG_MAX_OT_ADMIN = 10;   // 店長代開加班各段合計上限小時（Eason 2026-11-18 N1 再確認：代開也是 10 小時；2026-11-21 四段也是合計 10）；要改只改這一個數字（mock.js 示範後端、打卡端各有自己的一份）
+export const SEG_MAX_PROXY_SEGS = 4;  // 店長代開加班一次最多四段（2026-11-21，原本兩段）；請假、出差代開本來就不分段
 
 // 這張單的「同一次送出」標記；沒有＝空字串
 export function groupOf(it) {
@@ -58,6 +58,7 @@ export function segIndex(group, it) {
 }
 // 已核准的申請列：這張是「同一次送出」的第 N／M 段？同天同人同組有 2 張以上才標；回 { n, m } 或 null
 //   reqs：那位同仁那天已核准的申請（mgr_req_day by_emp）。只看這一批裡的張數，作廢掉的不在裡面＝剩一張就不標
+//   n 是在這一批裡依段排好的第幾張（2026-11-21 加班到四段後：四段作廢第 1 段，剩的標「第 1／3」「第 2／3」「第 3／3」，不再寫成「第 4／3」）
 export function approvedSegTag(reqs, it) {
   const g = groupOf(it);
   if (!g) return null;
@@ -65,7 +66,7 @@ export function approvedSegTag(reqs, it) {
   if (mem.length < 2) return null;
   const at = mem.indexOf(it);
   if (at < 0) return null;
-  return { n: segOf(it) || at + 1, m: mem.length };
+  return { n: at + 1, m: mem.length };
 }
 // 組標頭的合計小時（每張都有數字才算；有一張沒有就回 null）
 export function groupHours(group) {
@@ -76,8 +77,9 @@ export function groupHours(group) {
 const num = ['零', '一', '兩', '三', '四', '五', '六', '七', '八', '九'];
 export const segWord = n => (n >= 0 && n <= 9 ? (n === 2 ? '兩' : num[n]) : String(n)) + '段';
 
-// ---- 店長代開加班兩段：送出前的檢查（只管畫面送出的內容；真正的擋由打卡端做，這裡只是先擋掉明顯錯的，省一次來回）----
-// segs：[{start:'11:00', end:'14:00'}, …]；回 { ok, msg, total, norm:[{start,end,hours}] }。跨夜（結束 ≤ 開始）算到隔天
+// ---- 店長代開加班（最多四段）：送出前的檢查（只管畫面送出的內容；真正的擋由打卡端做，這裡只是先擋掉明顯錯的，省一次來回）----
+// segs：[{start:'11:00', end:'14:00'}, …]（照畫面順序，1～4 段）；回 { ok, msg, total, norm:[{start,end,a,b,hours}] }。跨夜（結束 ≤ 開始）算到隔天
+// 重疊、接在一起：各段照開始時間排好後，相鄰兩段比（任何兩段衝突，排好後一定有相鄰的兩段先衝突）；兩段時字句跟以前一樣，三、四段時講「第 X 段和第 Y 段」（畫面上的順序）
 export function proxyOtSegs(segs, maxH) {
   const cap = Number(maxH) > 0 ? Number(maxH) : SEG_MAX_OT_ADMIN;
   const norm = [];
@@ -89,12 +91,16 @@ export function proxyOtSegs(segs, maxH) {
     norm.push({ start: s.start, end: s.end, a: a + night, b: a + night + len, hours: Math.round(len / 60 * 100) / 100 });
   }
   const total = Math.round(norm.reduce((t, x) => t + x.hours, 0) * 100) / 100;
-  if (norm.length > SEG_MAX_PROXY_SEGS) return { ok: false, msg: '最多兩段', total, norm };
-  if (norm.length === 2) {
-    const [x, y] = norm[0].a <= norm[1].a ? [norm[0], norm[1]] : [norm[1], norm[0]];
-    if (y.a < x.b) return { ok: false, msg: '兩段時間重疊了，請改成不重疊的時段', total, norm };
-    if (y.a === x.b) return { ok: false, msg: '兩段時間剛好接在一起，請填成一段', total, norm };
+  if (norm.length > SEG_MAX_PROXY_SEGS) return { ok: false, msg: '加班最多' + segWord(SEG_MAX_PROXY_SEGS), total, norm };
+  if (norm.length >= 2) {
+    const order = norm.map((x, i) => ({ x, i })).sort((p, q) => p.x.a - q.x.a);
+    for (let k = 1; k < order.length; k++) {
+      const p = order[k - 1], q = order[k];
+      const who = norm.length === 2 ? '兩段' : '第 ' + (Math.min(p.i, q.i) + 1) + ' 段和第 ' + (Math.max(p.i, q.i) + 1) + ' 段';
+      if (q.x.a < p.x.b) return { ok: false, msg: who + '時間重疊了，請改成不重疊的時段', total, norm };
+      if (q.x.a === p.x.b) return { ok: false, msg: who + '時間剛好接在一起，請填成一段', total, norm };
+    }
   }
-  if (total > cap) return { ok: false, msg: (norm.length > 1 ? '兩段合計 ' : '加班 ') + total + ' 小時，店長代開最多 ' + cap + ' 小時', total, norm };
+  if (total > cap) return { ok: false, msg: (norm.length > 1 ? segWord(norm.length) + '合計 ' : '加班 ') + total + ' 小時，店長代開最多 ' + cap + ' 小時', total, norm };
   return { ok: true, msg: '', total, norm };
 }
