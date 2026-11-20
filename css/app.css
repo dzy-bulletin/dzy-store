@@ -726,6 +726,8 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
 .du-verdict.ok .du-verdict-t{color:var(--ok)}
 .du-verdict.gray .du-verdict-t{color:var(--bad)}
 .du-verdict-n{font-size:13px;color:var(--muted)}
+.du-verdict.stale>:not(.du-verdict-stale){opacity:.45}
+.du-verdict-stale{font-weight:700;color:#7a5200!important}
 .du-needk{font-size:13px;font-weight:700}
 .du-needs{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
 .du-needs li{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;font-size:14px}

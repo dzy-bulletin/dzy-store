@@ -4,6 +4,7 @@
 //   2. 時段取「打卡」和「班表＋已核准加班單」的交集；班表以外的打卡（早到、晚走、班表空檔來上班）照打卡算，
 //      當天加起來超過 8 小時的部分才要加班單、沒單不算（2026-11-16 Eason：「只要當天出勤滿八小時以上才需要加班單，不是依照班表的時間」，取代 11/14 的「比班表多 30 分鐘就要加班單」）。
 //   3. 遲到：開頭留班表（打卡端照標遲到 N 分、薪資照扣）；早退、中途離開照打卡算（正職不足 8 小時要假單，由打卡端檢查）。
+//      2026-11-20 Eason：二段班中途離開又回來比照遲到（核定蓋過空檔、空檔記遲到），開關 GAP_LATE_FROM（上線日，跟打卡端同一天），見 corePeriods 1b、1c。
 //   4. 忘打卡單補的時間超出班表的部分不算；加班單要有打卡涵蓋（打卡端檢查）。
 //   5. 打卡跟班表（或加班單）邊界差 15 分鐘內算對得上；其他只往少的方向取整到 15 分（上班往後、下班往前）。
 // 沒班表也沒加班單（例：排休卻來上班）：照打卡算，讓打卡端回「要有加班單」。沒打卡又有班表：照班表，讓打卡端回「要有忘打卡單」。
@@ -18,6 +19,19 @@ export const DAY_FREE_MIN = 480;
  *  整段沒被核定就比最近的開始／結束；只有單邊的卡只比有的那邊。CARD_REASON_FROM 起的日子才要（打卡端 REQ_CARD_REASON_FROM）。 */
 export const CARD_DIFF_MIN = 30;
 export const CARD_REASON_FROM = '2026-11-01';      // 2026-11-18 Eason「卡差 30 分起算日維持 11/1」（原本 11/17；同打卡端 REQ_CARD_REASON_FROM_DEFAULT_）
+/** 二段班中途離開又回來比照遲到（2026-11-20 Eason 第 11 題 B、第 1～4 題，見 corePeriods 1b、1c）。
+ *  GAP_LATE_FROM＝上線日（YYYY-MM-DD）；null＝關（跟改之前完全一樣）。只有這天（plan.date，伺服器 attachPlan 只在個人登入時帶；門市登入不帶＝照舊，因為打卡端只收個人帳號的班表）在上線日以後才套；
+ *  不知道日期＝不套（照舊）。**要跟打卡端 Requests.gs 的 REQ_GAP_LATE_FROM_DEFAULT_ 設成同一天**：上線日之前的日子補核定，兩邊都照舊。
+ *  GAP_LATE_SCOPE：'multi'＝只有當天班表兩段以上（Eason 第 1 題 A）；'all'＝單段班也算（沒採用，留著對照打卡端 REQ_GAP_LATE_SCOPE）。 */
+export const GAP_LATE_FROM = '2026-11-22';        // 2026-11-20 Eason 定案：九店打卡部署完成的隔天起算（打卡端 REQ_GAP_LATE_FROM_DEFAULT_ 同一天）
+export const GAP_LATE_SCOPE = 'multi';
+/** 這一天套哪個範圍：o.gapLate（測試直接指定 'off'｜'multi'｜'all'，不看日期）優先；否則看上線日（o.gapFrom 可覆寫）與這天日期（o.date 或 o.plan.date） */
+function gapScopeOf(o) {
+  if (o.gapLate !== undefined) return o.gapLate;
+  const from = o.gapFrom !== undefined ? o.gapFrom : GAP_LATE_FROM;
+  const d = String(o.date || (o.plan && o.plan.date) || '');
+  return from && /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= from ? GAP_LATE_SCOPE : 'off';
+}
 // 2026-11-18 Eason 拿掉「遲到超過 30 分要選原因」（同打卡端 reqCardDiffs_）：上班卡晚於對到的核定開始＝記成遲到、下班卡早於對到的核定結束＝記成早退，不算卡差；
 // lateGiven＝主管填的遲到分鐘（沒填 null）：只有他認的分鐘算已涵蓋。仍要原因：早到很多、晚走很多、整段沒被核定。
 export function cardDiffs(segs, periods, lateGiven) {
@@ -182,6 +196,16 @@ export function corePeriods(o) {
   // 1b. 班別設定的休息（break_min）：同一段班中間出去休息有打卡 → 從出去那張卡起扣滿休息分鐘；休超過的照實扣到回來那張卡（2026-11-17 Eason「照班別休息分鐘扣，超過的照實扣」）。
   //     原本兩張卡各往內取整到 15 分，休 23 分會被扣成 45 分（陳盈如 11/2 E班 09:00–17:30 休 30：13:25 出、13:48 回 → 7.75 小時，主管手動核 13:25–13:55＝8 小時）。
   //     做法：出去、回來那兩張卡先接成一段（不取整），最後再把休息挖掉。每段班只認第一個空檔；空檔要整個在那段班裡。
+  //     2026-11-20 Eason 第 3 題 B：二段班（當天班表兩段以上）、中途離開比照遲到開著時（GAP_LATE_SCOPE，見 1c）→ 休息只扣滿班別休息分鐘，
+  //     超過的部分核定蓋過、記遲到（例：排休 30、17:00 出 17:50 回 → 休息 17:00–17:30，17:30–17:50 的 20 分記遲到）。單段班、沒開時照 11/17（超過的照實扣、不記遲到）。
+  //     空檔碰到不打卡休息帶、已核准有時段的假單／出差單、「中間休息」忘打卡單 → 照 11/17。打卡端 Requests.gs reqGapLateMs_ 同一套。
+  const gapScope = gapScopeOf(o);
+  const gapOn = (gapScope === 'multi' && S.length >= 2) || (gapScope === 'all' && S.length >= 1);
+  const MB = reqs.filter((r) => r && r.kind === 'miss' && r.miss_type === 'break' && r.pending !== true).map((r) => span(toMin(r.end), toMin(r.start))).filter(Boolean);      // end＝出去、start＝回來
+  const gapSkip = BRK.concat(BRK.map(([a, b]) => [a + 1440, b + 1440]), LV, MB, MB.map(([a, b]) => [a + 1440, b + 1440]));      // 休息帶用整條（半天班 BRKcut 是空的，打卡端照樣看休息帶）
+  const restOver = gapOn && S.length >= 2;      // 題 3 B 只限二段班（就算 GAP_LATE_SCOPE 開成 all，單段班的班別休息也照 11/17）
+  let restLate = 0;
+  const restLateSpans = [];
   const RESTS = [];
   for (const p of plan) {
     const bm = Math.round(Number(p.break_min) || 0), sp = span(toMin(p.start), toMin(p.end));
@@ -189,12 +213,35 @@ export function corePeriods(o) {
     for (let i = 1; i < W.length; i++) {
       const a = W[i - 1][1], b = W[i][0];
       if (!(a > sp[0] && b < sp[1] && b > a)) continue;
-      RESTS.push(b - a <= bm ? [a, a + bm] : [a, b]);
+      const over = restOver && b - a > bm && !gapSkip.some((x) => x[0] < b && x[1] > a);
+      RESTS.push(b - a <= bm || over ? [a, a + bm] : [a, b]);
+      if (over) { restLate += b - a - bm; restLateSpans.push([a + bm, b]); }
       W = merge(W.slice(0, i - 1).concat([[W[i - 1][0], W[i][1]]], W.slice(i + 1)));
       break;
     }
   }
   if (RESTS.length) notes.push('休息 ' + RESTS.map(([a, b]) => toHm(a) + '–' + toHm(b)).join('、') + '（班別休息從出去那張卡起算' + (RESTS.some(([a, b]) => b - a > 0 && plan.some((p) => Number(p.break_min) > 0 && b - a > Number(p.break_min))) ? '，休超過的照實扣' : '') + '）');
+  // 1c. 二段班中途離開又回來，比照遲到記（2026-11-20 Eason 第 11 題 B；例 班表 16:00–20:00，16:03 走、17:24 回 → 遲到 81 分）：
+  //     同一段班裡兩段打卡中間的空檔，核定直接蓋過（跟開頭晚到「核定留班表」一樣），空檔分鐘照實記成遲到（打卡端 computeApprovalStatus 記「遲到N分」、薪資照扣；
+  //     打卡端 reqGapLateMs_ 不把這段當「核定比打卡多」）。沒有寬限、不設最短分鐘，同開頭遲到。範圍 GAP_LATE_SCOPE（o.gapLate 可覆寫）：
+  //     'off'＝改之前（中途離開照打卡算）；'multi'＝只有當天班表兩段以上（二段班）；'all'＝單段班也算。打卡端 REQ_GAP_LATE_FROM／REQ_GAP_LATE_SCOPE 要一起開、設成一樣。
+  //     不算（照改之前）：空檔碰到不打卡休息帶、碰到已核准有時段的假單／出差單（走請假那幾條）、是「中間休息」忘打卡單補出來的休息、
+  //     班別休息分鐘那段班的第一個空檔（上面 1b 已當休息）、空檔不在同一段班表裡（例：前一段班結尾早走到下一段班之間）。
+  if (restLate > 0) notes.push('休息超過班別休息 ' + restLateSpans.map(([a, b]) => toHm(a) + '–' + toHm(b)).join('、') + '，' + restLate + ' 分記遲到（二段班比照遲到，薪資照扣）');
+  let gapLate = 0;
+  if (gapOn) {
+    const skip = gapSkip;
+    const fill = [];
+    for (let i = 1; i < W.length; i++) {
+      const a = W[i - 1][1], b = W[i][0];
+      if (!(b > a) || !S.some((s) => a > s[0] && b < s[1]) || skip.some((x) => x[0] < b && x[1] > a)) continue;
+      fill.push([a, b]); gapLate += b - a;
+    }
+    if (fill.length) {
+      W = merge(W.concat(fill));
+      notes.push('中途離開 ' + fill.map(([a, b]) => toHm(a) + '–' + toHm(b)).join('、') + '，' + gapLate + ' 分記遲到（中途離開比照遲到，薪資照扣）');
+    }
+  }
   const bounds = [].concat(...S, ...OT, ...BRK, ...LV);      // 已核准、有時段假單的起訖也當對齊點（2026-11-18 Eason 選 A：假 16–18、15:50 下班 → 算到 16:00；假 17–19、19:10 回 → 從 19:00 起）
   W = merge(W.map(([a, b]) => [snapIn(a, bounds), snapOut(b, bounds)]));
 
@@ -341,7 +388,7 @@ export function corePeriods(o) {
   // 假單沒填時段、上班＋假單比班表多（2026-11-18 第 5 題）：只提醒、不擋。班表＝扣不打卡休息帶與班別休息；加班單那段不算
   let leaveOver = 0;
   if (untimedLeave && S.length) leaveOver = Math.max(0, Math.round(total(minus(core, OT)) + leaveMin - total(minus(minus(S, BRKcut), RESTS))));
-  return { periods, hours: Math.round(total(core) / 60 * 100) / 100, notes, late, early, over, overMin, leaveOver };
+  return { periods, hours: Math.round(total(core) / 60 * 100) / 100, notes, late: late + gapLate + restLate, early, over, overMin, leaveOver, gapLate, restLate };
 }
 
 /** 超出的打卡時段 → 要加班單的時段：接在班表／加班單（bounds）後面的開頭、前面的結尾各扣 15 分寬限，再往內取整到 15 分，不到 15 分不列 */

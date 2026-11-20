@@ -12,7 +12,7 @@ import { planFlags, REASONS, pendSplit, planOtText } from './quick-calc.js';
 import { leaveIncrements, leaveShort } from './leave-batch.js';
 import { pendingFor } from './pend-gate.js';
 import { ssoSwitch, setSession, toSession } from '../../js/auth.js';
-import { renderQuick, backBar, e2eNoCore } from './quick.js';
+import { renderQuick, backBar, e2eNoCore, isMock } from './quick.js';
 import { canBg, watchJob, refreshJobs, rejectBar } from './bg.js';
 import { mirrorLine, mirrorFlags } from './mirror-line.js';      // 「資料更新於」那一行＋只讀 mini 的過期黃條（第 1 階段）
 
@@ -347,12 +347,19 @@ export function returnsPanel(retEl, onPick, onCancel, live) {
 
 // ---------- 送出前先檢查（2026-11-14 Eason「五個全做」第 1 項，docs/duty-easy/）----------
 // 打卡系統 mgr_approve_check：用「送出核定」同一套檢查跑到寫入前就停，回每個人會不會被擋、被擋的原因。
-// 一天打開時整批算一次（每家店一次），之後主管改了某人的時段或假別，停手 1 秒只重算那一位（buildCard 的 queueCheck）。
+// 一天打開時整批算一次（每家店一次），之後主管改了某人的時段或假別，停手 0.35 秒只重算那一位（buildCard 的 queueCheck）。
 // 讀不到（舊版打卡、連不上）就不標：畫面照舊，按送出才知道。
 // 出差地點下拉（與打卡 req-line.js TRIP_PLACES 同一份，2026-11-17）
 const TRIP_PLACES = ['總部辦公室', '新竹光復', '新竹金山', '台北六張犁', '台北瑞光', '台中美村'];
 const TRIP_OTHER = '其他';
 const CHECK_MAX = 40;
+// 改時段後這一張卡的單人檢查最多等多久（2026-11-20）：超過就當「讀不到」、按鈕恢復、顯示逾時提示；晚回來的結果只要對得上最後一次輸入就補上顯示（取代逾時提示），改過輸入就丟掉。
+// 只管這條路徑，不動全域 api()；整天那次檢查另有 30 秒上限（quick.js CHECK_WAIT_MS）。示範模式 e2e 可用 window.__duEditCheckMs 縮短
+const EDIT_CHECK_MS = 10000;
+const editCheckMs = () => (isMock() && Number(window.__duEditCheckMs)) || EDIT_CHECK_MS;
+const TIMEOUT_HINT = '檢查逾時（打卡系統回得比較慢）。可以直接按「送出核定」，送出時系統會再檢查一次。';
+const STALE_TITLE = '時段剛改過，檢查完才能送出';
+const CHECK_DEBOUNCE_MS = 350;      // 改了時段後停手多久才問打卡系統（2026-11-20 由 1000 縮短；畫面上的「檢查中…」是當下就標）
 function runChecks(box, date, current) {
   const cards = [].filter.call(box.querySelectorAll('.du-card'), c => c.__checkItem);
   cards.forEach(c => { if (c.__propose) c.__propose(); });      // 先照「打卡＋單」算好核定時段（2026-11-14）
@@ -503,16 +510,41 @@ function buildCard(emp, date) {
   // __pendErr（第三輪審查）：待審清單還沒讀到／讀不到的原因。有就不能核定（fail-closed）；__applyPending 讀到清單才清掉，__pendRetry＝提示裡的重讀
   card.__pendErr = '待審的申請讀取中，讀到後才能核定'; card.__pendRetry = null;
   const recalcDone = () => { if (card.__recalc !== 2) return false; card.__recalc = 0; return true; };
-  // 改了時段、假別、遲到、原因：停手 1 秒只重算這一位（整天那次跑完 __checkOn 才開始；卡片初始化時呼叫會直接略過）
+  // 改了時段、假別、遲到、原因：畫面當下就把舊結果標成「檢查中…」（不讓舊的「核定通過」看起來像新時段的結果、核定鈕先停用），
+  // 停手 0.35 秒才只重算這一位（不是每個按鍵都問打卡系統）；還在路上的舊回應一律作廢（2026-11-20，改前停手 1 秒、舊結果照亮著）。
+  // 整天那次跑完 __checkOn 才開始；卡片初始化時呼叫會直接略過
   function queueCheck(now) {
     if (!card.__checkOn || !card.__checkItem) { if (recalcDone()) card.__pendRelease(); return; }
     clearTimeout(card.__checkTimer);
+    card.__checkSeq = (card.__checkSeq || 0) + 1;      // 改了就作廢還在路上的檢查：它回來也不能蓋掉「檢查中…」或新一輪的結果
+    if (!now && card.__markStale) card.__markStale();
     card.__checkTimer = setTimeout(() => {
       const it = card.__checkItem(); if (!it) { if (recalcDone()) card.__pendRelease(); return; }
       const seq = (card.__checkSeq = (card.__checkSeq || 0) + 1);
       card.__checking(true);
-      checkOnce(date, emp.store || '', [it]).then(rs => { if (seq !== card.__checkSeq || !card.isConnected) return; recalcDone(); card.__setCheck(rs ? rs.find(r => r.emp_id === String(emp.emp_id)) || null : null); });
-    }, now ? 50 : 1000);
+      let tm = null, timedOut = false;
+      const chk = checkOnce(date, emp.store || '', [it]);
+      const timeout = new Promise(res => { tm = setTimeout(() => res('timeout'), editCheckMs()); });
+      const mineOf = rs => (rs ? rs.find(r => r.emp_id === String(emp.emp_id)) || null : null);
+      Promise.race([chk, timeout]).then(rs => {
+        clearTimeout(tm);
+        if (seq !== card.__checkSeq || !card.isConnected) return;
+        if (rs === 'timeout') {      // 逾時：視同讀不到（按鈕恢復可按），多一句說明。seq 不動：下面 chk.then 晚到時，輸入沒再改過（seq 還對得上）才顯示結果
+          timedOut = true; recalcDone(); card.__setCheck(null);
+          preBox.className = 'du-pre'; preBox.hidden = false; preBox.textContent = TIMEOUT_HINT;
+          return;
+        }
+        recalcDone(); card.__setCheck(mineOf(rs));
+      });
+      // 逾時後才回來的結果（2026-11-20 做法 b）：只有「輸入沒再改過」（改時段／假別／遲到／原因都會讓 __checkSeq 前進；送出也會）、
+      // 卡片還沒核定、這張卡此刻沒有送出流程在跑、而且結果是正常的檢查結果，才顯示並取代逾時提示；其餘（改過、已送出、失敗／讀不到）一律照舊，維持逾時提示
+      chk.then(rs => {
+        if (!timedOut || seq !== card.__checkSeq || !card.isConnected || card.__subBusy || !card.__pending || emp.approved) return;
+        const mine = mineOf(rs);
+        if (!mine || typeof mine.ok !== 'boolean' || mine.error === 'unknown_action') return;
+        card.__setCheck(mine);
+      });
+    }, now ? 50 : CHECK_DEBOUNCE_MS);
   }
   card.__segments = emp.segments || [];
   const pv = C.planPrefill(emp, emp.plan, br);                        // 那天的班表優先，沒排班才用個人預設時間（2026-10-29 Eason 選 A）
@@ -785,6 +817,22 @@ function buildCard(emp, date) {
     return it;
   };
   card.__checking = on => { if (on && card.__pending) { mini.className = 'du-mini pending'; mini.textContent = '檢查中…'; } };
+  // 改了時段等，檢查結果還沒回來：舊結果標成過期（淡色、核定鈕與送出鈕停用、右上角「檢查中…」）。結果回來由 __setCheck 整張重畫（它會把送出鈕、提示全部重設）
+  card.__markStale = () => {
+    if (readOnly || !card.__pending || absent || emp.approved || pendBlocked()) return;      // 這幾種本來就不檢查，或畫面已經在說「待審單」
+    const it = card.__checkItem();      // null＝時段還沒填完（只填一邊、整張清空）：不會問打卡系統，送出鈕照舊可按（按了會說明哪裡沒填完），只把舊結果標成過期
+    mini.className = 'du-mini pending'; mini.textContent = it ? '檢查中…' : '時段填完才檢查';
+    preBox.hidden = true; preBox.className = 'du-pre'; preBox.textContent = '';      // 上一次的逾時提示
+    if (!it) { verdict.hidden = true; verdict.textContent = ''; verdict.className = 'du-verdict'; }      // 時段還沒填完：不留舊的通過／未通過框，免得看起來像這個時段的結果
+    else if (!verdict.hidden) {
+      verdict.classList.add('stale');
+      verdict.querySelectorAll('.du-verdict-go').forEach(b => { b.disabled = true; });
+      let note = verdict.querySelector('.du-verdict-stale');
+      if (!note) { note = h('div', 'du-verdict-n du-verdict-stale', '時段剛改過，下面是改之前的結果，正在重新檢查…', { role: 'status' }); verdict.insertBefore(note, verdict.firstChild); }
+    }
+    if (it) { submit.disabled = true; submit.title = STALE_TITLE; }
+    else if (submit.title === STALE_TITLE) { submit.disabled = false; submit.title = ''; }
+  };
   // ---- 打卡＋單＝核定時數（2026-11-14 Eason 定案，docs/punch-plus-req/）：系統先照原則算好時段（core-calc.js），檢查會過＝亮燈「核定通過」，
   //      不會過＝灰底「未符合規定」＋要補齊的單（每項有處理鈕）、核定鈕灰掉；檢查讀不到＝照舊（可以送出，由打卡系統送出時判）
   const verdict = h('div', 'du-verdict'); verdict.hidden = true;
@@ -858,7 +906,7 @@ function buildCard(emp, date) {
     preBox.hidden = true; preBox.className = 'du-pre'; preBox.textContent = '';
     submit.classList.remove('du-submit-warn'); submit.disabled = false;
     verdict.hidden = true; verdict.textContent = ''; verdict.className = 'du-verdict';
-    if (submit.title === PEND_TITLE) submit.title = '';
+    if (submit.title === PEND_TITLE || submit.title === STALE_TITLE) submit.title = '';
     if (!card.__pending) { if (pendBlocked()) pendVerdict(); return; }
     if (submit.textContent === '仍要送出' || /^確認沒加班/.test(submit.textContent)) submit.textContent = '送出核定';
     if (pendBlocked()) { pendVerdict(); return; }      // 還有待審單：不看檢查結果（不亮綠燈、不給核定鈕）
@@ -1028,18 +1076,22 @@ function buildCard(emp, date) {
       lb.textContent = ot ? '加班結束' : m === 'break' ? '休息開始（下班）' : '實際下班';
       la.hidden = a.hidden = !(ot || miss) || (miss && m === 'out');
       lb.hidden = b.hidden = !(ot || miss) || (miss && m === 'in');
-      add2.hidden = !ot || two; seg2.hidden = segSum.hidden = !ot || !two;
-      if (ot && two) {
-        const v = proxyOtSegs([{ start: a.value, end: b.value }, { start: a2.value, end: b2.value }], SEG_MAX_OT_ADMIN);
+      add2.hidden = !ot || two; seg2.hidden = !ot || !two;
+      // 合計列：兩段一直顯示；只填一段時，開始、結束都填了就顯示「加班 N 小時」（2026-11-20：原本只有兩段才有，改了時間沒有任何數字跟著變）
+      const one1 = ot && !two && !!a.value && !!b.value;
+      segSum.hidden = !ot || !(two || one1);
+      if (ot && (two || one1)) {
+        const v = proxyOtSegs(two ? [{ start: a.value, end: b.value }, { start: a2.value, end: b2.value }] : [{ start: a.value, end: b.value }], SEG_MAX_OT_ADMIN);
         segSum.className = 'seg-sum du-proxy-segsum' + (v.ok || !v.total ? '' : ' bad');
         const over = !v.ok && v.total > SEG_MAX_OT_ADMIN && /店長代開最多/.test(v.msg);   // 合計超過上限：一句講完，不重複上限
-        segSum.textContent = over ? '兩段共 ' + v.total + ' 小時，超過店長代開上限 ' + SEG_MAX_OT_ADMIN + ' 小時'
-          : '兩段共 ' + v.total + ' 小時（店長代開上限 ' + SEG_MAX_OT_ADMIN + ' 小時）' + (v.ok || !v.total ? '' : '：' + v.msg);
+        const lead = two ? '兩段共 ' : '加班 ';
+        segSum.textContent = over ? lead + v.total + ' 小時，超過店長代開上限 ' + SEG_MAX_OT_ADMIN + ' 小時'
+          : lead + v.total + ' 小時（店長代開上限 ' + SEG_MAX_OT_ADMIN + ' 小時）' + (v.ok || !v.total ? '' : '：' + v.msg);
       }
     };
     add2.onclick = () => { two = true; sync(); a2.focus(); };
     rm2.onclick = () => { two = false; a2.value = b2.value = ''; sync(); };
-    [a, b, a2, b2].forEach(x => { x.oninput = sync; });
+    [a, b, a2, b2].forEach(x => { x.addEventListener('input', sync); x.addEventListener('change', sync); });      // 有些手機的時間欄只在選好收起時才發 change，兩個都接
     // 被擋的原因是正職上班日不滿 8 小時（2026-11-13）：先選好假單、補休、還差的時數（往上取到半小時）
     const gapM = /正職上班日要滿 8 小時[^。]*?還差 ([\d.]+) 小時/.exec(String(why0 || ''));
     if (gapM) {
@@ -1235,6 +1287,8 @@ function buildCard(emp, date) {
     }
     finally { submit.disabled = !!(card.__pending && card.__check && card.__check.error === 'pay_locked' && !e2eNoCore()); submit.textContent = '重新送出核定'; }      // 薪資鎖月：送出鈕維持不能按
   };
+  // 送出流程進行中（含確認框、重讀額度那幾個 await）：逾時後晚到的檢查結果不可重畫這張卡、不可動送出鈕
+  { const submitRun = submit.onclick; submit.onclick = async () => { card.__subBusy = true; try { return await submitRun(); } finally { card.__subBusy = false; } }; }
 
   function setExpanded(on) { body.hidden = !on; card.classList.toggle('open', on); head.setAttribute('aria-expanded', on ? 'true' : 'false'); }
   setBadge(emp.approved, initLeaves);

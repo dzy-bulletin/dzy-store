@@ -256,7 +256,7 @@ function route(method, p, q, b, token) {
       if (MF.includes(m[2]) || ['mgr_approve_check', 'mgr_roster'].includes(m[2])) return new Promise((res) => setTimeout(() => res(duty(m[2], mx, s, b)), w.__dutyUpMs));
     }
     if (m[1] === 'duty' && window.__dutyDelays && window.__dutyDelays[m[2]]) {      // e2e：指定動作拖慢（驗名單先顯示）
-      return new Promise(res => setTimeout(() => res(duty(m[2], mx, s, b)), window.__dutyDelays[m[2]]));
+      return new Promise(res => setTimeout(() => res(window.__dutyDelayFail && window.__dutyDelayFail[m[2]] ? fail('UPSTREAM', '伺服器暫時沒有回應，請稍後再試') : duty(m[2], mx, s, b)), window.__dutyDelays[m[2]]));      // __dutyDelayFail[動作]＝拖完之後才失敗（驗逾時後晚到的是錯誤）
     }
     if (m[1] === 'duty') return duty(m[2], mx, s, b);
     if (m[1] === 'transfer') return transferMock(m[2], mx, b, db);

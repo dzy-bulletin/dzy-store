@@ -18,6 +18,7 @@ export const QUICK_ON = true;
 const SKIP_KEY = 'dzystore_dutyquick_skip';     // 「先跳過」只存在這個分頁（sessionStorage），不寫任何資料
 // 完整頁都只進去這一次，不記住（2026-11-09 Eason：切分頁不該跑回舊畫面）。這個值只有示範模式看：其他 e2e 用它預設停在舊畫面，正式網站不讀
 // e2e 舊測試（示範模式）照舊分組：localStorage dzystore_core＝'0' 時不套「打卡＋單」（2026-11-14；正式網站一律套）
+export const isMock = () => !!MOCK;      // 示範模式（e2e 掛鉤只在這裡有用）
 export const e2eNoCore = () => { if (!MOCK) return false; try { return localStorage.getItem('dzystore_core') === '0'; } catch (e) { return false; } };
 const e2eFull = () => { if (!MOCK) return false; try { return localStorage.getItem('dzystore_dutyview') === 'full'; } catch (e) { return false; } };
 const skipGet = () => { try { return JSON.parse(sessionStorage.getItem(SKIP_KEY) || '{}') || {}; } catch (e) { return {}; } };
