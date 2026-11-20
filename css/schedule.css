@@ -230,6 +230,8 @@ button.hq-day{cursor:pointer}
 .sc-storesup { color: #1e5fa8; }
 .sc-unlocked { color: #8a6100; background: #fff0b3; border-radius: 3px; padding: 0 3px; }
 .sc-extacct { color: #9a4b00; }
+/* 「支援・班表在○○」標籤太長（姓名欄被撐到約 194px，加上凍結的休假／排班欄，手機只剩 17px 給日期格、點不到）：手機寬度換行、姓名欄上限 72px 的標籤寬（2026-11-21） */
+@media screen and (max-width: 760px) { .sc-grid .sc-name .sc-away { display: block; margin-left: 0; max-width: 72px; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; } }
 .sc-legx b { color: #1e5fa8; }
 .sc-xsn { font-style: normal; }
 @media print { .sc-unlocked { background: none; color: #555; } }
