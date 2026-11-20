@@ -4,6 +4,7 @@ import { S, call, callAll, h, tipText } from './state.js';
 import { taipeiToday, tsLabel, shortDate } from './calc.js';
 import { defaultYm, ymAdd, ymLabel, xlsSafe } from './summary-calc.js';
 import { css, loadXlsx } from './summary.js';
+import { xLine, MONTH_TAIL } from './mirror-line.js';      // 資料更新於（整月申請從副本給時，2026-11-20）
 
 export const ACTION_LABEL = { hours: '工時核定', rehours: '工時重新核定', recheck: '系統自動重新計算', submit: '申請送出', approve: '申請核准', reject: '申請退回',
   cancel: '申請取消', void: '申請作廢', device_ok: '裝置核准', device_no: '裝置拒絕' };
@@ -109,6 +110,7 @@ function drawOut(out) {
   }
   const failed = st.data && Array.isArray(st.data.failed) ? st.data.failed : [];
   if (failed.length) out.append(h('div', 'sm-failed', '有 ' + failed.length + ' 家門市暫時讀不到：' + failed.map(x => x.storeName || x.store).join('、') + '（其他門市的紀錄照常顯示）'));
+  { const xl = xLine(st.data, 'alAt', MONTH_TAIL); if (xl) out.append(xl); }
   const rows = filterLog(st.log, st.f);
   const top = h('div', 'sm-top');
   top.append(h('span', 'hint', '共 ' + rows.length + ' 筆・依時間新到舊。「看歷史」會展開同一件事的前後紀錄。'));

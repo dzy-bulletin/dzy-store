@@ -363,6 +363,7 @@ select{min-height:44px}
 .du-rq-file{display:inline-block;margin-top:8px;font-weight:700;color:var(--red)}
 .du-reqbox{margin-top:10px;background:#e6f3ea;color:#1a5a33;border-radius:8px;padding:8px 10px;font-size:13px;line-height:1.6;white-space:pre-line;overflow-wrap:anywhere}
 .du-restot{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;background:#fdecea;color:#b3261e;font-size:12.5px;font-weight:700;white-space:nowrap}      /* 班表休息日加班（2026-11-15） */
+.du-restot.du-ot8{display:block;margin:4px 0 0;border-radius:7px;white-space:normal;line-height:1.5}      /* 班表本身超過 8 小時的說明：句子長，換行、不撐破手機寬度（2026-11-20） */
 .du-reqbox.warn{background:#fff4d6;color:#6b4c00}
 /* 同天多張已核准申請（2026-10-29）：逐張列出、可能是舊單、依這張填／作廢 */
 .du-reqlead{font-weight:700;margin-bottom:4px}

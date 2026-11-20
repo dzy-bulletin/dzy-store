@@ -931,7 +931,7 @@ export function renderQuick(ctx) {
     // 要同仁補單的那句是建議，不是同仁送的申請（2026-11-16 Eason：「申請那句話改成建議」）
     const adv = !!p.mgrNote || /^(要補齊|請同仁|還沒有|要有|要補)/.test(p.note || '');      // 核定登記假別（mgrNote）也是建議，但是主管要做的事（2026-11-18）
     const noteTxt = adv ? String(p.note).replace(/^要補齊：\s*(要補)?/, '請同仁補').replace(/^要補/, '請同仁補') : p.note;
-    [line(adv ? '建議' : /^打卡跟核定差/.test(p.note || '') ? '提醒' : '申請', noteTxt), line('比對', p.chk, 'dq-chk')].forEach((x) => { if (x) grid.append(...x); });
+    [line(adv ? '建議' : /^(打卡跟核定差|班表 [\d.]+ 小時，超過)/.test(p.note || '') ? '提醒' : '申請', noteTxt), line('比對', p.chk, 'dq-chk')].forEach((x) => { if (x) grid.append(...x); });
     if (adv && grid.firstChild) { grid.classList.add('adv'); timeChips(grid.childNodes[1]); }      // 建議補單：底色框＋時段做成小標籤，一眼看得出要補哪幾段（2026-11-16 Eason：更有質感、好辨識）
     if (grid.childNodes.length) c.append(grid);
     if (Q.overText(p)) c.append(h('div', 'du-total-over dq-over', Q.overText(p)));      // 超過單日 10 小時：紅字、不擋（2026-11-15）

@@ -1209,7 +1209,7 @@ function dutyDo(d, action, b) {
       if (r.status === 'voided') put({ at: r.voided_at, action: 'void', by: r.voided_by, detail: { summary: r.summary, reason: r.void_reason } });
     });
     log.sort((a, c) => (a.at < c.at ? 1 : a.at > c.at ? -1 : 0));
-    return ok({ ym, items, leaves, log: log.filter(e => e.at), unmatched: leaves.filter(x => !x.emp_id).length });
+    return ok({ ym, items, leaves, log: log.filter(e => e.at), unmatched: leaves.filter(x => !x.emp_id).length, ...(d.monthXAt ? { mirror_x_at: d.monthXAt } : {}) });      // monthXAt：e2e 用，模擬從副本給（伺服器 mirror_x_at）
   }
   if (action === 'mgr_req_proxy') {              // Requests.gs mgr_req_proxy：超過 7 天才能代開，一律送總監層級審；原因必填
     const emp = d.roster.find(r => r.emp_id === b.emp_id); if (!emp) return fail('NOT_FOUND', '名冊裡找不到這位同仁，請重新整理。');

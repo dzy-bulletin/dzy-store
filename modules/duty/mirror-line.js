@@ -29,9 +29,11 @@ export function mirrorLine(o) {
 }
 
 /** 名冊、裝置、公告這幾頁（DUTY_MIRROR_EXTRA，伺服器從副本給時回 mirror_x_at）：一行灰字；沒有＝null（跟以前一樣什麼都不加） */
-export function xLine(r, id) {
-  return r && r.mirror_x_at ? h('div', 'du-mirror-at', '資料更新於 ' + snapLabel(r.mirror_x_at) + '・打卡系統有異動會自動更新', { id }) : null;
+export function xLine(r, id, tail) {
+  return r && r.mirror_x_at ? h('div', 'du-mirror-at', '資料更新於 ' + snapLabel(r.mirror_x_at) + (tail || '・打卡系統有異動會自動更新'), { id }) : null;
 }
+/** 申請單總表、核定紀錄（整月申請 mgr_req_month，2026-11-20）：這兩頁讀進來就放著、不會自己換新，所以不寫「會自動更新」，只寫換月份會重讀。全部門市＝最早的那家時間 */
+export const MONTH_TAIL = '・換月份會重新讀取';
 
 /** 回應 → 這一行要的四個旗標（幾份回應任一份是只讀 mini／過期就算） */
 export function mirrorFlags(...rs) {

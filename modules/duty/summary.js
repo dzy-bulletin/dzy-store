@@ -2,6 +2,7 @@
 // 印一覽表（A4 橫）、印單張（A4 直，一筆一頁）、匯出 Excel。只讀：這一頁不能核准、退回、作廢任何單據。
 // 資料：mgr_req_month {ym}（全部門市走 callAll）；換月份才重讀，其他篩選只在前端。對帳與合計的規則在 summary-calc.js（純函式）。
 import { S, call, callAll, h, tipText } from './state.js';
+import { xLine, MONTH_TAIL } from './mirror-line.js';      // 資料更新於（整月申請從副本給時，2026-11-20）
 import { taipeiToday, tsLabel, shortDate } from './calc.js';
 import { buildRows, filterRows, totals, empKey, defaultYm, ymAdd, ymLabel, xlsSafe, KIND_LABEL, KIND_ORDER, SLIP_TITLE, MERGED, OT_NOTE, compBankRows, compSheet, compNoneText } from './summary-calc.js';
 
@@ -165,6 +166,7 @@ function drawOut(out) {
     b.onclick = () => { st.data = null; load(out); };
     fb.append(b); out.append(fb);
   }
+  { const xl = xLine(st.data, 'smAt', MONTH_TAIL); if (xl) out.append(xl); }
   const rows = filterRows(st.rows, st.f), t = totals(rows);
   const nCheck = filterRows(st.rows, Object.assign({}, st.f, { check: true })).length;
   const top = h('div', 'sm-top');

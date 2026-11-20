@@ -284,6 +284,13 @@ export function quotaHardBlocked(def, q) { return !!(q && q.blocked && !q.comp &
 export function personalOver(def, q) { return !!(def && def.code === 'personal' && q && q.blocked && !q.comp); }
 export const personalOverText = (name, q) => name + ' 今年事假已超過 ' + ((q && q.cap_days != null) ? q.cap_days : 14) + ' 天，超過的部分會照曠職標紅，仍要送出嗎？';
 export const MENSTRUAL_MAX_TIMES = 3;
+/** 生理假一天最多 8 小時（2026-11-18 規則；打卡端核定也擋）。同一天幾列生理假加起來超過就回提示字串，沒超過回 ''。
+ *  一頁核定（quick-calc leaveProblem）與完整核定頁（approve.js 送出前）共用同一句，免得送出才被打卡系統退回 */
+export const MENSTRUAL_DAY_MAX_H = 8;
+export function menstrualDayOverText(leaves) {
+  const h = (leaves || []).filter(L => L && L.type === '生理假').reduce((n, L) => n + (Number(L.hours) || 0), 0);
+  return h > MENSTRUAL_DAY_MAX_H + 0.001 ? '生理假一天最多 ' + MENSTRUAL_DAY_MAX_H + ' 小時，目前填了 ' + Math.round(h * 100) / 100 + ' 小時' : '';
+}
 // 薪資 payLeaveUsage 的生理假 used_days 就是次數（payLeaveQuotaDays_，4 小時也算 1 次）
 const menstrualUsed = q => { for (const k of ['used_days', 'used_n', 'used_times', 'used_count', 'times_used']) if (q && q[k] != null && !isNaN(Number(q[k]))) return Number(q[k]); return null; };
 /** 申請審核：這張請假單能不能核准。回 '' ＝可以；否則是核准鈕要顯示的原因。

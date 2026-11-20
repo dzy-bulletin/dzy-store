@@ -50,6 +50,9 @@ export function renderRoster(ctx) {
     gone.innerHTML = `<div class="du-subtitle">已離職（${off.length}）</div>` + off.map(r => {
       const when = shortDate(r.removed_at), by = r.removed_by ? '由 ' + esc(r.removed_by) + ' 設定' : '';
       const meta = when || by ? `<span class="du-when">${[when, by].filter(Boolean).join('・')}</span>` : '';
+      // 管理系統已停用（帶 last_day，2026-11-20）：這裡恢復當晚會被停回去 → 不給按鈕，請總部到管理系統復職
+      if (r.last_day) return `<div class="du-item" data-emp="${esc(r.emp_id)}"><span class="du-item-body">${esc(r.name)}（${esc(r.emp_id)}）${sup(r)}${meta}
+        <span class="du-when re-dzy-off">管理系統已停用（離職日 ${esc(shortDate(r.last_day))}）・要復職請總部到<a href="${DZY_ORIGIN}/#/staff" target="_blank" rel="noopener">管理系統</a>按「復職」</span></span></div>`;
       return `<div class="du-item" data-emp="${esc(r.emp_id)}"><span class="du-item-body">${esc(r.name)}（${esc(r.emp_id)}）${sup(r)}${meta}</span>
         <button type="button" class="btn sm ghost re-restore" data-emp="${esc(r.emp_id)}" data-name="${esc(r.name)}">恢復在職</button></div>`;
     }).join('');

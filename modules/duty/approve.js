@@ -8,7 +8,7 @@ import { corePeriods, OVER_BLOCK_MIN, otSuggestText, cardDiffs, cardLabel, cardR
 import * as C from './calc.js';
 import { api } from '../../js/api.js';
 import { leaveOverText } from './core-calc.js';      // 2026-11-18 第 5 題提醒（另起一行：上面那行同時有別的分支在改）
-import { planFlags, REASONS, pendSplit } from './quick-calc.js';
+import { planFlags, REASONS, pendSplit, planOtText } from './quick-calc.js';
 import { leaveIncrements, leaveShort } from './leave-batch.js';
 import { pendingFor } from './pend-gate.js';
 import { ssoSwitch, setSession, toSession } from '../../js/auth.js';
@@ -527,6 +527,7 @@ function buildCard(emp, date) {
   if (pv.text) nameEl.append(h('span', 'du-shift' + (pv.mode === 'off' ? ' off' : ''), pv.text, { 'data-mode': pv.mode }));
   // 班表排的是休息日（或例假）出勤（2026-11-15 Eason：休假加班要看得出來，主管才不會忘了要加班單）：整天都算加班
   if (pv.mode === 'plan' && emp.plan && (emp.plan.day_type === 'H' || emp.plan.day_type === 'R')) nameEl.append(h('span', 'du-restot', (emp.plan.day_type === 'R' ? '例假出勤' : '休息日加班') + '・整天算加班，要有加班單'));
+  { const ot8 = planOtText(emp, br); if (ot8) nameEl.append(h('span', 'du-restot du-ot8', ot8)); }      // 班表本身超過 8 小時：準時下班也要加班單（2026-11-20，跟一頁核定那張卡同一句）
   const punchEl = h('div', 'du-punch');
   if (emp.segments && emp.segments.length) {
     const ref = (emp.reference === null || emp.reference === undefined) ? '參考 —' : '參考 ' + emp.reference + ' 小時';   // 忘刷卡整天 reference=null，不可印成 "null"
@@ -1139,6 +1140,8 @@ function buildCard(emp, date) {
     const lv = leaveList();
     const dupT = C.dupLeaveType(lv);
     if (dupT) return say('bad', '✕ 「' + dupT + '」選了兩次，同一種假別請合併成一列（時數加起來）。');
+    const mensOver = C.menstrualDayOverText(lv);      // 生理假一天最多 8 小時（跟一頁核定同一句；後端也擋，這裡先擋免得送出才被退回）
+    if (mensOver) return say('bad', '✕ ' + mensOver + '，無法送出。');
     for (const L of lv) {
       if (!LO || prevHad(L.type)) continue;
       const d0 = C.leaveDefOf(LO, L.type), q0 = d0 ? C.quotaOf(LO, String(emp.emp_id), d0.code) : null;

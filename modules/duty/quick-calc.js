@@ -119,6 +119,19 @@ export function splitBreak(plan, br) {
 export const hoursOf = (periods) => C.round2(C.sumPeriods(periods || []).total);
 const periodsOfPrefill = (pv) => (pv.initial || []).filter((p) => p && p.start && p.end).map((p) => ({ start: p.start, end: p.end }));
 
+/** 班表本身超過 8 小時（例：8.5 小時）：超過的部分準時下班也要有加班單（加班時數＝核定時數－8；2026-11-20 張羽成案）。
+ *  回一句白話說明；班表 8 小時以內、休息日／例假出勤（整天本來就算加班，另有說明）、沒有班表回 ''。一頁核定那張「班表超過 8 小時」的卡與完整核定頁的班別旁共用 */
+export function planOtText(emp, brk) {
+  const plan = emp && emp.plan;
+  if (!plan || plan.work !== true || plan.day_type === 'H' || plan.day_type === 'R') return '';
+  const pv = C.planPrefill(Object.assign({}, emp, { approved: null }), plan, brk);      // 已核定的人 pv.initial 是核定時段，這裡要的是班表本身
+  if (pv.mode !== 'plan') return '';
+  const h = hoursOf(periodsOfPrefill(pv));
+  if (!(h > OK_MAX_H + 0.001)) return '';
+  const over = C.round2(h - OK_MAX_H);
+  return '班表 ' + C.round2(h) + ' 小時，超過 ' + OK_MAX_H + ' 小時的部分要有加班單：準時下班也需要 ' + over + ' 小時加班單（加班時數＝核定時數－' + OK_MAX_H + '）';
+}
+
 /** emp.plan（mgr_day 的班表）→ comparePlan 要的形狀；沒有上班班表回 undefined */
 export function comparePlanOf(plan) {
   if (!plan || plan.work !== true || !Array.isArray(plan.segs) || !plan.segs.length || !plan.segs.every((s) => s && s.start && s.end)) return undefined;
@@ -226,8 +239,8 @@ export const overText = (p) => (p && p.over ? '超過一天 ' + C.DAY_MAX_H + ' 
 export function leaveProblem(LO, empId, leaves, date) {
   if (!LO) return '';
   // 生理假一天最多 8 小時（2026-11-18 規則；打卡端核定也擋，這裡先擋免得送出才被退回）
-  const mensH = (leaves || []).filter(L => L.type === '生理假').reduce((n, L) => n + (Number(L.hours) || 0), 0);
-  if (mensH > 8.001) return '生理假一天最多 8 小時，目前填了 ' + Math.round(mensH * 100) / 100 + ' 小時';
+  const mensOver = C.menstrualDayOverText(leaves);
+  if (mensOver) return mensOver;
   for (const L of leaves || []) {
     const d0 = C.leaveDefOf(LO, L.type), q0 = d0 ? C.quotaOf(LO, String(empId), d0.code) : null;
     if (d0) {
@@ -509,7 +522,7 @@ function classifyRaw(inp) {
     return Object.assign(base, { status: 'abnormal', tag, note: '沒有加班單', hours: planHours, payload: planPayload, actions: acts });
   }
   if (planHours > OK_MAX_H) {
-    return Object.assign(base, { status: 'abnormal', tag: '班表超過 ' + OK_MAX_H + ' 小時', hours: planHours, payload: planPayload, actions: [planAct(true), fullAct] });
+    return Object.assign(base, { status: 'abnormal', tag: '班表超過 ' + OK_MAX_H + ' 小時', note: planOtText(emp, brk), hours: planHours, payload: planPayload, actions: [planAct(true), fullAct] });
   }
   if (!planPeriods.length) return full('班表時段不全', '');
   if (raw != null && Math.abs(planHours * 60 - raw) >= DIFF_MIN) return full('打卡時數和班表差太多', '班表 ' + fmtH(planHours) + ' 小時，實際打卡 ' + fmtH(raw / 60) + ' 小時');

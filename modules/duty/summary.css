@@ -54,6 +54,8 @@
 .sm-comp-tb .bal{font-weight:900}
 .sm-comp-tb tr.neg .bal{color:var(--bad)}
 .sm-comp-tb tr.neg td:first-child{border-left:3px solid var(--bad)}
+/* 手機窄畫面（2026-11-20）：補休明細四欄含「欠 N 小時」，原本在 375 寬會比畫面多出約 9px（整頁橫向捲動）→ 縮小格子間距與字級，數字欄也允許換行 */
+@media (max-width:480px){.sm-comp-tb th,.sm-comp-tb td{padding:6px 4px;font-size:13px}.sm-comp-tb th{font-size:12px}.sm-comp-tb .num{white-space:normal}}
 @media print{.sm-comp{display:none}}
 @media (max-width:760px){
   .sm-tbl thead{display:none}
