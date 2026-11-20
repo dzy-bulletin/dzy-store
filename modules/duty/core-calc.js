@@ -23,7 +23,7 @@ export const CARD_REASON_FROM = '2026-11-01';      // 2026-11-18 Eason「卡差 
  *  GAP_LATE_FROM＝上線日（YYYY-MM-DD）；null＝關（跟改之前完全一樣）。只有這天（plan.date，伺服器 attachPlan 只在個人登入時帶；門市登入不帶＝照舊，因為打卡端只收個人帳號的班表）在上線日以後才套；
  *  不知道日期＝不套（照舊）。**要跟打卡端 Requests.gs 的 REQ_GAP_LATE_FROM_DEFAULT_ 設成同一天**：上線日之前的日子補核定，兩邊都照舊。
  *  GAP_LATE_SCOPE：'multi'＝只有當天班表兩段以上（Eason 第 1 題 A）；'all'＝單段班也算（沒採用，留著對照打卡端 REQ_GAP_LATE_SCOPE）。 */
-export const GAP_LATE_FROM = '2026-11-22';        // 2026-11-20 Eason 定案：九店打卡部署完成的隔天起算（打卡端 REQ_GAP_LATE_FROM_DEFAULT_ 同一天）
+export const GAP_LATE_FROM = null;        // 2026-11-21 延後生效（Codex 交叉驗證 4 個已重現問題）：關（原本 '2026-11-22'）。打卡端同時改成沒設屬性＝關，兩邊要一起開
 export const GAP_LATE_SCOPE = 'multi';
 /** 這一天套哪個範圍：o.gapLate（測試直接指定 'off'｜'multi'｜'all'，不看日期）優先；否則看上線日（o.gapFrom 可覆寫）與這天日期（o.date 或 o.plan.date） */
 function gapScopeOf(o) {
