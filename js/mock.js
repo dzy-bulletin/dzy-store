@@ -209,6 +209,16 @@ function route(method, p, q, b, token) {
     if (m[1] === 'duty' && !s.duty) return fail('FORBIDDEN', '請先輸入出勤核定通行碼');
     if (m[1] === 'purchase') return purchase(m[2], mx, b);
     if (m[1] === 'cashbook') return cashbook(m[2], mx, b);
+    if (m[1] === 'duty' && window.__dutySync && window.__dutySync[m[2]] > 0) {      // e2e（2026-11-21 資料更新中，mod_duty_sync）：window.__dutySync＝{動作: 前幾次回「資料更新中」}；記每次的店別、同仁
+      const w = window; w.__dutySync[m[2]]--;
+      (w.__dutySyncSeen = w.__dutySyncSeen || []).push({ a: m[2], store: (b && (b.asStore || b.store)) || '', emp: (b && b.emp_id) || '', at: Date.now() });
+      return new Promise((res) => setTimeout(() => res(Object.assign(fail('CONFLICT', '資料更新中，請稍候…'), { reason: 'duty_syncing', retry_ms: w.__dutySyncRetryMs || 300 })), w.__dutySyncServerMs || 100));
+    }
+    if (m[1] === 'duty' && window.__dutyStuck && window.__dutyStuck[m[2]] > 0) {      // e2e（2026-11-21 寫回卡住，mod_duty_sync D）：window.__dutyStuck＝{動作: 前幾次回「這位同仁上一筆還在送往打卡系統…」（reason duty_stuck，不帶 retry_ms）}
+      const w = window; w.__dutyStuck[m[2]]--;
+      (w.__dutyStuckSeen = w.__dutyStuckSeen || []).push({ a: m[2], emp: (b && b.emp_id) || '', at: Date.now() });
+      return new Promise((res) => setTimeout(() => res(Object.assign(fail('CONFLICT', '這位同仁上一筆還在送往打卡系統，暫時不能動這位同仁，可先處理其他人'), { reason: 'duty_stuck' })), 100));
+    }
     if (m[1] === 'duty' && m[2] === 'mgr_approve' && window.__dutyDelay) {      // e2e：核定拖慢，並記同時進行的最大請求數（驗一鍵核定循序、不併發）
       const w = window; w.__dutyInflight = (w.__dutyInflight || 0) + 1; w.__dutyMax = Math.max(w.__dutyMax || 0, w.__dutyInflight);
       return new Promise(res => setTimeout(() => { try { res(duty(m[2], mx, s, b)); } finally { w.__dutyInflight--; } }, w.__dutyDelay));

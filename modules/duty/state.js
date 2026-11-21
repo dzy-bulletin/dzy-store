@@ -3,6 +3,7 @@ import { api } from '../../js/api.js';
 import { getSession } from '../../js/auth.js';
 import { reqDecidable } from './quick-calc.js';
 import { viewCanWrite } from './calc.js';
+import { makeSyncGate, SYNC_WAIT_MSG } from './sync-wait.js';      // 核定「資料更新中」自動等待（2026-11-21）
 
 const FLAG = 'dzystore_dutyok';
 // 管理者（2026-10-11 Eason：看得到所有門市、也能代核）：asStore＝正在看的門市代號，每次呼叫自動帶上；stores＝各店總覽讀到的門市清單。
@@ -11,6 +12,7 @@ export const S = { key: null, admin: false, asStore: '', asName: '', stores: nul
   all: false, metaBy: {}, leaveBy: {}, recent: {}, reqPre: null, dqFull: false };   // all＝個人登入「全部門市」模式（2026-10-19）；metaBy／leaveBy＝各店的休息帶與假別額度（以營運系統門市代號為鍵）
 
 export function reset(key) {
+  cancelSyncWaits();      // 換登入：正在等的「資料更新中」全部取消
   S.key = key; S.asStore = ''; S.asName = ''; S.stores = null; S.meta = { clockStore: '', label: '', breakStart: '', breakEnd: '' }; S.date = null; S.dayCache = {}; S.dayTok++;
   S.pend = null; S.pendPrev = ''; S.pendPrevWait = false; S.pendPrevFail = false; S.pendGen = (S.pendGen || 0) + 1; S.pendAll = false; S.focusEmp = null; S.elsewhere = []; S.leave = null; S.leaveP = null; S.reqCount = 0; S.reqAt = 0; S.metaBy = {}; S.leaveBy = {}; S.recent = {}; S.reqPre = null; S.dqFull = false;
   S.leaveMirrorStale = false; S.leaveErr = false; S.leaveStale = false;      // 換登入／換模式：上一個人的額度狀態不留（第三輪審查）
@@ -103,6 +105,7 @@ export function failedStores(el, failed, retry) {
 
 // 管理者換門市：清掉上一家店的資料（日期、核定快取、假別額度、待審數），只保留門市清單
 export function setStore(code, name) {
+  cancelSyncWaits();      // 換店：正在等的「資料更新中」全部取消（不會改帶新店代碼重送）
   const stores = S.stores;
   reset(S.key);
   S.stores = stores; S.asStore = code || ''; S.asName = name || '';
@@ -113,10 +116,29 @@ export function setStore(code, name) {
 const READS = new Set(['all', 'hr_return_list', 'mgr_day', 'mgr_req_day', 'mgr_req_pending', 'mgr_pending_approvals', 'mgr_roster', 'mgr_pending_devices', 'mgr_notices',
   'mgr_line_binds', 'mgr_qr_token', 'payroll_leave_options', 'payroll_annual_left', 'line_hub_attach_get', 'admin_stores', 'mgr_req_month',
   'mirror_jobs', 'mirror_ack', 'mgr_approve_check']);      // mgr_approve_check：送出前只檢查，不寫入（2026-11-14）      // 背景送出的進度、按知道了：不動考勤資料，不清上次看到的名單
+// 核定「資料更新中」（2026-11-21，sync-wait.js）：伺服器說 Mac mini 副本還在更新時，自動等、自動再送（最多 90 秒）；
+//   等的時候畫面上方顯示「資料更新中，請稍候…」；同一個動作＋同一份內容在等的時候再按＝同一個結果（不多送）
+let syncN = 0;
+function syncBanner(on) {
+  syncN = Math.max(0, syncN + (on ? 1 : -1));
+  if (typeof document === 'undefined') return;
+  let el = document.getElementById('du-syncwait');
+  if (syncN && !el) { el = h('div', 'du-syncwait', SYNC_WAIT_MSG, { id: 'du-syncwait', role: 'status', 'aria-live': 'polite' }); el.style.cssText = 'position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:9999;background:#1f2937;color:#fff;padding:8px 14px;border-radius:8px;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,.2)'; document.body.append(el); }
+  if (!syncN && el) el.remove();
+}
+const mockMax = () => (typeof window !== 'undefined' && window.__dutySyncMaxMs && typeof location !== 'undefined' && /[?&]mode=mock\b/.test(location.search) ? window.__dutySyncMaxMs : undefined);      // e2e 可縮短上限（只有示範模式 ?mode=mock）
+const syncGate = makeSyncGate({ onWait: syncBanner, maxMs: mockMax });
+/** 取消所有正在等的「資料更新中」：離開頁面、換店、換人、換日期、換分頁、換登入時叫（#354 驗收必修 1） */
+export function cancelSyncWaits() { syncGate.cancelAll(); }
+if (typeof window !== 'undefined' && window.addEventListener) { window.addEventListener('hashchange', cancelSyncWaits); window.addEventListener('pagehide', cancelSyncWaits); }
 export async function call(action, body) {
+  const fix = { k: S.key, st: S.asStore };      // 發起當時的身分與店別：重試一律用這份，不讀之後換掉的（#354 驗收必修 1）
+  return syncGate(action + '|' + (fix.st || '') + '|' + JSON.stringify(body || {}), () => call1(action, body, fix), { stale: () => S.key !== fix.k || S.asStore !== fix.st });
+}
+async function call1(action, body, fix) {
   if (!READS.has(action)) { S.recent = {}; S.reqPre = null; checkMemo.clear(); }      // 寫入之後：記住的送出前檢查結果作廢
   try {
-    const k = S.key, st = S.asStore;
+    const k = fix.k, st = fix.st;
     const b0 = Object.assign({ mf: 1 }, body || {});      // 寫入也帶（2026-11-19 審查 R2：伺服器看到新前端的核定一定要有 base_ver、calc_ver）      // mf：這個前端會處理「伺服器先給副本」（mirror_stale）並背景再問（2026-11-19；沒帶的舊前端伺服器照舊等新的）
     const r = await api('POST', '/m/duty/' + action, st ? Object.assign({}, b0, { asStore: st }) : b0, undefined, { read: READS.has(action) });
     if (r && r.meta && action !== 'mgr_approve_check' && S.key === k && S.asStore === st) S.meta = r.meta;      // 送出前檢查在背景跑、可能晚到：不拿它的休息帶蓋掉剛讀到的

@@ -1,4 +1,4 @@
-import { S, reset, refreshReqBadge, dutyManager, dutyHours, multiStores, allModeOf, setAll, viewNoHoursStore } from './state.js';
+import { S, reset, refreshReqBadge, dutyManager, dutyHours, multiStores, allModeOf, setAll, viewNoHoursStore, cancelSyncWaits } from './state.js';
 import { renderOverview, storeBar, personStoreBar } from './overview.js';
 import { renderApprove } from './approve.js';
 import { renderDevice } from './device.js';
@@ -39,6 +39,8 @@ export default {
     const key = moduleResetKey(ctx.session);
     if (S.key !== key) reset(key);                      // 換了登入就重來，不留上一個人的資料
     S.rerender = ctx.rerender;
+    if (S.tabNow !== undefined && S.tabNow !== ctx.tab) cancelSyncWaits();      // 換分頁：正在等的「資料更新中」取消（#354）
+    S.tabNow = ctx.tab;
     if (ctx.tab !== 'approve') S.dqFull = false;        // 離開核定工時分頁：手機回來時一律是一頁核定，完整頁只算那一次
     S.admin = ctx.session.role === 'admin';
     if (S.admin) {

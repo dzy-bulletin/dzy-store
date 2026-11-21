@@ -41,6 +41,8 @@ function settle(res, path, token) {
   if (res && res.ok) return res.data;
   const err = new Error((res && res.message) || '發生錯誤，請稍後再試');
   err.code = (res && res.error) || 'SERVER_ERROR';
+  if (res && typeof res.reason === 'string') err.reason = res.reason;      // 核定「資料更新中」（2026-11-21）：前端自動等待用
+  if (res && Number(res.retry_ms) > 0) err.retryMs = Number(res.retry_ms);
   // 這幾支的 AUTH 只是「密碼不對」，不代表登入過期，不能踢人
   const wrongPw = path === '/duty/unlock' || path === '/password' || path === '/login' || path === '/sso' || path === '/sso/select';   // /sso 的 AUTH＝入場券不能用，不是目前的登入過期
   // 只有「現在這個登入」的請求才踢人：登出後還在路上的舊請求回來 AUTH，不能把剛重新登入的人也踢掉

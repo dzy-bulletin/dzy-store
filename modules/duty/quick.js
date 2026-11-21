@@ -1,7 +1,8 @@
 // 考勤管理「手機一頁核定」（核定工時分頁在手機寬度 ≤860px 的新畫面；規格 docs/duty-quick/requirements.md，2026-11-09 Eason 定案）。
 // 一頁完成：沒問題的人一鍵核定、有異常的人一人一張卡按一下完成、少打卡又沒單的人先擋住。舊畫面（approve.js）完整保留當退路。
 // 規則都在 quick-calc.js（純函式，有單元測試）；這裡只負責讀資料、畫畫面、依序呼叫既有的 mgr_approve／mgr_req_decide／mgr_req_proxy。
-import { S, call, callAll, h, failBar, failedStores, supportTag, loadLeave, staleLeave, leaveFor, canWriteRow, brk, brkOf, dutyManager, dutyHours, viewNoHoursStore, snapLabel, checkOnce, reqShown, dropChecks, readPend, pendTake, pendDrop } from './state.js';
+import { S, cancelSyncWaits, call, callAll, h, failBar, failedStores, supportTag, loadLeave, staleLeave, leaveFor, canWriteRow, brk, brkOf, dutyManager, dutyHours, viewNoHoursStore, snapLabel, checkOnce, reqShown, dropChecks, readPend, pendTake, pendDrop } from './state.js';
+import { isSyncCancelled } from './sync-wait.js';      // 資料更新中被取消（換頁、換日期）：不顯示結果（2026-11-21）
 import * as T from './timeline-calc.js';
 import { fineCard, checkCards, pendingPanel, returnsPanel, elsewhereCards, FULL_UNTIL, leaveFreshOk } from './approve.js';
 import * as C from './calc.js';
@@ -603,7 +604,7 @@ export function renderQuick(ctx) {
   }
 
   // 主管自己選日期（前一天／後一天）：最多到今天；這天處理完回到自動找下一個待處理的日子
-  function gotoDate(date) { st.manual = date; st.toast = ''; st.failLine = ''; load(); }
+  function gotoDate(date) { if (date !== st.date) cancelSyncWaits(); st.manual = date; st.toast = ''; st.failLine = ''; load(); }      // 換日期（換一批同仁）：正在等的「資料更新中」取消（#354）
   function backToAuto() { st.manual = null; st.toast = ''; st.failLine = ''; load(); }
   function navEl() {
     const cur = st.manual || st.date || todayNow();
@@ -772,6 +773,7 @@ export function renderQuick(ctx) {
       if (lvWhy) { bad.push(p.name + '（' + lvWhy + '）'); Object.assign(U(p.key), { failed: lvWhy, failedDiff: false }); continue; }
       try { await approveOne(p, mainAction(p), undefined, { leaveChecked: lvRes.has(p.key) }); okN++; }
       catch (e) {
+        if (isSyncCancelled(e)) { st.busy = false; st.progress = ''; return; }      // 畫面已換（資料更新中被取消）：不顯示、不套到新畫面
         let msg = (e && e.message) || '沒有成功';
         if (uncertain(e)) {                                   // 逾時：資料已重讀，後面的人先停下，不拿舊清單繼續送
           halted = true;
@@ -809,6 +811,7 @@ export function renderQuick(ctx) {
         await call('mgr_req_decide', { id: a.reqId, decision: 'reject', reason, store: a.reqStore || undefined });
         rejected();
       } catch (e) {
+        if (isSyncCancelled(e)) { st.busy = false; return; }
         u.msg = '退回沒成功：' + ((e && e.message) || '請再試一次');
         if (uncertain(e)) {                                   // 逾時：先重讀，單子已不在待審＝其實退回成功
           try {
@@ -854,6 +857,7 @@ export function renderQuick(ctx) {
       return afterChange();
     } catch (e) {
       st.busy = false;
+      if (isSyncCancelled(e)) return;      // 畫面已換：不套到新畫面
       const msg = (e && e.message) || '沒有成功，請再試一次';
       if (uncertain(e) && !/^核定和打卡差/.test(msg)) {
         try {
@@ -891,6 +895,7 @@ export function renderQuick(ctx) {
       st.extra.push(it.name + (decision === 'approve' ? ' 核准' : ' 退回') + ' ' + C.REQ_KIND_LABEL[it.kind] + '單' + (r && r.warn ? '（⚠ ' + (r.message || '那天已經核定過，請重新核定一次') + '）' : ''));      // 2026-11-13 a2
       afterDecide(it, decision);
     } catch (e) {
+      if (isSyncCancelled(e)) { st.busy = false; return; }
       st.reqMsg[k] = '沒有成功：' + ((e && e.message) || '請再試一次');
       if (uncertain(e)) {                                     // 逾時：先重讀，單子已不在待審＝其實處理成功
         try {
@@ -1149,7 +1154,7 @@ export function renderQuick(ctx) {
       t.append(h('b', null, (w.emp_name || w.emp_id) + (w.storeName ? '・' + w.storeName : '')), h('span', 'dq-rd', C.shortDate(w.date)), h('span', 'dq-wtag' + (ok ? ' ok' : ''), ok ? '單送來了' : '等同仁補單'));
       row.append(t, h('div', 'dq-rs', w.what || ''), h('div', 'dq-wby', (w.by_name || '') + ' ' + String(w.created_at || '').slice(5, 16).replace('T', ' ') + ' 記下'));
       const acts = h('div', 'dq-acts two');
-      acts.append(btn('dq-act ' + (ok ? 'primary' : 'ghost'), ok ? '去核定' : '看那天', () => { st.openKey = Q.keyOf(w); gotoDate(w.date); }));
+      acts.append(btn('dq-act ' + (ok ? 'primary' : 'ghost'), ok ? '去核定' : '看那天', () => { cancelSyncWaits(); st.openKey = Q.keyOf(w); gotoDate(w.date); }));
       if (w.can_cancel !== false) acts.append(btn('dq-act ghost', '不等了', () => cancelWait(w)));
       row.append(acts);
       sec.append(row);
@@ -1353,7 +1358,7 @@ export function renderQuick(ctx) {
 
   // 人資退回、本月待核定提醒：舊畫面搬來（2026-11-15），點名字跳到那天並打開那個人的細調
   const pendEl = h('div', 'dq-pend'), retEl = h('div', 'dq-ret');
-  const pick = (date, key) => { st.openKey = key; gotoDate(date); };
+  const pick = (date, key) => { cancelSyncWaits(); st.openKey = key; gotoDate(date); };      // 點名字跳到別的同仁：正在等的取消（#354）
   const pendPanel = pendingPanel(pendEl, pick);
   // 本月待核定提醒在新頁預設只留一行（2026-11-15）：點標題展開名單，詳細模式一律展開
   pendEl.classList.add('fold');

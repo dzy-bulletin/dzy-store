@@ -1,7 +1,8 @@
 // 核定工時：照原系統 ~/mala-clock-in/manager.html 搬。日期列（前一天／後一天／今天）、本月待核定提醒、員工卡（收合展開、時段、
 // 核定時數即時算、休息、假別、出差、遲到分鐘）、送出核定。外觀換成營運系統風格，規則與文案不改。
 import { confirmBox } from '../../js/ui.js';
-import { S, dutyManager, call, callAll, readPend, pendTake, pendDrop, brk, brkOf, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow, canVoidRow, supportTag, rememberOne, snapLabel, tipText, checkOnce, reqShown, refreshReqBadge, reqCanDecide } from './state.js';
+import { S, cancelSyncWaits, dutyManager, call, callAll, readPend, pendTake, pendDrop, brk, brkOf, h, failBar, failedStores, loadLeave, staleLeave, leaveFor, rowKey, canWriteRow, canVoidRow, supportTag, rememberOne, snapLabel, tipText, checkOnce, reqShown, refreshReqBadge, reqCanDecide } from './state.js';
+import { isSyncCancelled } from './sync-wait.js';      // 資料更新中被取消（換頁、換日期）：不顯示結果（2026-11-21）
 import { buildReqItem } from './request.js';
 import { approvedSegTag, proxyOtSegs, segWord, SEG_MAX_OT_ADMIN } from './req-group.js';
 import { corePeriods, OVER_BLOCK_MIN, otSuggestText, cardDiffs, cardLabel, cardReasonText } from './core-calc.js';
@@ -31,12 +32,12 @@ export function renderApprove(ctx) {
   const live = () => el.isConnected;
   el.insertBefore(backBar(ctx), el.firstChild);      // 舊畫面（管理員緊急備用）：上面一顆「回到新畫面」
   // 考勤副本（2026-11-14）：背景送出被打卡系統退回的，列在最上面；點了跳到那天那位
-  el.querySelector('#duBg').append(rejectBar((date, empId) => { S.focusEmp = rowKey({ emp_id: empId }); delete S.dayCache[date]; loadDay(date); }));
+  el.querySelector('#duBg').append(rejectBar((date, empId) => { cancelSyncWaits(); S.focusEmp = rowKey({ emp_id: empId }); delete S.dayCache[date]; loadDay(date); }));
   refreshJobs();
 
-  const pendPanel = pendingPanel(pendEl, (date, key) => { S.focusEmp = key; loadDay(date); });
+  const pendPanel = pendingPanel(pendEl, (date, key) => { cancelSyncWaits(); S.focusEmp = key; loadDay(date); });
   const loadPending = pendPanel.load, drawPending = pendPanel.draw;
-  const loadReturns = returnsPanel(retEl, (date, key) => { S.focusEmp = key; loadDay(date); }, (date) => { if (S.date === date) loadDay(date); }, live).load;
+  const loadReturns = returnsPanel(retEl, (date, key) => { cancelSyncWaits(); S.focusEmp = key; loadDay(date); }, (date) => { if (S.date === date) loadDay(date); }, live).load;
   box.addEventListener('hr-returned', () => loadReturns());
   box.addEventListener('duty-reload-day', e => { const d = e.detail || {}; S.focusEmp = rowKey(d.emp); delete S.dayCache[d.date]; loadDay(d.date); });   // 背景送出被退回：重新載入那天
   // 核定成功後即時從提醒移除（不必重打後端）
@@ -151,6 +152,7 @@ export function renderApprove(ctx) {
     box.prepend(h('div', 'du-stale-note', text || '先顯示上次看到的資料，正在更新…', { id: 'duStale' }));
   }
   function drawDay(date, employees, failed, quick) {
+    if (S.date && S.date !== date) cancelSyncWaits();      // 換日期：正在等的「資料更新中」取消（#354）
     S.date = date; dateIn.value = date;
     const focus = S.focusEmp;
     renderEmployees(box, date, employees, failed, () => { loadPending(); loadDay(date); });
@@ -1294,6 +1296,7 @@ function buildCard(emp, date) {
       planDone = true; if (card.__planR) card.__showPlan(card.__planR);   // 核定後拿掉跟班表比的提醒
       card.dispatchEvent(new CustomEvent('emp-approved', { bubbles: true, detail: { emp_id: emp.emp_id, date: approveDate, store: emp.store } }));
     } catch (e) {
+      if (isSyncCancelled(e)) return;      // 畫面已換（資料更新中被取消）：不顯示
       say('bad', '✕ 核定失敗：' + e.message);
       failHelp(e.message, approveDate);
     }
