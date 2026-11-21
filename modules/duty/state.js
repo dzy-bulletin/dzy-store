@@ -1,5 +1,7 @@
 // 出勤核定：四個分頁共用的狀態與呼叫。換了登入就整包重來（不留上一個人的資料）。
 import { api } from '../../js/api.js';
+// 考勤管理連不上時的話（api.js 預設短版，這裡多一句核定期限；2026-11-22 Eason 同意）
+export const NET_MSG_DUTY = '連不上系統。網路正常的話，可能是系統暫停中，請稍後再試；核定期限會順延。';
 import { getSession } from '../../js/auth.js';
 import { reqDecidable } from './quick-calc.js';
 import { viewCanWrite } from './calc.js';
@@ -140,7 +142,7 @@ async function call1(action, body, fix) {
   try {
     const k = fix.k, st = fix.st;
     const b0 = Object.assign({ mf: 1 }, body || {});      // 寫入也帶（2026-11-19 審查 R2：伺服器看到新前端的核定一定要有 base_ver、calc_ver）      // mf：這個前端會處理「伺服器先給副本」（mirror_stale）並背景再問（2026-11-19；沒帶的舊前端伺服器照舊等新的）
-    const r = await api('POST', '/m/duty/' + action, st ? Object.assign({}, b0, { asStore: st }) : b0, undefined, { read: READS.has(action) });
+    const r = await api('POST', '/m/duty/' + action, st ? Object.assign({}, b0, { asStore: st }) : b0, undefined, { read: READS.has(action), netMsg: NET_MSG_DUTY });
     if (r && r.meta && action !== 'mgr_approve_check' && S.key === k && S.asStore === st) S.meta = r.meta;      // 送出前檢查在背景跑、可能晚到：不拿它的休息帶蓋掉剛讀到的
     // 考勤副本（2026-11-14）：Mac mini 副本讀的資料標 __mirror；有 ver 的人核定時可以背景送（bg.js canBg）
     if (r && r.mirror_at) for (const f of ['employees', 'items']) if (Array.isArray(r[f])) for (const x of r[f]) if (x && typeof x === 'object') x.__mirror = true;

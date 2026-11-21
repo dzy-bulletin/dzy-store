@@ -120,8 +120,16 @@ const nearBound = (t, groups) => {
   for (const list of groups) { let best = null; for (const x of list) { const d = Math.abs(x - t); if (d <= TOL && (best == null || d < Math.abs(best - t))) best = x; } if (best != null) return best; }
   return null;
 };
-function snapIn(t, bounds) { const b = nearBound(t, bounds.st); return b != null ? b : Math.ceil(t / 15) * 15; }
-function snapOut(t, bounds) { const b = nearBound(t, bounds.en); return b != null ? b : Math.floor(t / 15) * 15; }
+// 2026-11-21 碎段修正（複審第 8 項）：bounds.pin＝上一輪找到的「這張卡改對到這個邊界」（見 corePeriods 外層）；bounds.fb＝這一輪哪些卡是靠取整（沒對到邊界）、取整到哪
+const noteFb = (bounds, side, t, g) => { if (!bounds.fb) return g; const m = bounds.fb[side]; if (!m.has(g)) m.set(g, new Set()); m.get(g).add(t); return g; };
+function snapIn(t, bounds) {
+  if (bounds.pin && bounds.pin.has('i' + t)) return bounds.pin.get('i' + t);
+  const b = nearBound(t, bounds.st); return b != null ? b : noteFb(bounds, 'i', t, Math.ceil(t / 15) * 15);
+}
+function snapOut(t, bounds) {
+  if (bounds.pin && bounds.pin.has('o' + t)) return bounds.pin.get('o' + t);
+  const b = nearBound(t, bounds.en); return b != null ? b : noteFb(bounds, 'o', t, Math.floor(t / 15) * 15);
+}
 
 /**
  * @param {object} o
@@ -132,6 +140,41 @@ function snapOut(t, bounds) { const b = nearBound(t, bounds.en); return b != nul
  * @returns {null | {periods:[{start,end}], hours, notes:[string], late:number, over:[{start,end}], overMin:number}}（over＝打卡在班表＋加班單以外的時段）
  */
 export function corePeriods(o) {
+  // 取整碎段（2026-11-21 複審第 8 項）：卡對不到邊界時取整到時鐘的 15 分格，但假單、休息帶、班表、加班單的起訖不一定在 15 分整點，
+  //   取整後的點離這種邊界不到 15 分 → 切完剩一段不到 15 分的時段（例 班表 10:24–13:12、假單 10:48–12:44、下班卡 12:52 → 取整 12:45 → 多出 12:44–12:45）。
+  //   「時段以 15 分鐘為一單位」：從邊界到取整點不到一單位＝這張卡就對到那個邊界（那一小段不算）。
+  //   要不要對到邊界，只有算完才知道那一小段是不是孤立的（前後有沒有接著別的核定時段），所以先照原本算一輪；
+  //   有這種碎段，就把造成它的那張卡改對到邊界、整個重算（加班單外的 8 小時額度照新的卡重算）。沒有碎段＝跟改之前一字不差。
+  //   邊界都在 15 分整點（真實資料幾乎都是）時，取整點跟邊界的距離一定是 0 或 15 分以上，不會走到這裡。
+  //   2026-11-22 Eason「遲到照記」：遲到、早退分鐘一律照原本那輪（例 請假到 13:07、13:10 回來待 10 分又走 → 回來那段拿掉，遲到 3 分照記）。
+  //   重算的結果只有在「遲到、早退（含中途離開、休息超過）、要補加班單分鐘、假單超過提醒都跟原本一樣、總分鐘沒變多、還有時段、沒剩碎段」時才用；
+  //   否則改用原本那輪、只把碎段那幾段拿掉（其他欄位都照原本那輪，遲到早退自然一樣）。
+  //   拿掉之後整天一段都不剩（唯一的核定段就是碎段）→ 照原本那輪不動（保留碎段）：空時段在畫面上是「整天請假／上班時段全被假單蓋掉」的意思，
+  //   回空的或 null 會讓主管看不到遲到早退，所以這類不修。
+  const first = corePass(o, null);
+  if (!first[1].length) return first[0];
+  const pin = new Map();
+  let out = first;
+  for (let k = 0; k < 4 && out[1].length; k++) {
+    const n0 = pin.size;
+    for (const f of out[1]) if (!pin.has(f.key)) pin.set(f.key, f.to);
+    if (pin.size === n0) break;
+    out = corePass(o, pin);
+  }
+  const a = first[0], b = out[0];
+  if (b && !out[1].length && b.periods.length && minsOf(b) <= minsOf(a) && ['late', 'early', 'gapLate', 'restLate', 'overMin', 'leaveOver'].every((k) => b[k] === a[k])) return b;
+  return dropFrags(a, first[1]) || a;
+}
+const minsOf = (r) => (r ? total(r.periods.map((p) => span(toMin(p.start), toMin(p.end)))) : 0);
+/** 原本那輪只拿掉碎段：時段、時數跟著改；遲到早退、說明、要補加班單照原本那輪（說明裡「班表外多做／比班表多 N 小時」與 leaveOver 是含碎段算的，最多差 14 分）。一段都不剩回 null（呼叫端照原本那輪） */
+function dropFrags(r, frags) {
+  const gone = new Set(frags.map((f) => toHm(f.p) + '–' + toHm(f.q)));
+  const periods = r.periods.filter((p) => !gone.has(p.start + '–' + p.end));
+  if (!periods.length) return null;
+  return Object.assign({}, r, { periods, hours: Math.round(minsOf({ periods }) / 60 * 100) / 100 });
+}
+
+function corePass(o, pin) {
   const plan = o.plan && o.plan.work && Array.isArray(o.plan.segs) ? o.plan.segs : [];
   const S = merge(plan.map((x) => span(toMin(x.start), toMin(x.end))));
   // 沒有班表（這家店沒排他，例：到別店支援；或班表時段是空的）＋有已核准加班單（2026-11-18 Eason，張淳 11/17 金山）：照打卡算，加班單只標示哪段是加班、不截斷時段。
@@ -182,10 +225,10 @@ export function corePeriods(o) {
   }
   let W = merge(raw.filter((x) => x.in != null && x.out != null).map((x) => span(x.in, x.out)));
   if (!W.length) {
-    if (!S.length || zeroOnly) return null;                      // 沒打卡也沒班：沒得算；只有同一分鐘的上下班卡＝有打卡但 0 分鐘，不照班表填（卡沒有缺，打卡端不會要忘打卡單）
+    if (!S.length || zeroOnly) return [null, []];                     // 沒打卡也沒班：沒得算；只有同一分鐘的上下班卡＝有打卡但 0 分鐘，不照班表填（卡沒有缺，打卡端不會要忘打卡單）
     // 沒打卡、有已核准整天的假單／出差單（沒填時段，時數合計蓋滿班表或滿 8 小時）＝整天請假：不照班表填時段（2026-11-15 游家輝事假 8 小時被要求補 4 張忘打卡單）
     const noTime = reqs.filter((r) => (r.kind === 'leave' || r.kind === 'trip') && !r.start).reduce((a, r) => a + (Number(r.hours) || 0), 0);
-    if (noTime > 0 && (noTime >= total(minus(S, BRKcut)) / 60 - 0.01 || noTime >= 8)) return null;      // 班表時數要扣不打卡休息帶（央廚 09–17＝7 小時，事假 7 小時就是整天）
+    if (noTime > 0 && (noTime >= total(minus(S, BRKcut)) / 60 - 0.01 || noTime >= 8)) return [null, []];      // 班表時數要扣不打卡休息帶（央廚 09–17＝7 小時，事假 7 小時就是整天）
     W = S.map((x) => x.slice());                                 // 沒打卡但有班：照班表（打卡端回要忘打卡單）
   }
   const Wraw = W.map((x) => x.slice());
@@ -257,7 +300,7 @@ export function corePeriods(o) {
   // 已核准、有時段假單的起訖也當對齊點（2026-11-18 Eason 選 A：假 16–18、15:50 下班 → 算到 16:00；假 17–19、19:10 回 → 從 19:00 起）
   // 2026-11-21 A'：分成上班卡用的開始類（st）、下班卡用的結束類（en），見 snapIn／snapOut
   const head = (g) => g.map((x) => x[0]), tail = (g) => g.map((x) => x[1]);
-  const bounds = { st: [head(S), head(OT), tail(BRK), tail(LV)], en: [tail(S), tail(OT), head(BRK), head(LV)] };      // 休息帶、假單：結束＝該回來上班（開始類），開始＝該下班（結束類）
+  const bounds = { st: [head(S), head(OT), tail(BRK), tail(LV)], en: [tail(S), tail(OT), head(BRK), head(LV)], pin, fb: { i: new Map(), o: new Map() } };      // 休息帶、假單：結束＝該回來上班（開始類），開始＝該下班（結束類）
   W = merge(W.map(([a, b]) => [snapIn(a, bounds), snapOut(b, bounds)]));
 
   // 2. 班表＋已核准加班單裡的打卡照算；都沒有（排休、沒排班又沒加班單）就照打卡（打卡端回要加班單）
@@ -370,8 +413,8 @@ export function corePeriods(o) {
   else if (BRK.length) core = merge(intersect(core, S).concat(minus(minus(core, S), BRK)));      // 半天班：班表裡不扣，班表外多出來的照扣
   if (RESTS.length) core = minus(core, RESTS);
   core = merge(core);
-  if (!core.length && lvAll) return { periods: [], hours: 0, notes, late: 0, early: 0, over: [], overMin: 0, leaveOver: 0 };      // 照假單登記、上班時段空（2026-11-18 驗收：原本回 null 不預填）
-  if (!core.length) return null;
+  if (!core.length && lvAll) return [{ periods: [], hours: 0, notes, late: 0, early: 0, over: [], overMin: 0, leaveOver: 0 }, []];      // 照假單登記、上班時段空（2026-11-18 驗收：原本回 null 不預填）
+  if (!core.length) return [null, []];
 
   // 5. 給主管看的說明
   const FREE = merge(A.concat(freeExtra));
@@ -403,7 +446,22 @@ export function corePeriods(o) {
   // 假單沒填時段、上班＋假單比班表多（2026-11-18 第 5 題）：只提醒、不擋。班表＝扣不打卡休息帶與班別休息；加班單那段不算
   let leaveOver = 0;
   if (untimedLeave && S.length) leaveOver = Math.max(0, Math.round(total(minus(core, OT)) + leaveMin - total(minus(minus(S, BRKcut), RESTS))));
-  return { periods, hours: Math.round(total(core) / 60 * 100) / 100, notes, late: late + gapLate + restLate, early, over, overMin, leaveOver, gapLate, restLate };
+  return [{ periods, hours: Math.round(total(core) / 60 * 100) / 100, notes, late: late + gapLate + restLate, early, over, overMin, leaveOver, gapLate, restLate }, fragPins(core, bounds, BRK)];
+}
+
+/** 取整碎段（見 corePeriods）：最後的核定時段裡，不到 15 分、一頭是「卡取整出來的點」（不是任何邊界）的那段，
+ *  從取整那頭往裡找最近的邊界（班表、加班單、假單、休息帶的起訖）→ 回 [{ key: 'o'+下班卡分鐘 | 'i'+上班卡分鐘, to: 改對到的邊界, p, q: 碎段起訖 }]。
+ *  另一頭是班別休息（break_min）照實扣的卡、或 8 小時額度剛好用完的點，裡面又沒有邊界的，不在這裡處理（跟取整無關，改之前就有）。 */
+function fragPins(core, bounds, BRK) {
+  const B = new Set(bounds.st.concat(bounds.en).flat().concat(BRK.flat().map((x) => x + 1440)));
+  const res = [];
+  for (const [p, q] of core) {
+    if (!(q - p > 0 && q - p < TOL)) continue;
+    const inner = [...B].filter((x) => x >= p && x <= q);
+    if (bounds.fb.o.has(q) && !B.has(q)) { const x = inner.filter((y) => y < q); if (x.length) for (const t of bounds.fb.o.get(q)) res.push({ key: 'o' + t, to: Math.max(...x), p, q }); }
+    if (bounds.fb.i.has(p) && !B.has(p)) { const x = inner.filter((y) => y > p); if (x.length) for (const t of bounds.fb.i.get(p)) res.push({ key: 'i' + t, to: Math.min(...x), p, q }); }
+  }
+  return res;
 }
 
 /** 超出的打卡時段 → 要加班單的時段：接在班表／加班單（bounds）後面的開頭、前面的結尾各扣 15 分寬限，再往內取整到 15 分，不到 15 分不列 */

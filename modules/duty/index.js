@@ -1,4 +1,4 @@
-import { S, reset, refreshReqBadge, dutyManager, dutyHours, multiStores, allModeOf, setAll, viewNoHoursStore, cancelSyncWaits } from './state.js';
+import { S, reset, refreshReqBadge, dutyManager, dutyHours, multiStores, allModeOf, setAll, viewNoHoursStore, cancelSyncWaits, NET_MSG_DUTY } from './state.js';
 import { renderOverview, storeBar, personStoreBar } from './overview.js';
 import { renderApprove } from './approve.js';
 import { renderDevice } from './device.js';
@@ -70,7 +70,7 @@ function unlockForm(ctx) {
     e.preventDefault();
     busy(form.querySelector('#dutyBtn'), async () => {
       try {
-        const r = await api('POST', '/duty/unlock', { password: form.querySelector('#dutyPw').value });
+        const r = await api('POST', '/duty/unlock', { password: form.querySelector('#dutyPw').value }, undefined, { netMsg: NET_MSG_DUTY });
         setFlag(r && r.mustChange ? 'm' : '1');
         ctx.rerender();
       } catch (er) { setMsg(form.querySelector('#dutyErr'), er.message); }
@@ -92,7 +92,7 @@ function changeForm(ctx) {
     if (a.length < 4) return setMsg(err, '新的核定密碼至少要 4 碼');
     if (a !== b) return setMsg(err, '兩次輸入的不一樣');
     busy(form.querySelector('#dutyNewBtn'), async () => {
-      try { await api('POST', '/duty/password', { newPassword: a }); setFlag('1'); ctx.rerender(); }
+      try { await api('POST', '/duty/password', { newPassword: a }, undefined, { netMsg: NET_MSG_DUTY }); setFlag('1'); ctx.rerender(); }
       catch (er) { setMsg(err, er.message); }
     });
   };

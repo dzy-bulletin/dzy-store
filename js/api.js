@@ -2,11 +2,15 @@ import { gateway, MOCK } from './config.js';
 import { isGatewayError } from './gateway.js';
 import { whileLeaving } from './leaving.js';
 
+// 連不上時給人看的話（2026-11-22 停機演練後 Eason 同意）：預設短版；考勤管理（核定）的呼叫帶 opts.netMsg 換成含「核定期限會順延」的長版（見 modules/duty/state.js NET_MSG_DUTY）
+const NET_MSG = '連不上系統。網路正常的話，可能是系統暫停中，請稍後再試。';
+
 let hooks = { getToken: () => null, onAuth: () => {}, onMust: () => {} };
 export function setHooks(h) { hooks = { ...hooks, ...h }; }
 
 // 回傳 data；失敗丟 Error（.code=error 代碼，.message=後端白話訊息）
 // tokenOverride：用指定的 token 打（嵌入模式要登出「舊的」或「剛建的多餘」session 時用），不影響目前登入
+// opts.netMsg：連不上時顯示的話（預設 NET_MSG）
 // opts.keepalive：頁面／iframe 在請求途中被拆掉也讓瀏覽器把它送完（嵌入登出用，2026-11-20）
 // opts.read：這支 POST 其實是讀取（例如考勤的讀取動作），新路出事時可以放心用舊路重送一次。GET 與 body.peek===true 自動算讀取
 export async function api(method, path, body, tokenOverride, opts) {
@@ -30,7 +34,7 @@ export async function api(method, path, body, tokenOverride, opts) {
       });
     }
   } catch (e) {
-    const err = new Error('連不上伺服器，請確認網路後再試');
+    const err = new Error((opts && opts.netMsg) || NET_MSG);
     err.code = 'NETWORK';
     throw err;
   }
@@ -67,7 +71,7 @@ export async function apiUpload(path, formData) {
       });
     }
   } catch (e) {
-    const err = new Error('連不上伺服器，請確認網路後再試');
+    const err = new Error(NET_MSG);
     err.code = 'NETWORK';
     throw err;
   }
@@ -77,7 +81,7 @@ export async function apiUpload(path, formData) {
 // 取圖片（GET）：入口通行證放標頭，不放網址；回 Blob，呼叫端用 URL.createObjectURL 顯示
 export async function apiBlob(path) {
   const token = hooks.getToken();
-  const netErr = () => { const err = new Error('連不上伺服器，請確認網路後再試'); err.code = 'NETWORK'; return err; };
+  const netErr = () => { const err = new Error(NET_MSG); err.code = 'NETWORK'; return err; };
   if (MOCK) {
     const { handleBlob } = await whileLeaving(import('./mock.js'));
     const res = await handleBlob(path, token);
