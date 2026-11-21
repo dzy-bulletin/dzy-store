@@ -7,6 +7,7 @@
 //      2026-11-20 Eason：二段班中途離開又回來比照遲到（核定蓋過空檔、空檔記遲到），開關 GAP_LATE_FROM（上線日，跟打卡端同一天），見 corePeriods 1b、1c。
 //   4. 忘打卡單補的時間超出班表的部分不算；加班單要有打卡涵蓋（打卡端檢查）。
 //   5. 打卡跟班表（或加班單）邊界差 15 分鐘內算對得上；其他只往少的方向取整到 15 分（上班往後、下班往前）。
+//      2026-11-21 Eason 選 A'：上班卡只跟「開始類」邊界對、下班卡只跟「結束類」邊界對，取最近的（見 snapIn／snapOut）。
 // 沒班表也沒加班單（例：排休卻來上班）：照打卡算，讓打卡端回「要有加班單」。沒打卡又有班表：照班表，讓打卡端回「要有忘打卡單」。
 
 const TOL = 15;
@@ -107,9 +108,20 @@ const minus = (A, B) => {
 };
 const total = (list) => list.reduce((a, x) => a + x[1] - x[0], 0);
 
-/** 邊界（班表、加班單的開始／結束、休息帶兩端）：差 15 分內對齊；否則上班往後、下班往前取整到 15 分 */
-function snapIn(t, bounds) { const b = bounds.find((x) => Math.abs(x - t) <= TOL); return b != null ? b : Math.ceil(t / 15) * 15; }
-function snapOut(t, bounds) { const b = bounds.find((x) => Math.abs(x - t) <= TOL); return b != null ? b : Math.floor(t / 15) * 15; }
+/** 邊界對齊（2026-11-21 Eason 選 A'，mala-store-ops #335 舊問題 2）：上班卡只對齊「開始類」邊界（班表開始、加班單開始、休息帶結束、假單結束），
+ *  下班卡只對齊「結束類」邊界（班表結束、加班單結束、休息帶開始、假單開始），差 15 分內取最近的那個。
+ *  優先順序照改之前：先看班表，班表對不到才看加班單，再來休息帶、假單（同一類裡取最近）。不讓休息帶搶過自己的班表：
+ *    例 班表 13:15–19:15、休息帶 12–13，13:06 上班卡 → 對 13:15（班表開始），不對比較近的 13:00（休息帶結束）——
+ *    對到 13:00 會把 13:00–13:15 算成「班表外多做」，違反 2026-11-16 Eason「上班前 15 分鐘打卡不算」。
+ *  都對不到：上班往後、下班往前取整到 15 分（同改之前）。
+ *  改之前是不分上下班、取清單裡「第一個」差 15 分內的邊界：兩段班中間只隔幾分鐘（09–11、11:10–15）時，11:10 上班卡被對到 11:00（前一段的結束），兩段被接成一段。
+ *  bounds＝{ st: [開始類，依優先順序分組], en: [結束類，同] }（corePeriods 裡組） */
+const nearBound = (t, groups) => {
+  for (const list of groups) { let best = null; for (const x of list) { const d = Math.abs(x - t); if (d <= TOL && (best == null || d < Math.abs(best - t))) best = x; } if (best != null) return best; }
+  return null;
+};
+function snapIn(t, bounds) { const b = nearBound(t, bounds.st); return b != null ? b : Math.ceil(t / 15) * 15; }
+function snapOut(t, bounds) { const b = nearBound(t, bounds.en); return b != null ? b : Math.floor(t / 15) * 15; }
 
 /**
  * @param {object} o
@@ -242,7 +254,10 @@ export function corePeriods(o) {
       notes.push('中途離開 ' + fill.map(([a, b]) => toHm(a) + '–' + toHm(b)).join('、') + '，' + gapLate + ' 分記遲到（中途離開比照遲到，薪資照扣）');
     }
   }
-  const bounds = [].concat(...S, ...OT, ...BRK, ...LV);      // 已核准、有時段假單的起訖也當對齊點（2026-11-18 Eason 選 A：假 16–18、15:50 下班 → 算到 16:00；假 17–19、19:10 回 → 從 19:00 起）
+  // 已核准、有時段假單的起訖也當對齊點（2026-11-18 Eason 選 A：假 16–18、15:50 下班 → 算到 16:00；假 17–19、19:10 回 → 從 19:00 起）
+  // 2026-11-21 A'：分成上班卡用的開始類（st）、下班卡用的結束類（en），見 snapIn／snapOut
+  const head = (g) => g.map((x) => x[0]), tail = (g) => g.map((x) => x[1]);
+  const bounds = { st: [head(S), head(OT), tail(BRK), tail(LV)], en: [tail(S), tail(OT), head(BRK), head(LV)] };      // 休息帶、假單：結束＝該回來上班（開始類），開始＝該下班（結束類）
   W = merge(W.map(([a, b]) => [snapIn(a, bounds), snapOut(b, bounds)]));
 
   // 2. 班表＋已核准加班單裡的打卡照算；都沒有（排休、沒排班又沒加班單）就照打卡（打卡端回要加班單）

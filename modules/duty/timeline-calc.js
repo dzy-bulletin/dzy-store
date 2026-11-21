@@ -173,8 +173,11 @@ export function timelineModel(o) {
     //   原本一律拿第一段班算：兩段班第一段沒來、第二段遲到又晚走（10–14、17–21，打卡 17:30–23:00）整段第一段被當成有上班，晚走的被畫成加班沒單
     const p0 = union(punch)[0], planS = plan.slice().sort((x, y) => x.a - y.a);
     const s0 = p0 ? planS.find((p) => p.b > p0.a) || planS[0] : null;
-    const edge = [].concat(...plan.concat(otCover, bkAll).map((s) => [s.a, s.b]));
-    const snap = (t, up) => { const e = edge.find((x) => Math.abs(x - t) <= TOL); return e != null ? e : (up ? Math.ceil(t / TOL) : Math.floor(t / TOL)) * TOL; };
+    // 對齊同 core-calc snapIn／snapOut（2026-11-21 Eason 選 A'）：上班卡只對開始類（班表開始、加班單開始、休息帶結束）、下班卡只對結束類，
+    //   依序先看班表、再加班單、再休息帶，同一類取差 15 分內最近的；都對不到照舊取整
+    const edgeIn = [plan.map((s) => s.a), otCover.map((s) => s.a), bkAll.map((s) => s.b)], edgeOut = [plan.map((s) => s.b), otCover.map((s) => s.b), bkAll.map((s) => s.a)];
+    const nearE = (t, groups) => { for (const g of groups) { let best = null; g.forEach((x) => { if (Math.abs(x - t) <= TOL && (best == null || Math.abs(x - t) < Math.abs(best - t))) best = x; }); if (best != null) return best; } return null; };
+    const snap = (t, up) => { const e = nearE(t, up ? edgeIn : edgeOut); return e != null ? e : (up ? Math.ceil(t / TOL) : Math.floor(t / TOL)) * TOL; };
     const lateOk = !!p0 && p0.a > s0.a && p0.a < s0.b && snap(p0.b, false) > snap(p0.a, true) && snap(p0.a, true) < s0.b;
     const lateHead = lateOk ? minus(inter(work, [{ a: s0.a, b: p0.a }]), punch) : [];
     const workedMin = len(inter(work, punch)) + len(lateHead);
