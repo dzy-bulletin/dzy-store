@@ -2,7 +2,8 @@
 .sm-bar .sm-h{font-size:17px;font-weight:900;margin-bottom:4px}
 .sm-filters{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end}
 .sm-f{display:flex;flex-direction:column;gap:4px;min-width:0;max-width:100%}
-.sm-f select{min-height:40px;max-width:100%}
+.sm-f select,.sm-f input{min-height:40px;max-width:100%}
+.sm-f input[type=search]{min-width:20em}
 .sm-checks{display:flex;flex-wrap:wrap;gap:4px 12px;min-height:40px;align-items:center}
 .sm-chk{display:inline-flex;align-items:center;gap:6px;font-size:14px;font-weight:700;cursor:pointer;min-height:40px;overflow-wrap:anywhere}
 .sm-chk input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--red)}
@@ -29,6 +30,7 @@
 .sm-tbl th,.sm-tbl td{white-space:normal;overflow-wrap:anywhere;vertical-align:top;padding:7px 6px}
 .sm-tbl th{background:#f7f2ef;font-size:12px}
 .sm-tbl .sm-c-pick{width:32px;text-align:center}
+.sm-tbl .sm-c-seq{width:38px;text-align:right;white-space:nowrap;color:var(--muted);font-variant-numeric:tabular-nums}
 .sm-tbl .sm-c-date,.sm-tbl .sm-c-req,.sm-tbl .sm-c-fin,.sm-tbl .sm-c-st,.sm-tbl .sm-c-kind{white-space:nowrap}
 .sm-pick,#smAll{width:20px;height:20px;margin:0;accent-color:var(--red);cursor:pointer}
 .sm-row.sm-flag-diff{background:#fff6ea}
@@ -66,7 +68,8 @@
   .sm-tbl td.sm-c-pick{position:absolute;right:10px;top:8px;width:auto;padding:0}
   .sm-tbl td.sm-c-pick::before{content:none}
   .sm-tbl td.sm-c-date,.sm-tbl td.sm-c-req,.sm-tbl td.sm-c-fin,.sm-tbl td.sm-c-st,.sm-tbl td.sm-c-kind{white-space:normal}
-  .sm-f,.sm-f select{width:100%}
+  .sm-tbl td.sm-c-seq{text-align:left;white-space:normal;color:inherit;font-weight:900}
+  .sm-f,.sm-f select,.sm-f input[type=search]{width:100%;min-width:0}
 }
 
 /* ── 列印：body 加 sm-print-list／sm-print-slip 時只印 #smPrint（summary.js doPrint；@page 由程式動態插入、印完移掉）── */
@@ -93,8 +96,8 @@
 .sm-p-tbl tr.sm-flag-diff td{background:#ffe9cc}
 .sm-p-tbl tr.sm-flag-voided_final td{background:#fbd5d1}
 .sm-p-none{text-align:center;color:#555}
-.sm-pc-date{width:5%}.sm-pc-emp{width:9%}.sm-pc-kind{width:4.5%}.sm-pc-type{width:6.5%}.sm-pc-time{width:8%}.sm-pc-req{width:4.5%}.sm-pc-fin{width:4.5%}
-.sm-pc-place{width:7%}.sm-pc-reason{width:15%}.sm-pc-att{width:3.5%}.sm-pc-st{width:5%}.sm-pc-flag{width:8%}.sm-pc-at{width:7%}.sm-pc-by{width:6%}.sm-pc-dat{width:6.5%}
+.sm-pc-seq{width:3%}.sm-pc-date{width:5%}.sm-pc-emp{width:9%}.sm-pc-kind{width:4.5%}.sm-pc-type{width:6.5%}.sm-pc-time{width:8%}.sm-pc-req{width:4.5%}.sm-pc-fin{width:4.5%}
+.sm-pc-place{width:7%}.sm-pc-reason{width:12%}.sm-pc-att{width:3.5%}.sm-pc-st{width:5%}.sm-pc-flag{width:8%}.sm-pc-at{width:7%}.sm-pc-by{width:6%}.sm-pc-dat{width:6.5%}
 .sm-p-end{break-inside:avoid;page-break-inside:avoid;margin-top:8px}
 .sm-p-subt{font-weight:900;font-size:10pt;margin-bottom:2px}
 .sm-p-tot{border-collapse:collapse;width:100%;table-layout:fixed}

@@ -10,6 +10,12 @@
 
 export const KIND_LABEL = { leave: '請假', ot: '加班', trip: '出差', miss: '忘打卡' };
 export const KIND_ORDER = ['leave', 'ot', 'trip', 'miss'];
+// 畫面上「單別」的分類（2026-11-23 主管：請假／補休／加班／出差要能分開查）：補休＝請假單裡假別是「補休」的那幾張；原始 kind 不動（單張標題、對帳、合計都照 kind）。
+// 假別「補休」兩個字固定（薪資內建假別、打卡 LINE 假別清單、補休提醒 comp-period.js 都用去頭尾空白後整串相等判斷），這裡照同一個寫法，不做模糊比對。
+export const COMP_TYPE = '補休';
+export const CAT_LABEL = { leave: '請假', comp: '補休', ot: '加班', trip: '出差', miss: '忘打卡' };
+export const CAT_ORDER = ['leave', 'comp', 'ot', 'trip', 'miss'];
+export const catOf = (kind, type) => (kind === 'leave' && String(type == null ? '' : type).trim() === COMP_TYPE ? 'comp' : kind);
 export const SLIP_TITLE = { leave: '請假單', ot: '加班單', trip: '出差單', miss: '忘打卡單' };
 export const STATUS_LABEL = { pending: '待審', approved: '已核准', rejected: '已退回', cancelled: '本人取消', voided: '已作廢', finalized: '已核定' };
 export const FLAG_LABEL = { diff: '時數不同', unfinal: '還沒核定', voided_final: '申請已作廢、核定還在', no_request: '沒有申請單', unmatched: '對不到同仁' };
@@ -52,7 +58,7 @@ function reqRow(it, store, storeName) {
   return {
     key: 'R|' + store + '|' + String(it.id), src: 'req', id: String(it.id), store, storeName,
     emp_id: String(it.emp_id || ''), name: String(it.name || ''), date: String(it.date || ''),
-    kind, kindLabel: KIND_LABEL[kind] || String(kind),
+    kind, kindLabel: KIND_LABEL[kind] || String(kind), cat: catOf(kind, it.leave_type), catLabel: CAT_LABEL[catOf(kind, it.leave_type)] || String(kind),
     type: kind === 'leave' ? String(it.leave_type || '') : kind === 'miss' ? (MISS_LABEL[it.miss_type] || '') : '',
     time: timeText(it), reqHours: kind === 'miss' ? null : num(it.hours), finalHours: null, finalText: '',
     place: trip ? tripPlace(it.reason) : '', reason: trip ? tripWhy(it.reason) : String(it.reason || ''),
@@ -65,10 +71,11 @@ function reqRow(it, store, storeName) {
 function finalRow(lv, store, storeName) {
   const trip = String(lv.type == null ? '' : lv.type).trim() === '出差';
   const h = num(lv.hours) || 0;   // 核定時數空白＝0（同薪資 payCollect）
+  const type = trip ? '' : String(lv.type == null ? '' : lv.type).trim(), cat = catOf(trip ? 'trip' : 'leave', type);
   return {
     key: 'L|' + store + '|' + String(lv.id), src: 'final', id: String(lv.id), store, storeName,
     emp_id: String(lv.emp_id || ''), name: String(lv.name || ''), date: String(lv.date || ''),
-    kind: trip ? 'trip' : 'leave', kindLabel: trip ? '出差' : '請假', type: trip ? '' : String(lv.type == null ? '' : lv.type).trim(),
+    kind: trip ? 'trip' : 'leave', kindLabel: trip ? '出差' : '請假', cat, catLabel: CAT_LABEL[cat], type,
     time: '', reqHours: null, finalHours: h, finalText: '',
     place: '', reason: '', attach: null, status: 'finalized', statusLabel: STATUS_LABEL.finalized,
     flag: '', flagLabel: '', created_at: '', decided_by: '', decided_at: '', reject_reason: '', void_reason: '', self: false, standalone: true,
@@ -77,12 +84,14 @@ function finalRow(lv, store, storeName) {
 
 const setFlag = (r, f) => { r.flag = f; r.flagLabel = FLAG_LABEL[f] || ''; };
 
-// 排序：門市 → 日期 → 員編 → 單別 → 送出時間（核定列沒有送出時間，排在同鍵申請列後面）
+// 排序（2026-11-23 主管：結果要依日期依序）：日期 → 送出時間 → 門市 → 員編 → 單別 → 姓名 → key（升冪）。
+// 核定列沒有送出時間，排在同一天所有申請列的後面（同一天的核定列之間再照 門市 → 員編 → 單別）。
+// 原本是 門市 → 日期 → 員編 → 單別 → 送出時間：只是把門市從第一鍵移到送出時間後面、送出時間提前，其餘相對順序不變；單別照畫面上的五類（請假、補休、加班、出差、忘打卡）。
 export function sortRows(rows) {
-  const ko = k => { const i = KIND_ORDER.indexOf(k); return i < 0 ? 9 : i; };
+  const co = r => { const i = CAT_ORDER.indexOf(r.cat || r.kind); return i < 0 ? 9 : i; };
   const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
-  return rows.slice().sort((a, b) => cmp(a.store, b.store) || cmp(a.date, b.date) || cmp(a.emp_id, b.emp_id) || ko(a.kind) - ko(b.kind)
-    || cmp(a.created_at || '￿', b.created_at || '￿') || cmp(a.name, b.name) || cmp(a.key, b.key));
+  return rows.slice().sort((a, b) => cmp(a.date, b.date) || cmp(a.created_at || '￿', b.created_at || '￿') || cmp(a.store, b.store) || cmp(a.emp_id, b.emp_id)
+    || co(a) - co(b) || cmp(a.name, b.name) || cmp(a.key, b.key));
 }
 
 // data＝mgr_req_month 回應 {ym, items, leaves}；opts.store／storeName＝列上沒帶 store 時用的門市（單一門市＝''）
@@ -120,13 +129,36 @@ export function buildRows(data, opts) {
   return sortRows(rows);
 }
 
-// 篩選（只在前端）：f.stores＝門市代號陣列（null／undefined＝不限）、f.kinds＝單別陣列、f.status＝'approved'（含已核定）｜'all'、f.emp＝empKey、f.check＝只看要確認
+// 篩選（只在前端）：f.stores＝門市代號陣列（null／undefined＝不限）、f.kinds＝單別（畫面上五類 cat：leave／comp／ot／trip／miss）陣列、f.status＝'approved'（含已核定）｜'all'、
+//   f.emp＝empKey（選定的一位同仁）、f.q＝同仁搜尋字（姓名或員編的一部分，英文不分大小寫）、f.check＝只看要確認
 export const isApprovedView = r => r.status === 'approved' || r.status === 'finalized';
+export const empMatch = (r, q) => { const t = String(q || '').trim().toLowerCase(); return !t || String(r.name || '').toLowerCase().indexOf(t) >= 0 || String(r.emp_id || '').toLowerCase().indexOf(t) >= 0; };
 export function filterRows(rows, f) {
   const o = f || {};
   const stores = Array.isArray(o.stores) ? o.stores : null, kinds = Array.isArray(o.kinds) ? o.kinds : null;
-  return (rows || []).filter(r => (!stores || stores.indexOf(r.store) >= 0) && (!kinds || kinds.indexOf(r.kind) >= 0)
-    && (o.status === 'all' || isApprovedView(r)) && (!o.emp || empKey(r) === o.emp) && (!o.check || !!r.flag));
+  return (rows || []).filter(r => (!stores || stores.indexOf(r.store) >= 0) && (!kinds || kinds.indexOf(r.cat) >= 0)
+    && (o.status === 'all' || isApprovedView(r)) && (!o.emp || empKey(r) === o.emp) && empMatch(r, o.q) && (!o.check || !!r.flag));
+}
+
+// 序號：照傳進來的列（畫面上篩選＋排序後的結果）從 1 連續編到最後一筆；不存進資料、不影響 key，換篩選就重編。畫面、列印、Excel 共用
+export const numbered = rows => (rows || []).map((r, i) => ({ seq: i + 1, r }));
+
+// 同仁搜尋框（原本是下拉）：選項依讀到的資料產生，同店同員編一位；資料有兩家以上的店時後面加「・店名」，同名不同店才分得開。
+// empText＝畫面上「姓名（員編）」的寫法（summary.js 的 empText）。回 [{ key, label, name, emp_id, store, storeName }]，照 門市 → 員編 → 姓名 排
+export const ALL_EMP = '全部同仁';
+export function empOptions(rows, empText) {
+  const seen = new Map();
+  for (const r of rows || []) { const k = empKey(r); if (!seen.has(k)) seen.set(k, r); }
+  const multi = new Set((rows || []).map(r => r.store)).size > 1;
+  return [...seen.entries()].sort((a, b) => (a[1].store + '|' + a[1].emp_id + a[1].name < b[1].store + '|' + b[1].emp_id + b[1].name ? -1 : 1))
+    .map(([key, r]) => ({ key, label: empText(r) + (multi && r.storeName ? '・' + r.storeName : ''), name: r.name, emp_id: r.emp_id, store: r.store, storeName: r.storeName }));
+}
+// 搜尋框打的字 → 篩選條件：空白或「全部同仁」＝不篩；跟某一位的選項文字一模一樣（從清單點選）＝那一位（emp）；其他＝姓名或員編的一部分（q）
+export function empResolve(options, text) {
+  const t = String(text == null ? '' : text).trim();
+  if (!t || t === ALL_EMP) return { emp: '', q: '' };
+  const hit = (options || []).find(o => o.label === t);
+  return hit ? { emp: hit.key, q: '' } : { emp: '', q: t };
 }
 
 // 合計（依目前篩選後的列；一組只算一次＝核定時數只掛在組內第一張，其他寫「併上列」）

@@ -755,6 +755,7 @@ function demoMonth(which) {
       R('E02', '李小華', 'leave', D(pm, 5), { leave_type: '病假', start: '09:00', end: '13:00', hours: 4, reason: '看醫生（上午）', attach_id: 'att-demo-2' }),
       R('E02', '李小華', 'leave', D(pm, 5), { leave_type: '病假', start: '14:00', end: '18:00', hours: 4, reason: '看醫生（下午）' }),
       R('E03', '陳大文', 'leave', D(pm, 8), { leave_type: '特休假', hours: 8, reason: '出國' }),
+      R('E03', '陳大文', 'leave', D(pm, 9), { leave_type: '補休', start: '13:00', end: '17:00', hours: 4, reason: '補上個月加班' }),
       R('E01', '王小明', 'leave', D(pm, 10), { leave_type: '事假', status: 'voided', voided_at: at(D(pm, 11), '10:00'), voided_by: MGR, void_reason: '同仁改上班' }),
       R('E04', '林小美', 'trip', D(pm, 12), { hours: 4, start: '13:00', end: '17:00', reason: '地點：台中央廚；事由：教育訓練' }),
       R('E03', '陳大文', 'ot', D(pm, 14), { start: '18:00', end: '20:00', hours: 2, reason: '晚上客人多' }),
@@ -766,7 +767,7 @@ function demoMonth(which) {
       R('E01', '王小明', 'ot', D(cm, 2), { start: '18:00', end: '20:00', hours: 2, reason: '備料' }),
     ],
     leaves: [L('E01', '王小明', D(pm, 3), '事假', 8), L('E02', '李小華', D(pm, 5), '病假', 6), L('E01', '王小明', D(pm, 10), '事假', 8), L('E04', '林小美', D(pm, 12), '出差', 4),
-      L('E03', '陳大文', D(pm, 22), '事假', 3), L('', '王 小名', D(pm, 25), '事假', 2)],
+      L('E03', '陳大文', D(pm, 9), '補休', 4), L('E03', '陳大文', D(pm, 22), '事假', 3), L('', '王 小名', D(pm, 25), '事假', 2)],
   };
 }
 // 示範附件：圖片用 canvas 畫一張「示範附件」；PDF 給一小段 PDF 檔頭（只是讓下載連結出得來）
@@ -1136,10 +1137,11 @@ function dutyDo(d, action, b) {
         const ot = over ? over.ot_h : (k % 3) * 2, used = over ? over.used_h : ((k + 1) % 4) * 1.5, allowed = over ? over.allowed !== false : i % 2 === 0;
         quotas[r.emp_id] = { [cc]: { comp: true, monthly: true, allowed, ot_h: ot, used_h: used, balance_h: Math.round((ot - used) * 100) / 100, ym: b.ym } };
       });
+      // 總部另外問的薪酬單位讀不到（2026-11-23，伺服器 pay_failed；前端補休明細帶 comp_book 才回）：e2e 設 d.compPayFailed＝[{store, storeName}]；d.compPayEmpty＝true 時額度整份空
       // 薪資在這組、打卡在別家的個人例外（伺服器 home_people，2026-11-23）：e2e 設 d.compHome＝[{emp_id, name, active}]，額度用 d.compBank 或加班 2、補休 5
       const home = b.comp_book === true && Array.isArray(d.compHome) ? d.compHome : [];
       home.forEach(p => { const o = (d.compBank || {})[p.emp_id] || { ot_h: 2, used_h: 5 }; quotas[p.emp_id] = { [cc]: { comp: true, monthly: true, allowed: true, ot_h: o.ot_h, used_h: o.used_h, balance_h: Math.round((o.ot_h - o.used_h) * 100) / 100, ym: b.ym } }; });
-      return ok(Object.assign({ ok: true, store: 'SSLGF', ym: String(b.ym), day_hours: 8, types, quotas, events: {} }, home.length ? { home_people: clone(home) } : {}));
+      return ok(Object.assign({ ok: true, store: 'SSLGF', ym: String(b.ym), day_hours: 8, types, quotas: d.compPayEmpty ? {} : quotas, events: {} }, b.comp_book === true && Array.isArray(d.compPayFailed) ? { pay_failed: clone(d.compPayFailed) } : {}, home.length ? { home_people: clone(home) } : {}));
     }
     return ok(clone(d.leaveOpts || { ok: true, store: 'SSLGF', ym: taipeiDay().slice(0, 7), day_hours: 8, types: MOCK_LEAVES.map((n, i) => ({ code: 'lt' + i, name: n })), quotas: {}, events: {} }));
   }

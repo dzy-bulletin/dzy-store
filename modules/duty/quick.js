@@ -148,12 +148,13 @@ export function renderQuick(ctx) {
       Object.assign(p, { status: 'abnormal', tag: u.pre ? (u.failedDiff ? '要寫原因' : '還不能核定') : '沒核定成功', note: u.failed, actions: [main, { id: 'full', label: '手動修改', primary: false }] });
     }
     // 打卡＋單＝核定時數（2026-11-14）：檢查會過＝照算好的時段核定；異常的人也移到「核定通過」；不會過＝寫出要補齊的單
-    if (u.pass && !u.failed && !p.pendReq && !p.hasPend && !e2eNoCore() && (p.status === 'ok' || p.status === 'abnormal')) {      // 已核定又有待審單：維持「有待審單」（2026-11-16）；還沒核定、有待審單（hasPend）也不升（2026-11-18 第 7 題，第二道）
+    if (u.pass && !u.failed && !p.noCheck && !p.pendReq && !p.hasPend && !e2eNoCore() && (p.status === 'ok' || p.status === 'abnormal')) {      // noCheck＝不送檢查的卡（已核定但加班單比核定多等）：同一天重讀時舊的 u.pass 不能把他升進一鍵核定（2026-11-23）；已核定又有待審單：維持「有待審單」（2026-11-16）；還沒核定、有待審單（hasPend）也不升（2026-11-18 第 7 題，第二道）
       const cards = u.cards && u.cards.length ? u.cards : null;
       const act = { id: 'plan', label: '核定 ' + C.round2(u.pass.hours) + ' 小時' + (cards ? '（選原因）' : ''), primary: true, hours: u.pass.hours, payload: u.pass.payload, askReason: !!cards, cards };
       Object.assign(p, cards ? { status: 'abnormal', tag: '要選原因', note: '打卡跟核定差超過 30 分鐘：' + cards.map(cardLabel).join('、') }
         : { status: 'ok', tag: '核定通過', note: C.crossNotes(emp, u.pass.notes, u.pass.hours, firstStart(u.pass.payload)).join('；') },
         { hours: u.pass.hours, payload: u.pass.payload, actions: [act, { id: 'full', label: '手動修改', primary: false }] });
+      if (C.cap10On(emp)) Q.cap10Mark(emp, p);      // 單日滿 10 小時新定義（2026-11-23）：紅字改照打卡系統算的時數＋登記的請假重判；開關關著＝照舊（紅字留在換之前的判斷）
     } else if ((u.need || u.needMgr) && !p.pendReq && !p.hasPend && !e2eNoCore() && p.status === 'abnormal') {      // 不會過：寫出要補齊的單，不再給「選原因」（2026-11-14 不再靠寫原因放行）
       // 核定登記假別（needMgr，2026-11-18）是主管在手動修改裡做的事，不寫成「請同仁補…」；同時缺同仁的單時兩句都寫
       const mgrOnly = !!u.needMgr && !u.need;

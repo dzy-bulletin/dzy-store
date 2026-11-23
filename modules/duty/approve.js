@@ -763,9 +763,9 @@ function buildCard(emp, date) {
     if (filled || th) {
       const val = h('span', 'du-total-val', String(C.round2(total + th)));
       totalBox.append(h('span', 'du-total-lb', '核定時數'), val, h('span', 'du-total-unit', th ? '小時（上班 ' + C.round2(total) + '＋出差 ' + th + '）' : '小時'));
-      const over = C.overDay(total + th);        // 照實核定、只標紅（光復每天 09:00 列進通知匣）
+      const over = C.dayLoadOver(emp, total + th, leaveList());        // 照實核定、只標紅（光復每天 09:00 列進通知匣）；開關 CAP10_NEWDEF_ON 開著＝加請假、滿 10 就紅（calc.js dayLoadOver）
       totalBox.classList.toggle('over', over);
-      if (over) totalBox.append(h('div', 'du-total-over', '超過一天 ' + C.DAY_MAX_H + ' 小時上限（照實核定，會列進每日通知）'));
+      if (over) totalBox.append(h('div', 'du-total-over', C.dayOverText(emp)));
       const cw = C.contBreakWarn(rows);             // 連續 4 小時沒休 30 分（2026-11-06）：黃字、不擋
       if (cw) totalBox.append(h('div', 'du-total-cont', C.contBreakText(cw)));
     } else totalBox.classList.remove('over');
@@ -1247,7 +1247,7 @@ function buildCard(emp, date) {
       if (hasOpenSeg) warnings.push('・這天有打卡段還沒打下班卡，現在核定可能會核不到那一段，且之後補打卡不會自動重算——請同仁立即打卡避免忘打卡。');
       let msg = '即將核定 ' + emp.name + '：\n' + segs.map(s => s.start + '–' + s.end).join('、')
         + (t2 ? '\n上班 ' + totalH + ' 小時＋出差 ' + t2 + ' 小時\n核定時數共 ' + C.round2(totalH + t2) + ' 小時' : '\n核定時數共 ' + totalH + ' 小時');
-      if (C.overDay(totalH + t2)) msg += '\n⚠ 超過一天 ' + C.DAY_MAX_H + ' 小時上限（照實核定，會列進每日通知）';
+      if (C.dayLoadOver(emp, totalH + t2, lv)) msg += '\n⚠ ' + C.dayOverText(emp);      // 同上面的紅字（開關關著＝跟改之前逐字相同）
       const cw2 = C.contBreakWarn(periods);
       if (cw2) msg += '\n⚠ ' + C.contBreakText(cw2);
       const dupLine = C.dupConfirmLine(dupGroups, dupPicks);

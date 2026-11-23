@@ -187,6 +187,22 @@ export function viewCanWrite(v, kind, empId) {
 }
 export const overDay = h => round2(h) > 10;   // 超過單日上限才標紅：先取到小數兩位再比，三段相加的浮點誤差不會把剛好 10 小時標紅（2026-11-15）
 export const DAY_MAX_H = 10;   // 單日上限（2026-11-01 Eason）：照實核定、超過標紅；與打卡 Rest.gs、排班 rules.js 同一個數字
+/* 單日滿 10 小時新定義（2026-11-23 主管定案，同打卡端 mala-clock-in #223 的 09:00 通知 Payroll.gs payDayLoadOver_）：
+   當日出勤＝要核定的時數（上班＋出差，跟 approved_hours 同一個數）＋這次登記的請假（出差以外的假別，只填時數的也算＝事後），「滿」含剛好 10。
+   開關：伺服器環境變數 CAP10_NEWDEF_ON＝'1' 時，mgr_day 每一列帶 cap10_new:1（server/proxy/duty.js）；沒帶＝跟改之前逐字相同（超過才紅、只看上班＋出差、舊字）。
+   設計：PR 說明；打卡端 ~/加盟名單平台/_brain_out/cap10-newdef/design.md §8.2 */
+export const cap10On = emp => !!(emp && emp.cap10_new === 1);
+export const DAY_OVER_TEXT_OLD = '超過一天 ' + DAY_MAX_H + ' 小時上限（照實核定，會列進每日通知）';
+export const DAY_OVER_TEXT_NEW = '滿一天 ' + DAY_MAX_H + ' 小時上限（含已核准請假；照實核定，會列進每日通知）';   // 主管 2026-11-23 同意的字
+/** 這次登記的請假時數（出差已在核定時數裡不重算；時數空白、0、負數、不是數字＝0；同 payDayLoadOver_ 讀 leave 分頁的規則） */
+export const leaveHoursNonTrip = list => round2((list || []).reduce((a, x) => {
+  if (!x || !x.type || x.type === '出差') return a;
+  const h = Number(x.hours);
+  return a + (x.hours !== '' && x.hours != null && isFinite(h) && h > 0 ? h : 0);
+}, 0));
+/** 紅字要不要出現：workTripH＝上班＋出差（＝要核定的時數）；leaves＝這次登記的假別 [{type,hours}]。開關關著＝舊的 overDay(workTripH) */
+export const dayLoadOver = (emp, workTripH, leaves) => cap10On(emp) ? round2((Number(workTripH) || 0) + leaveHoursNonTrip(leaves)) >= DAY_MAX_H : overDay(workTripH);
+export const dayOverText = emp => (cap10On(emp) ? DAY_OVER_TEXT_NEW : DAY_OVER_TEXT_OLD);
 // 連續工作 4 小時要休息 30 分鐘（勞基法 §35；2026-11-06 Eason：核定頁黃字提醒、不擋）。與打卡 manager.html contBreakWarn 同一套：
 // 時段照開始排序，中間空檔不到 30 分鐘就當接著上；接起來超過 4 小時的第一塊 → {start, end, h}，沒有回 null。
 export const CONT_MAX_MIN = 240, CONT_BREAK_MIN = 30;

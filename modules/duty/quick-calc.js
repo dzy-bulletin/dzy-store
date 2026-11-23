@@ -232,7 +232,19 @@ export function planFlags(plan, segments, opts) {
   return { text: r.text, flags };
 }
 /** 一頁核定卡片的紅字：這張卡任何一顆按鈕會核定超過單日上限（照實核定、只提示；同一般核定頁 approve.js 的 du-total-over） */
-export const overText = (p) => (p && p.over ? '超過一天 ' + C.DAY_MAX_H + ' 小時上限（照實核定，會列進每日通知）' : '');
+//  cap10（2026-11-23）：開關 CAP10_NEWDEF_ON 開著時 classify 才帶 cap10:true＝新字；沒帶＝舊字（逐字同改之前）
+/** 單日滿 10 小時新定義（2026-11-23，calc.js dayLoadOver；開關 CAP10_NEWDEF_ON 開著＝mgr_day 列上 cap10_new:1 才用）：
+ *  這張卡任何一顆按鈕「要送的時數（上班＋出差）＋那顆按鈕會登記的請假」滿 10 → over、cap10 都標 true；不滿 → 兩個都拿掉。
+ *  leaveCheck＝有填時段、已核准的假單（送檢查時一律帶這份假別，同 precheckItem）；沒有就看各按鈕 payload.leaves。
+ *  classify 結尾用；quick.js 在「核定通過」換成打卡系統算的時數後再用一次（不然紅字還是照換之前的時數）。開關關著＝不動 p */
+export function cap10Mark(emp, p, leaveCheck) {
+  if (!C.cap10On(emp) || !p || !(p.status === 'ok' || p.status === 'abnormal')) return p;
+  const its = [p].concat(p.actions || []).filter((x) => x && x.hours != null);
+  if (its.some((x) => C.dayLoadOver(emp, x.hours, leaveCheck || (x.payload && x.payload.leaves) || []))) Object.assign(p, { over: true, cap10: true });
+  else { delete p.over; delete p.cap10; }
+  return p;
+}
+export const overText = (p) => (p && p.over ? (p.cap10 === true ? C.DAY_OVER_TEXT_NEW : C.DAY_OVER_TEXT_OLD) : '');
 
 // ---- 假別額度／期限（同 approve.js 送出前的硬擋；回字串＝擋下或要確認的原因，'' ＝可以）----
 export function leaveProblem(LO, empId, leaves, date) {
@@ -673,7 +685,8 @@ export function classify(inp) {
         actions: [{ id: 'full', label: '手動修改', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
     }
   }
-  if ((res.status === 'ok' || res.status === 'abnormal') && hs.some((h) => C.overDay(h))) res.over = true;      // 超過單日 10 小時：照實核定、卡片標紅（需求 2；2026-11-15）
+  if (C.cap10On(inp.emp)) cap10Mark(inp.emp, res, res.leaveCheck);      // 單日滿 10 小時新定義（2026-11-23）：開關開著才走這條
+  else if ((res.status === 'ok' || res.status === 'abnormal') && hs.some((h) => C.overDay(h))) res.over = true;      // 超過單日 10 小時：照實核定、卡片標紅（需求 2；2026-11-15）
   // 還沒核定、有這位主管審得了的待審單（2026-11-18 Eason 第 7、8 題）：一律留逐筆、標「有待審單」，卡片直接列待審單給核准／退回（quick.js pendReqsEl），審完自動重新分類。
   //   「核准單，核定 X 小時」那條（decide）本來就先審單再核定，照舊；已核定又有待審單（pendReq）照 11/16。
   //   標籤與按鈕照原本的判斷（例：申請和打卡對不上＝只給退回），另外標 pendNote，checkTargets 排除、quick.js 也不升「核定通過」。

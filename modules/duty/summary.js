@@ -4,7 +4,7 @@
 import { S, call, callAll, h, tipText } from './state.js';
 import { xLine, MONTH_TAIL } from './mirror-line.js';      // 資料更新於（整月申請從副本給時，2026-11-20）
 import { taipeiToday, tsLabel, shortDate } from './calc.js';
-import { buildRows, filterRows, totals, empKey, defaultYm, ymAdd, ymLabel, xlsSafe, KIND_LABEL, KIND_ORDER, SLIP_TITLE, MERGED, OT_NOTE, compBankRows, compSheet, compNoneText } from './summary-calc.js';
+import { buildRows, filterRows, totals, empKey, empOptions, empResolve, ALL_EMP, numbered, defaultYm, ymAdd, ymLabel, xlsSafe, CAT_LABEL, CAT_ORDER, SLIP_TITLE, MERGED, OT_NOTE, compBankRows, compSheet, compNoneText } from './summary-calc.js';
 
 // 樣式另放 summary.css（畫面、手機卡片、列印），第一次進來才掛上（同耗損登記 loss.css 的掛法）
 export function css() {
@@ -20,7 +20,7 @@ const ctxKey = () => [S.key, S.all ? 'ALL' : '', S.asStore].join('|');
 function state() {
   if (!SM || SM.ck !== ctxKey()) {
     SM = { ck: ctxKey(), ym: defaultYm(taipeiToday()), data: null, rows: [], err: null, tok: 0,
-      f: { stores: null, kinds: KIND_ORDER.slice(), status: 'approved', emp: '', check: false }, picked: new Set() };
+      f: { stores: null, kinds: CAT_ORDER.slice(), status: 'approved', empText: '', check: false }, picked: new Set() };
   }
   return SM;
 }
@@ -35,10 +35,13 @@ const finalCell = r => (r.finalText ? r.finalText : r.finalHours != null ? H(r.f
 const attachText = r => (r.attach === true ? '有' : r.attach === false ? '無' : '—');
 const ts = v => (v ? tsLabel(v) : '');
 const storeNameOf = () => (S.asStore ? S.asName : (SM && SM.defName) || '');
+// 同仁搜尋框打的字 → 篩選條件（完全等於清單某一項＝那一位；其他＝姓名或員編的一部分）；畫面、要確認筆數、列印、Excel 都用同一份
+const empFilter = st => empResolve(empOptions(st.rows, empText), st.f.empText);
+const filt = (st, extra) => filterRows(st.rows, Object.assign({}, st.f, empFilter(st), extra));
 
 // 一覽表欄位（需求 6A）：畫面、列印、Excel 共用同一份
 const COLS = [
-  ['date', '日期', r => shortDate(r.date)], ['emp', '同仁', empText], ['kind', '單別', r => r.kindLabel], ['type', '假別／忘打卡類型', r => dash(r.type)],
+  ['date', '日期', r => shortDate(r.date)], ['emp', '同仁', empText], ['kind', '單別', r => r.catLabel || r.kindLabel], ['type', '假別／忘打卡類型', r => dash(r.type)],
   ['time', '時段', r => dash(r.time)], ['req', '申請時數', r => H(r.reqHours)], ['fin', '核定時數', finalCell], ['place', '出差地點', r => dash(r.place)],
   ['reason', '事由', r => dash(r.reason)], ['att', '證明', attachText], ['st', '狀態', r => r.statusLabel], ['flag', '標示', r => dash(r.flagLabel)],
   ['at', '送出時間', r => dash(ts(r.created_at))], ['by', '核准人', r => dash(r.decided_by)], ['dat', '核准時間', r => dash(ts(r.decided_at))],
@@ -65,10 +68,11 @@ function load(out) {
   (S.all ? callAll('mgr_req_month', { ym: st.ym }) : call('mgr_req_month', { ym: st.ym })).then(r => {
     if (!SM || SM.ck !== ck || tok !== st.tok) return;
     st.err = null; st.data = r || {};
+    const prevEmp = empFilter(st).emp;      // 原本選定的那一位（從清單點選的）
     st.rows = buildRows(st.data, { store: '', storeName: storeNameOf() });
     st.storeList = S.all ? (Array.isArray(st.data.stores) ? st.data.stores.filter(x => x && x.ok).map(x => ({ code: x.store, name: x.storeName })) : []) : [];
     if (st.f.stores) st.f.stores = st.f.stores.filter(c => st.storeList.some(x => x.code === c));
-    if (st.f.emp && !st.rows.some(r => empKey(r) === st.f.emp)) st.f.emp = '';
+    if (prevEmp && !st.rows.some(r => empKey(r) === prevEmp)) st.f.empText = '';      // 換月份後這位沒有申請單了：回「全部同仁」
     st.picked = new Set([...st.picked].filter(k => st.rows.some(r => r.key === k)));
     if (out.isConnected) { const bar = out.parentNode && out.parentNode.querySelector('.sm-bar'); if (bar) drawBar(bar, out); drawOut(out); }
     { const c = document.getElementById('smComp'); if (c && st.comp && st.comp.stores) compDraw(c); }      // 補休帳：用申請單姓名補名冊沒有的人
@@ -108,14 +112,14 @@ function drawBar(bar, out) {
     fs.append(box);
   } else fs.append(h('div', 'sm-store-one', storeNameOf() || '目前這家店'));
   g.append(fs);
-  // 單別：四個勾選
+  // 單別：五個勾選（請假、補休、加班、出差、忘打卡；補休＝請假單裡假別是「補休」的）
   const fk = h('div', 'fld sm-f sm-f-wide'); fk.append(h('label', null, '單別'));
   const kb = h('div', 'sm-checks');
-  for (const k of KIND_ORDER) {
+  for (const k of CAT_ORDER) {
     const lab = h('label', 'sm-chk'), c = h('input', 'sm-kind', null, { type: 'checkbox', 'data-k': k });
     c.checked = st.f.kinds.indexOf(k) >= 0;
     c.onchange = () => { st.f.kinds = [...kb.querySelectorAll('.sm-kind')].filter(i => i.checked).map(i => i.dataset.k); drawOut(out); };
-    lab.append(c, document.createTextNode(KIND_LABEL[k])); kb.append(lab);
+    lab.append(c, document.createTextNode(CAT_LABEL[k])); kb.append(lab);
   }
   fk.append(kb); g.append(fk);
   // 狀態
@@ -125,18 +129,19 @@ function drawBar(bar, out) {
   ss.value = st.f.status;
   ss.onchange = () => { st.f.status = ss.value; drawOut(out); };
   ft.append(ss); g.append(ft);
-  // 同仁：依讀到的資料產生
+  // 同仁：可以直接打字找（姓名或員編的一部分），也可以從清單點選；選項依讀到的資料產生，空白＝全部同仁
   const fe = h('div', 'fld sm-f'); fe.append(h('label', null, '同仁', { for: 'smEmp' }));
-  const es = h('select', null, null, { id: 'smEmp' });
-  es.append(h('option', null, '全部同仁', { value: '' }));
-  const seen = new Map();
-  for (const r of st.rows) { const k = empKey(r); if (!seen.has(k)) seen.set(k, r); }
-  const multi = new Set(st.rows.map(r => r.store)).size > 1;
-  [...seen.entries()].sort((a, b) => (a[1].store + '|' + a[1].emp_id + a[1].name < b[1].store + '|' + b[1].emp_id + b[1].name ? -1 : 1))
-    .forEach(([k, r]) => es.append(h('option', null, empText(r) + (multi && r.storeName ? '・' + r.storeName : ''), { value: k })));
-  es.value = st.f.emp;
-  es.onchange = () => { st.f.emp = es.value; drawOut(out); };
-  fe.append(es); g.append(fe);
+  const ei = h('input', null, null, { id: 'smEmp', type: 'search', list: 'smEmpList', placeholder: ALL_EMP + '（可打姓名或員編）', autocomplete: 'off', 'aria-label': '同仁：打姓名或員編找人，空白＝全部同仁' });
+  ei.value = st.f.empText;
+  const dl = h('datalist', null, null, { id: 'smEmpList' });
+  dl.append(h('option', null, null, { value: ALL_EMP }));
+  empOptions(st.rows, empText).forEach(o => dl.append(h('option', null, null, { value: o.label })));
+  let composing = false;      // 注音、拼音選字中的半成品不要拿去篩
+  const apply = () => { if (ei.value.trim() === ALL_EMP) ei.value = ''; st.f.empText = ei.value; drawOut(out); };
+  ei.addEventListener('compositionstart', () => { composing = true; });
+  ei.addEventListener('compositionend', () => { composing = false; apply(); });
+  ei.addEventListener('input', () => { if (!composing) apply(); });
+  fe.append(ei, dl); g.append(fe);
   // 只看要確認
   const fc = h('label', 'sm-chk sm-only');
   const cc = h('input', null, null, { type: 'checkbox', id: 'smCheck' }); cc.checked = st.f.check;
@@ -167,8 +172,8 @@ function drawOut(out) {
     fb.append(b); out.append(fb);
   }
   { const xl = xLine(st.data, 'smAt', MONTH_TAIL); if (xl) out.append(xl); }
-  const rows = filterRows(st.rows, st.f), t = totals(rows);
-  const nCheck = filterRows(st.rows, Object.assign({}, st.f, { check: true })).length;
+  const rows = filt(st), t = totals(rows);
+  const nCheck = filt(st, { check: true }).length;
   const top = h('div', 'sm-top');
   const cb = h('button', 'sm-checkbtn' + (nCheck ? ' warn' : ''), '要確認 ' + nCheck + ' 筆', { type: 'button', id: 'smCheckBtn' });
   cb.disabled = !nCheck;
@@ -211,17 +216,18 @@ function compLoad(box) {
   box.innerHTML = ''; box.append(h('div', 'sm-comp-t', ymLabel(ym) + '補休明細（正職）'), h('div', 'sm-muted', '載入中…'));
   const get = S.all
     // 全部門市：員工名冊是整店功能、不走全部門市（2026-10-19 定）；姓名用核定工時的當天名單（mgr_day，在職同仁），沒有的再用申請單上的姓名
-    // comp_book（2026-11-23）：伺服器照薪資所在單位放行（薪資在總部、打卡在央廚的人列在總部），放行的人另外帶 home_people（姓名、在職）
+    // comp_book（2026-11-23）：伺服器照薪資所在單位放行（薪資在總部、打卡在央廚的人列在總部），總部那組另外問 MZTHQ／SSLHQ；pay_failed＝那幾家讀不到
     ? Promise.all([callAll('payroll_leave_options', { ym, comp_book: true }), callAll('mgr_day', { date: taipeiToday() }).catch(() => null)]).then(([lo, dy]) => {
       const okSt = (lo && Array.isArray(lo.stores) ? lo.stores : []).filter(x => x && x.ok);
       const roster = (dy && Array.isArray(dy.employees) ? dy.employees : []).map(e => ({ emp_id: e.emp_id, name: e.name, active: true, store: e.store }));
-      return { failed: (lo && lo.failed) || [], stores: okSt.map(x => ({ code: x.store, name: x.storeName, opts: (lo.by_store || {})[x.store] || null, roster: dy ? withHome(roster.filter(r => r.store === x.store), (lo.by_store || {})[x.store]) : [] })) };
+      const pf = okSt.flatMap(x => payFailedOf((lo.by_store || {})[x.store]));
+      return { failed: ((lo && lo.failed) || []).concat(pf), payMiss: pf.length > 0, stores: okSt.map(x => ({ code: x.store, name: x.storeName, opts: (lo.by_store || {})[x.store] || null, roster: dy ? withHome(roster.filter(r => r.store === x.store), (lo.by_store || {})[x.store]) : [] })) };
     })
-    : Promise.all([call('payroll_leave_options', { ym, comp_book: true }), call('mgr_roster').catch(() => null)]).then(([lo, ro]) => ({ failed: [], stores: [{ code: '', name: '', opts: lo, roster: ro && Array.isArray(ro.roster) ? withHome(ro.roster, lo) : ro && ro.roster }] }));
+    : Promise.all([call('payroll_leave_options', { ym, comp_book: true }), call('mgr_roster').catch(() => null)]).then(([lo, ro]) => ({ failed: payFailedOf(lo), payMiss: payFailedOf(lo).length > 0, stores: [{ code: '', name: '', opts: lo, roster: ro && Array.isArray(ro.roster) ? withHome(ro.roster, lo) : ro && ro.roster }] }));
   get.then(r => {
     if (!SM || SM.ck !== ck || st.compTok !== tok) return;
     if (r.stores.some(x => x.opts && x.opts.ym && x.opts.ym !== ym)) { st.comp = { ym, err: { updating: true } }; return compDraw(box); }      // 伺服器還沒更新：只給得出本月
-    st.comp = { ym, stores: r.stores, failed: r.failed };
+    st.comp = { ym, stores: r.stores, failed: r.failed, payMiss: r.payMiss };
     compDraw(box);
   }, e => {
     if (!SM || SM.ck !== ck || st.compTok !== tok) return;
@@ -237,7 +243,8 @@ function compView() {
   const names = new Map((st.rows || []).filter(r => r.emp_id && r.name).map(r => [(r.store || '') + '|' + r.emp_id, r.name]));
   const all = compBankRows(c.stores.map(x => Object.assign({}, x, { names: new Map([...names].filter(([k]) => k.startsWith((S.all ? x.code : (st.rows[0] && st.rows[0].store) || '') + '|')).map(([k, v]) => [k.split('|')[1], v])) })));
   const groups = all.filter(g => g.rows !== null);
-  return { status: groups.length ? 'ok' : 'none', ym, groups, noneText: compNoneText(all), failed: c.failed || [] };
+  // 總部另外問的薪酬單位有讀不到的、其他也沒有補休帳：不能說「還沒有同仁」，改顯示「缺：…（讀不到）」（2026-11-23）
+  return { status: groups.length ? 'ok' : 'none', ym, groups, noneText: !groups.length && c.payMiss ? missText(c.failed) : compNoneText(all), failed: c.failed || [] };
 }
 function compMsg(v) {
   if (v.status === 'loading') return '補休明細還在載入，請等上面的補休明細出來再按';
@@ -281,6 +288,7 @@ function compDraw(box) {
 }
 
 const missText = failed => '缺：' + failed.map(f => f.storeName || f.store).join('、') + '（讀不到）';
+const payFailedOf = o => (o && Array.isArray(o.pay_failed) ? o.pay_failed.filter(f => f && typeof f === 'object') : []);
 // 補休明細：伺服器放行的個人例外（薪資在這組、打卡在別家，home_people）不在這組名冊上：補進名冊，免得被當成離職、姓名只剩員編（名冊讀不到時不補，照舊一律當在職）
 const withHome = (roster, o) => {
   const hp = (o && Array.isArray(o.home_people) ? o.home_people : []).filter(p => p && typeof p.emp_id === 'string' && p.emp_id);
@@ -308,6 +316,7 @@ function table(rows, out) {
   const wrap = h('div', 'sm-tblwrap');
   const tbl = h('table', 'sm-tbl', null, { id: 'smTbl' });
   const thr = h('tr');
+  thr.append(h('th', 'sm-c-seq', '序號'));      // 最前面：照目前畫面（篩選＋排序後）從 1 編到最後一筆
   const th0 = h('th', 'sm-c-pick'), all = h('input', null, null, { type: 'checkbox', id: 'smAll', 'aria-label': '全選目前列出的' });
   all.checked = rows.every(r => st.picked.has(r.key)); all.indeterminate = !all.checked && rows.some(r => st.picked.has(r.key));
   all.onchange = () => { rows.forEach(r => (all.checked ? st.picked.add(r.key) : st.picked.delete(r.key))); drawOut(out); };
@@ -316,11 +325,12 @@ function table(rows, out) {
   COLS.forEach(([k, label]) => thr.append(h('th', 'sm-c-' + k, label)));
   tbl.append(h('thead')); tbl.tHead.append(thr);
   const tb = h('tbody');
-  for (const r of rows) {
+  for (const { seq, r } of numbered(rows)) {
     const tr = h('tr', 'sm-row' + (r.flag ? ' sm-flag-' + r.flag : '') + (r.src === 'final' ? ' sm-final' : ''), null, { 'data-key': r.key, 'data-kind': r.kind, 'data-status': r.status });
     if (r.flag) tr.setAttribute('data-flag', r.flag);
+    tr.append(h('td', 'sm-c-seq', String(seq), { 'data-l': '序號' }));
     const td0 = h('td', 'sm-c-pick');
-    const c = h('input', 'sm-pick', null, { type: 'checkbox', 'aria-label': '勾選 ' + r.name + ' ' + shortDate(r.date) + ' ' + r.kindLabel });
+    const c = h('input', 'sm-pick', null, { type: 'checkbox', 'aria-label': '勾選 ' + r.name + ' ' + shortDate(r.date) + ' ' + (r.catLabel || r.kindLabel) });
     c.checked = st.picked.has(r.key);
     c.onchange = () => { if (c.checked) st.picked.add(r.key); else st.picked.delete(r.key); drawOut(out); };
     td0.append(c); tr.append(td0);
@@ -361,7 +371,7 @@ function doPrint(mode, node) {
 const printDate = () => { const d = taipeiToday(); return d.slice(0, 4) + '/' + d.slice(5, 7) + '/' + d.slice(8, 10); };
 const statusWord = () => (SM.f.status === 'all' ? '全部' : '已核准');
 
-// 依門市分節（列已照門市排序）；全部門市時每家店另起新頁
+// 依門市分節（列是依日期排的、不同門市混在一起；這裡把同一家店的列挑在一起，每家店內仍是日期順序）；全部門市時每家店另起新頁
 // 全部門市：先照勾選、讀得到的門市開節（篩選後零筆的店也要有一節「這個月沒有符合的資料」，2026-11-03 審查）
 function byStore(rows) {
   const m = new Map();
@@ -391,13 +401,14 @@ function listDoc(rows, failed) {
     if (failed.length) hd.append(h('div', 'sm-p-miss', missText(failed)));
     s.append(hd);
     const tbl = h('table', 'sm-p-tbl'), cg = h('colgroup');
-    COLS.forEach(([k]) => cg.append(h('col', 'sm-pc-' + k)));
+    cg.append(h('col', 'sm-pc-seq')); COLS.forEach(([k]) => cg.append(h('col', 'sm-pc-' + k)));
     tbl.append(cg);
-    const thr = h('tr'); COLS.forEach(([, label]) => thr.append(h('th', null, label)));
+    const thr = h('tr'); thr.append(h('th', null, '序號')); COLS.forEach(([, label]) => thr.append(h('th', null, label)));
     tbl.append(h('thead')); tbl.tHead.append(thr);
     const tb = h('tbody');
-    if (!sec.rows.length) { const tr = h('tr'); tr.append(h('td', 'sm-p-none', '這個月沒有符合的資料', { colspan: String(COLS.length) })); tb.append(tr); }
-    sec.rows.forEach(r => { const tr = h('tr', r.flag ? 'sm-flag-' + r.flag : null); COLS.forEach(([k, , f]) => tr.append(h('td', 'sm-p-' + k, f(r)))); tb.append(tr); });
+    if (!sec.rows.length) { const tr = h('tr'); tr.append(h('td', 'sm-p-none', '這個月沒有符合的資料', { colspan: String(COLS.length + 1) })); tb.append(tr); }
+    // 序號：每一節（一家店一張）各自從 1 連續編，列印出來的每張都不跳號；單一門市就是畫面上的序號
+    numbered(sec.rows).forEach(({ seq, r }) => { const tr = h('tr', r.flag ? 'sm-flag-' + r.flag : null); tr.append(h('td', 'sm-p-seq', String(seq))); COLS.forEach(([k, , f]) => tr.append(h('td', 'sm-p-' + k, f(r)))); tb.append(tr); });
     tbl.append(tb); s.append(tbl);
     const end = h('div', 'sm-p-end');
     const tt = h('table', 'sm-p-tot');
@@ -494,8 +505,8 @@ async function exportXlsx(rows, failed, btn, msg) {
     const X = await loadXlsx();
     const safe = a => a.map(v => xlsSafe(v));
     const miss = failed.length ? [[missText(failed)]] : [];
-    const head = ['門市'].concat(COLS.map(c => c[1]));
-    const body = rows.map(r => safe([r.storeName || storeNameOf(), r.date].concat(COLS.slice(1).map(([k, , f]) => (k === 'req' ? (r.reqHours != null ? r.reqHours : '—')
+    const head = ['序號', '門市'].concat(COLS.map(c => c[1]));
+    const body = numbered(rows).map(({ seq, r }) => safe([seq, r.storeName || storeNameOf(), r.date].concat(COLS.slice(1).map(([k, , f]) => (k === 'req' ? (r.reqHours != null ? r.reqHours : '—')
       : k === 'fin' ? (r.finalText ? r.finalText : r.finalHours != null ? r.finalHours : '—') : f(r))))));
     const wb = X.utils.book_new();
     X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(miss.concat([head], body)), '明細');
