@@ -969,6 +969,7 @@ function dutyDo(d, action, b) {
         ...leaveOut(d.leave[date + r.emp_id]), shift_in: f.shift[0], shift_out: f.shift[1],
         plan: (d.plans && d.plans[r.emp_id]) || null, brk: { start: d.brk[0], end: d.brk[1] }, ...(Array.isArray(d.ftEmps) ? { ft: d.ftEmps.includes(r.emp_id) } : {}) };      // ft：正職（2026-11-13，e2e 設 d.ftEmps 才有）
       if (r.no_line) out.no_line = true;                // 打卡端 mgr_day 帶的「沒綁 LINE」（2026-11-10）
+      if (d.capSys && Array.isArray(d.capSys[date + r.emp_id])) out.cap_sys = d.capSys[date + r.emp_id].slice();      // 系統鎖卡（打卡端 Cap10.gs capAnnotateDay_；e2e 設 d.capSys 才有，2026-11-23）
       const a = d.approved[date + r.emp_id]; if (a) out.approved = { ...a };
       // 人資退回（2026-11-13）：示範後端照伺服器的 attachReturns／return_ok；d.returnOk＝true 時示範人資身分（能退回）
       const ret = (d.returns || []).find(x => x.status === 'open' && x.emp_id === r.emp_id && x.date === date);
@@ -1135,7 +1136,10 @@ function dutyDo(d, action, b) {
         const ot = over ? over.ot_h : (k % 3) * 2, used = over ? over.used_h : ((k + 1) % 4) * 1.5, allowed = over ? over.allowed !== false : i % 2 === 0;
         quotas[r.emp_id] = { [cc]: { comp: true, monthly: true, allowed, ot_h: ot, used_h: used, balance_h: Math.round((ot - used) * 100) / 100, ym: b.ym } };
       });
-      return ok({ ok: true, store: 'SSLGF', ym: String(b.ym), day_hours: 8, types, quotas, events: {} });
+      // 薪資在這組、打卡在別家的個人例外（伺服器 home_people，2026-11-23）：e2e 設 d.compHome＝[{emp_id, name, active}]，額度用 d.compBank 或加班 2、補休 5
+      const home = b.comp_book === true && Array.isArray(d.compHome) ? d.compHome : [];
+      home.forEach(p => { const o = (d.compBank || {})[p.emp_id] || { ot_h: 2, used_h: 5 }; quotas[p.emp_id] = { [cc]: { comp: true, monthly: true, allowed: true, ot_h: o.ot_h, used_h: o.used_h, balance_h: Math.round((o.ot_h - o.used_h) * 100) / 100, ym: b.ym } }; });
+      return ok(Object.assign({ ok: true, store: 'SSLGF', ym: String(b.ym), day_hours: 8, types, quotas, events: {} }, home.length ? { home_people: clone(home) } : {}));
     }
     return ok(clone(d.leaveOpts || { ok: true, store: 'SSLGF', ym: taipeiDay().slice(0, 7), day_hours: 8, types: MOCK_LEAVES.map((n, i) => ({ code: 'lt' + i, name: n })), quotas: {}, events: {} }));
   }

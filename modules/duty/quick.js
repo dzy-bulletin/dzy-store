@@ -12,6 +12,7 @@ import { canBg, watchJob, refreshJobs, rejectBar } from './bg.js';
 import { mirrorLine, mirrorFlags } from './mirror-line.js';      // 「資料更新於」那一行＋只讀 mini 的過期黃條（第 1 階段）
 import { corePeriods, OVER_BLOCK_MIN, otSuggestText, cardDiffs, cardLabel, cardReasonText } from './core-calc.js';
 import { MOCK } from '../../js/config.js';
+import { capLockMark } from './cap-note.js';      // 系統鎖卡標示（2026-11-23）
 
 // 總開關：改成 false、重新發布網站，手機也回到舊畫面（不必動別的）
 export const QUICK_ON = true;
@@ -63,7 +64,8 @@ export function timelineEl(m, label) {
   });
   m.forms.forEach((f) => box('tl-form tl-f-' + f.kind + (f.comp ? ' tl-f-comp' : '') + (f.pending ? ' pend' : ''), f.a, f.b, (f.pending ? '待審 ' : '') + f.label + ' ' + T.hhmm(f.a) + '–' + T.hhmm(f.b)));
   m.devs.filter((d) => d.kind === 'rest').forEach((d) => box('tl-dev tl-rest', d.a, d.b, '兩段班中間的空檔 ' + T.hhmm(d.a) + '–' + T.hhmm(d.b)));
-  m.punch.forEach((s) => box('tl-punch', s.a, s.b, '打卡 ' + T.hhmm(s.a) + '–' + T.hhmm(s.b)));
+  const ck = (t) => capLockMark(T.hhmm(t), m.capSys);      // 系統鎖卡：那一筆打卡時間後面加「（系統鎖定）」（2026-11-23 Eason；m.capSys 由 modelOf 帶 mgr_day 的 cap_sys）
+  m.punch.forEach((s) => box('tl-punch', s.a, s.b, '打卡 ' + T.hhmm(s.a) + '–' + T.hhmm(s.b) + ck(s.b)));
   (m.away || []).forEach((s) => box('tl-away', s.a, s.b, '在' + s.label + '打卡 ' + T.hhmm(s.a) + '–' + T.hhmm(s.b) + '（由' + s.label + '核定）'));      // 同一人別家店的打卡（2026-11-17）
   m.open.forEach((x) => { const t = x.a != null ? x.a : x.b; box('tl-dot', t, t, (x.side === 'out' ? '只有上班卡 ' : '只有下班卡 ') + T.hhmm(t)); });
   m.devs.filter((d) => d.kind !== 'rest').forEach((d) => box('tl-dev tl-' + d.kind, d.a, d.b, TL_KIND[d.kind] + ' ' + T.hhmm(d.a) + '–' + T.hhmm(d.b)));
@@ -87,10 +89,10 @@ export function timelineEl(m, label) {
   };
   requestAnimationFrame(placeLabels);
   m.punch.forEach((s) => {
-    if ((s.b - s.a) / W * 100 < 16) plab((s.a + s.b) / 2, 'mid', T.hhmm(s.a) + '–' + T.hhmm(s.b));
-    else { plab(s.a, 'st', T.hhmm(s.a)); plab(s.b, 'en', T.hhmm(s.b)); }
+    if ((s.b - s.a) / W * 100 < 16) plab((s.a + s.b) / 2, 'mid', T.hhmm(s.a) + '–' + T.hhmm(s.b) + ck(s.b));
+    else { plab(s.a, 'st', T.hhmm(s.a)); plab(s.b, 'en', T.hhmm(s.b) + ck(s.b)); }
   });
-  m.open.forEach((x) => { if (x.a != null) plab(x.a, 'st', T.hhmm(x.a) + '–？'); else plab(x.b, 'en', '？–' + T.hhmm(x.b)); });
+  m.open.forEach((x) => { if (x.a != null) plab(x.a, 'st', T.hhmm(x.a) + '–？'); else plab(x.b, 'en', '？–' + T.hhmm(x.b) + ck(x.b)); });
   (m.away || []).forEach((s) => plab((s.a + s.b) / 2, 'mid away', s.label + ' ' + T.hhmm(s.a) + '–' + T.hhmm(s.b)));
   const ax = h('div', 'tl-axis');
   // 刻度：每兩小時標一次整點（班表起訖已經標在上方括號）
@@ -186,7 +188,9 @@ export function renderQuick(ctx) {
   }
   // 那天這個人的時間軸資料（班表、打卡、已核准與待審的單）
   function modelOf(emp, date, approved) {
-    return T.timelineModel({ segments: emp.segments, plan: emp.plan, reqs: reqsFor(emp, date, approved), brk: brkOf(emp), elsewhere: emp.elsewhere });
+    const m = T.timelineModel({ segments: emp.segments, plan: emp.plan, reqs: reqsFor(emp, date, approved), brk: brkOf(emp), elsewhere: emp.elsewhere });
+    m.capSys = Array.isArray(emp.cap_sys) ? emp.cap_sys : [];      // 系統鎖卡的時間（只給 timelineEl 標字，不進任何計算）
+    return m;
   }
   // 等同仁補單（伺服器記）：這個人這天有沒有在等；等的時候有沒有新的單送來（送來了＝回到正常流程讓主管核）
   const waitOf = (key, date) => (st.waits || []).find((w) => Q.keyOf(w) === key && w.date === date) || null;

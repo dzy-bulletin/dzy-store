@@ -211,12 +211,13 @@ function compLoad(box) {
   box.innerHTML = ''; box.append(h('div', 'sm-comp-t', ymLabel(ym) + '補休明細（正職）'), h('div', 'sm-muted', '載入中…'));
   const get = S.all
     // 全部門市：員工名冊是整店功能、不走全部門市（2026-10-19 定）；姓名用核定工時的當天名單（mgr_day，在職同仁），沒有的再用申請單上的姓名
-    ? Promise.all([callAll('payroll_leave_options', { ym }), callAll('mgr_day', { date: taipeiToday() }).catch(() => null)]).then(([lo, dy]) => {
+    // comp_book（2026-11-23）：伺服器照薪資所在單位放行（薪資在總部、打卡在央廚的人列在總部），放行的人另外帶 home_people（姓名、在職）
+    ? Promise.all([callAll('payroll_leave_options', { ym, comp_book: true }), callAll('mgr_day', { date: taipeiToday() }).catch(() => null)]).then(([lo, dy]) => {
       const okSt = (lo && Array.isArray(lo.stores) ? lo.stores : []).filter(x => x && x.ok);
       const roster = (dy && Array.isArray(dy.employees) ? dy.employees : []).map(e => ({ emp_id: e.emp_id, name: e.name, active: true, store: e.store }));
-      return { failed: (lo && lo.failed) || [], stores: okSt.map(x => ({ code: x.store, name: x.storeName, opts: (lo.by_store || {})[x.store] || null, roster: roster.filter(r => r.store === x.store) })) };
+      return { failed: (lo && lo.failed) || [], stores: okSt.map(x => ({ code: x.store, name: x.storeName, opts: (lo.by_store || {})[x.store] || null, roster: dy ? withHome(roster.filter(r => r.store === x.store), (lo.by_store || {})[x.store]) : [] })) };
     })
-    : Promise.all([call('payroll_leave_options', { ym }), call('mgr_roster').catch(() => null)]).then(([lo, ro]) => ({ failed: [], stores: [{ code: '', name: '', opts: lo, roster: ro && ro.roster }] }));
+    : Promise.all([call('payroll_leave_options', { ym, comp_book: true }), call('mgr_roster').catch(() => null)]).then(([lo, ro]) => ({ failed: [], stores: [{ code: '', name: '', opts: lo, roster: ro && Array.isArray(ro.roster) ? withHome(ro.roster, lo) : ro && ro.roster }] }));
   get.then(r => {
     if (!SM || SM.ck !== ck || st.compTok !== tok) return;
     if (r.stores.some(x => x.opts && x.opts.ym && x.opts.ym !== ym)) { st.comp = { ym, err: { updating: true } }; return compDraw(box); }      // 伺服器還沒更新：只給得出本月
@@ -280,6 +281,13 @@ function compDraw(box) {
 }
 
 const missText = failed => '缺：' + failed.map(f => f.storeName || f.store).join('、') + '（讀不到）';
+// 補休明細：伺服器放行的個人例外（薪資在這組、打卡在別家，home_people）不在這組名冊上：補進名冊，免得被當成離職、姓名只剩員編（名冊讀不到時不補，照舊一律當在職）
+const withHome = (roster, o) => {
+  const hp = (o && Array.isArray(o.home_people) ? o.home_people : []).filter(p => p && typeof p.emp_id === 'string' && p.emp_id);
+  if (!hp.length) return roster;
+  const ids = new Set(hp.map(p => p.emp_id));
+  return roster.filter(r => !ids.has(String(r.emp_id))).concat(hp.map(p => ({ emp_id: p.emp_id, name: p.name || p.emp_id, active: p.active !== false })));
+};
 
 function totCards(t) {
   const wrap = h('div', 'sm-tots');

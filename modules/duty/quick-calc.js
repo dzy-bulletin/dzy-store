@@ -205,7 +205,6 @@ export function uncoveredMin(rs, re, segs, br) {
   }
   return n;
 }
-const periodsCover = C.periodsCoverReq;      // 用分鐘比、跨午夜也對（2026-11-17；原本比字串，核定 16:00–01:00 對加班單 00:00–01:00 永遠標「加班單沒算進去」）
 /** 打卡比班表早到／晚走多少分（只算超出的部分，各自 ≥ 0）；plan＝comparePlanOf 的結果 */
 export function overshoot(plan, segments) {
   const segs = segsOf({ segments }).filter((s) => s.in && s.out);
@@ -306,6 +305,41 @@ export function segCountOk(plan, segs, br) {
   const splitAtBreak = n === 1 && !!plan && C.hasBreak(br) && segs.length === 2 && near(segs[0].out, br.start) && near(segs[1].in, br.end);
   return segs.length === n || splitAtBreak || (n === 2 && segs.length === 1 && C.gapIsBreak(br, plan.segs[0].end, plan.segs[1].start));
 }
+/**
+ * 已核定的人：已核准加班單時數比「核定該有的加班」多超過 15 分鐘 → 回 { rest, hours, need, have }，否則 null（2026-11-23 主管定案：加班單只是憑證，比時數、不比時段）。
+ * 該有的加班同薪資缺單檢查 payOtFormCheck_（Payroll.gs）與打卡端 reqStrictOtNeed_：班表休息日 H／例假 R＝核定時數全部；其他（上班日、國定假日、查不到班表）＝核定時數（含出差）超過 8 小時的部分。
+ * 容差 0.25 小時（同 PAY_OT_FORM_TOL_H）：多 0.25 以內不列。同一天在同一單位別家店也上班（elsewhere 有時數）→ 兩家合併算、這裡看不全，不列（同打卡端 peerDay）。
+ * 日別來源＝營運系統班表（server/schedule.js dutyPlans，經 mgr_day 每人的 plan.day_type 帶到這一頁）。班表查不到（plan 空、或沒有 day_type）＝不知道該有多少加班：
+ * 目前不列回（OT_FLAG_CFG.unknownDay＝'skip'）；改成 'workday' 就當上班日（同打卡端 reqStrictOtNeed_ 把查不到當一般日）照列。主管還沒定這條，只改這一個值就能切換。
+ */
+export const OT_FLAG_TOL_H = 0.25;
+export const OT_FLAG_CFG = { unknownDay: 'skip' };
+/** 時數欄位 → 0～24 的有限數字，否則 NaN。只收 number，或純十進位數字字串（"1.5"；不收 "0x10"、空白、"Infinity"、科學記號以外的怪寫法）；物件、null 都是 NaN，不呼叫物件的 toString。一天不可能超過 24 小時，超過的視為怪值 */
+const OT_DAY_MAX_H = 24;
+const finiteH = (v) => {
+  const n = typeof v === 'number' ? v : (typeof v === 'string' && /^\s*\d+(\.\d+)?\s*$/.test(v) ? Number(v) : NaN);
+  return Number.isFinite(n) && n >= 0 && n <= OT_DAY_MAX_H ? n : NaN;
+};
+export function otExcess(emp, reqs) {
+  try {      // 資料有任何怪異（getter 拋錯、怪物件…）→ 判斷不出來、不列回，不讓整頁壞掉
+    if (!emp || !emp.approved) return null;
+    // 已核准加班單時數合計：只加 0～24 的有限正數；已作廢／退回／駁回（有狀態欄、不是 approved）、待審的、負數或怪值的那一張不計
+    const sum = (Array.isArray(reqs) ? reqs : []).filter((r) => r && r.kind === 'ot' && !r.pending && (r.status === undefined || r.status === 'approved'))
+      .reduce((a, r) => { const n = finiteH(r.hours); return a + (n > 0 ? n : 0); }, 0);
+    if (!Number.isFinite(sum)) return null;
+    const have = C.round2(sum);
+    if (!(have > 0)) return null;
+    const hours0 = finiteH(emp.approved.approved_hours);
+    if (!Number.isFinite(hours0)) return null;      // 核定時數缺欄、讀不出來、超過 24：判斷不出該有多少加班，不列（也不寫「核定 0 小時」）
+    const hours = C.round2(hours0);
+    const dt = emp.plan && emp.plan.day_type, rest = dt === 'H' || dt === 'R';
+    if (!dt && OT_FLAG_CFG.unknownDay !== 'workday') return null;      // 班表查不到：判斷不出該有多少加班，不列（見上面）
+    const need = rest ? hours : Math.max(0, C.round2(hours - OK_MAX_H));
+    if (!(have > need + OT_FLAG_TOL_H + 0.005)) return null;
+    if (C.elsewhereHours(emp).length) return null;
+    return { rest, hours, need, have };
+  } catch (e) { return null; }
+}
 function classifyRaw(inp) {
   const { emp, date, today, brk, LO, canHours, skipped } = inp;
   const reqs = inp.reqs || [];
@@ -317,11 +351,17 @@ function classifyRaw(inp) {
   // 休息日／例假出勤要在班表文字標出來（2026-11-15 Eason）；放在已核定分支之前，已核定的人也要標（2026-11-17 Eason：吳佳宜 11/1 已核定卡片看不出是休息日加班）
   if (pv.mode === 'plan' && emp.plan && (emp.plan.day_type === 'H' || emp.plan.day_type === 'R')) base.planText += '（' + (emp.plan.day_type === 'R' ? '例假出勤' : '休息日加班') + '：整天算加班，要有加班單）';
   if (emp.approved) {
-    const otLate = canHours ? reqs.filter((r) => r.kind === 'ot' && !r.pending && r.start && r.end && !periodsCover(emp.approved.periods, r)) : [];
-    if (otLate.length) return Object.assign(base, { status: 'abnormal', tag: '已核定過，加班單沒算進去', note: '核定後才核准的加班單，要重新核定', actions: [{ id: 'full', label: '手動修改', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
+    const ex = canHours ? otExcess(emp, reqs) : null;
+    if (ex) {
+      const fix = '照打卡或出差單真的多上班，請按「手動修改」重新核定；沒有多上班，請把加班單作廢。加班單只是憑證，不會自己加進時數。';
+      const note = ex.rest ? '休息日：核定 ' + ex.hours + ' 小時全部算加班，但已核准的加班單有 ' + ex.have + ' 小時，比核定多。' + fix
+        : '上班日：核定 ' + ex.hours + ' 小時，照規定超過 ' + OK_MAX_H + ' 小時才算加班（' + ex.need + ' 小時），但已核准的加班單有 ' + ex.have + ' 小時。' + fix;
+      // noCheck：不送送出前檢查（precheckItem 回 null）——檢查會過時會被移到「核定通過」一鍵核定，主管就不是二選一（手動修改／作廢加班單）了。#372 合併後由 doneBefore 涵蓋
+      return Object.assign(base, { status: 'abnormal', tag: '已核定，加班單比核定多', note, noCheck: true, actions: [{ id: 'full', label: '手動修改', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
+    }
     // 2026-11-16 Eason：標「有待審單」；pendReq＝送出前檢查不能把他改成「核定通過」（余忠哲 11/1：先核定 8 小時、隔天才送加班單，卡片卻寫核定通過）
     if (canHours && reqs.some((r) => r.pending)) return Object.assign(base, { status: 'abnormal', tag: '有待審單', pendReq: true, note: '核定後又送來新的申請：先審單，核准後再重新送出核定', actions: [{ id: 'full', label: '手動修改', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
-    return Object.assign(base, { status: 'done', hours: Number(emp.approved.approved_hours) });
+    return Object.assign(base, { status: 'done', hours: (() => { try { return Number(emp.approved.approved_hours); } catch (e) { return NaN; } })() });      // 核定時數是怪物件時不拋例外（照原本 Number 的結果，讀不出來＝NaN）
   }
 
   const segs = segsOf(emp);

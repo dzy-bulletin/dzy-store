@@ -12,6 +12,7 @@ import { leaveOverText } from './core-calc.js';      // 2026-11-18 第 5 題提�
 import { planFlags, REASONS, pendSplit, planOtText } from './quick-calc.js';
 import { leaveIncrements, leaveShort } from './leave-batch.js';
 import { pendingFor } from './pend-gate.js';
+import { capLockMark, capUnmatched } from './cap-note.js';      // 系統鎖卡標示（2026-11-23）
 import { ssoSwitch, setSession, toSession } from '../../js/auth.js';
 import { renderQuick, backBar, e2eNoCore, isMock } from './quick.js';
 import { canBg, watchJob, refreshJobs, rejectBar } from './bg.js';
@@ -568,8 +569,10 @@ function buildCard(emp, date) {
     const dupIgn = (emp.approved && emp.approved.dup_ignore) || [];  // 已認定重複的卡：打卡段已由打卡後端拿掉，這裡註明是哪幾張（2026-11-06）
     const dupNote = dupIgn.length ? '（' + dupIgn.map(t => String(t).slice(11, 16)).sort().join('、') + ' 重複）' : '';
     const capSys = emp.cap_sys || [];                             // 單日滿 10 小時系統代打的下班卡（2026-11-14，打卡 Cap10.gs）
-    const capNote = capSys.length ? '（' + capSys.join('、') + ' 系統自動補的卡）' : '';
-    punchEl.textContent = '打卡：' + emp.segments.map(C.segmentText).join('、') + dupNote + capNote + '　' + ref;
+    // 2026-11-23 Eason：系統鎖卡在那一筆打卡時間後面標「（系統鎖定）」（cap-note.js）；對不到打卡段的系統卡才照原本另外註明
+    const capLeft = capUnmatched(capSys, emp.segments);
+    const capNote = capLeft.length ? '（' + capLeft.join('、') + ' 系統自動補的卡）' : '';
+    punchEl.textContent = '打卡：' + emp.segments.map(s => C.segmentText(s) + capLockMark(s.out, capSys)).join('、') + dupNote + capNote + '　' + ref;
     if (capSys.length) nameEl.append(h('span', 'du-capsys', '滿 10 小時・系統自動打下班卡', { title: '這天的下班卡是系統在滿 10 小時時代打的，請照同仁實際離開的時間核定' }));
   } else if (emp.attempts > 0) punchEl.textContent = '今天沒有打卡成功（試了 ' + emp.attempts + ' 次沒成功）';
   else punchEl.textContent = '今天沒有打卡紀錄';
