@@ -658,6 +658,31 @@ export function renderQuick(ctx) {
     const w = h('div', 'dq-fine'); w.append(c);
     return w;
   }
+  // 手動修改只留一條路（2026-11-24 Eason 方案一）：手動區展開（簡潔按「手動修改」、詳細＝全部展開）的卡，上方的按鈕列、「申請／比對」兩行都收起，
+  // 右上改寫「手動修改中」，只剩時間軸、「系統建議（參考）」一行，和手動區（approve.js fineCard：步驟說明、時段、檢查結果、更多、唯一的紅色「送出核定 N 小時」、取消連結）。
+  // 沒權限核定的人（只看）不走這條，照舊「查看明細」。呈現集中在這三個函式，之後跟別的分支合併只要看這裡
+  const manualOk = (p) => { const e = empOf(p.key); return !!e && canWriteRow('hours', e.emp_id, e.store); };
+  const isManual = (p) => fineShown(p.key) && manualOk(p);
+  const MANUAL_TAG = '手動修改中';
+  function manualBody(c, p) {
+    const u = U(p.key);
+    u.rejecting = false; u.proxyOpen = false; u.ask = null; u.other = false;      // 上方按鈕列開出來的輸入（退回理由、幫開單、選原因）在手動狀態沒有對應的鈕，收掉
+    const f = fineEl(p); if (!f) return c;
+    const fc = f.firstChild;
+    if (fc && fc.__needRecheck) { fc.__needRecheck = false; if (fc.__recheck) fc.__recheck(); }      // 收起時沒檢查完（或取消手動修改還原了輸入）：打開時重新檢查
+    if (fc && fc.__sysEl) c.append(fc.__sysEl);
+    if (u.proxied) c.append(h('div', 'dq-info', '已幫同仁開單：' + u.proxied + '。等總監在「申請審核」核准後，再回來核定。'));
+    if (u.msg) c.append(h('div', 'dq-msg bad', u.msg, { role: 'alert' }));
+    c.append(f);
+    return c;
+  }
+  // 「取消手動修改，回到系統建議」（approve.js 已經把輸入還原）：收起手動區
+  function closeFine(key) {
+    if (!fineShown(key)) return;
+    if (st.detail) U(key).fold = true; else st.fine.delete(key);
+    st.scrollTo = key;
+    render();
+  }
   // 等同仁補單：記到伺服器（能核這家店的人都看得到），這張卡先收到「等同仁補單」；單送來或核定了就回到正常流程
   async function addWait(p) {
     if (st.busy) return;
@@ -935,9 +960,11 @@ export function renderQuick(ctx) {
     const u = U(p.key);
     const c = h('div', 'dq-card' + (p.status === 'blocked' ? ' blocked' : ''), null, { 'data-key': p.key });
     const top = h('div', 'dq-ctop');
-    top.append(whoEl(p), h('div', 'dq-tag' + (p.status === 'blocked' ? ' blocked' : '') + ' sev' + sevOf(p), p.tag));
+    const manual = isManual(p);
+    top.append(whoEl(p), manual ? h('div', 'dq-mright', MANUAL_TAG) : h('div', 'dq-tag' + (p.status === 'blocked' ? ' blocked' : '') + ' sev' + sevOf(p), p.tag));
     c.append(top);
     const tl = tlFor(p); if (tl) c.append(tl);
+    if (manual) return manualBody(c, p);
     const grid = h('div', 'dq-grid');
     // 要同仁補單的那句是建議，不是同仁送的申請（2026-11-16 Eason：「申請那句話改成建議」）
     const adv = !!p.mgrNote || /^(要補齊|請同仁|還沒有|要有|要補)/.test(p.note || '');      // 核定登記假別（mgrNote）也是建議，但是主管要做的事（2026-11-18）
@@ -1082,9 +1109,11 @@ export function renderQuick(ctx) {
   function miniCard(p, right) {
     const c = h('div', 'dq-card dq-mini', null, { 'data-key': p.key });
     const top = h('div', 'dq-ctop');
-    top.append(whoEl(p, true), h('div', 'dq-mright', right || ''));
+    const manual = isManual(p);
+    top.append(whoEl(p, true), h('div', 'dq-mright', manual ? MANUAL_TAG : (right || '')));
     c.append(top);
     const tl = tlFor(p); if (tl) c.append(tl);
+    if (manual) return manualBody(c, p);
     const row = h('div', 'dq-acts two');
     if (p.status === 'ok') row.append(btn('dq-act primary', '核定 ' + C.round2(mainAction(p).hours != null ? mainAction(p).hours : p.hours) + ' 小時', () => act(p, Object.assign({}, mainAction(p), { label: '' }))));
     row.append(btn('dq-act ghost dq-finebtn', fineShown(p.key) ? '收起' : (p.status === 'done' ? '手動修改（重新核定）' : p.status === 'readonly' ? '查看明細' : '手動修改'), () => goFull(p)));
@@ -1097,10 +1126,12 @@ export function renderQuick(ctx) {
   function ckCard(p, word) {
     const c = h('div', 'dq-card dq-mini dq-ckcard', null, { 'data-key': p.key });
     const top = h('div', 'dq-ctop'), mr = h('div', 'dq-mright');
-    mr.append(h('span', 'dq-ckmark', word));
+    const manual = isManual(p);
+    if (manual) mr.append(MANUAL_TAG); else mr.append(h('span', 'dq-ckmark', word));
     top.append(whoEl(p, true), mr);
     c.append(top);
     const tl = tlFor(p); if (tl) c.append(tl);
+    if (manual) return manualBody(c, p);
     const row = h('div', 'dq-acts two');
     const go = btn('dq-act primary', word + '…', () => {}); go.disabled = true;
     row.append(go, btn('dq-act ghost dq-finebtn', fineShown(p.key) ? '收起' : '手動修改', () => goFull(p)));
@@ -1395,6 +1426,7 @@ export function renderQuick(ctx) {
     recompute(); render();
   });
   root.addEventListener('duty-reload-day', () => { if (!st.busy) load(); });
+  root.addEventListener('duty-manual-cancel', (e) => { const d = e.detail || {}; closeFine(Q.keyOf({ store: d.store || '', emp_id: d.emp_id })); });      // 手動區的「取消手動修改，回到系統建議」
   root.addEventListener('hr-returned', () => retPanel.load());
   render();
   load();      // load() 會順便讀上方兩個提醒

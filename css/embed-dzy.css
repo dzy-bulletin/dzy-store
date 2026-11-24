@@ -53,3 +53,4 @@ body.embed .du-verdict.warn .du-verdict-t{color:var(--dzy-warn)}
 body.embed .du-verdict.ok .du-verdict-t,body.embed .du-reqline{color:var(--dzy-ok)}
 body.embed .du-reqline{background:var(--dzy-ok-light)}
 body.embed .du-verdict.gray .du-verdict-t,body.embed .du-need-t{color:var(--dzy-danger)}
+body.embed .du-verdict.du-verdict-ck .du-verdict-t{color:var(--dzy-muted)}      /* 「檢查中…」不是錯誤，不用紅字（2026-11-24） */

@@ -488,10 +488,11 @@ export async function leaveFreshOk(emp, date, leaves, prevLeaves) {      // prev
   return r2.why || true;
 }
 export function fineCard(emp, date, o) {
-  const card = buildCard(emp, date);
+  const card = buildCard(emp, date, { single: true });      // 手動修改只留一條路（2026-11-24 方案一）：一頁核定裡的手動區用新呈現；完整頁（renderEmployees）照舊
   if (o && typeof o.beforeSubmit === 'function') card.__beforeSubmit = o.beforeSubmit;
   if (o && typeof o.current === 'function') card.__current = o.current;      // 送出前最後檢查：還是目前這天（第三輪審查）
   card.classList.add('du-fine');
+  if (card.__single) card.classList.add('du-single');      // 新呈現的樣式掛在這個 class 上
   card.__setExpanded(true);
   if (card.__applyReq) card.__applyReq((o && o.reqs) || []);
   if (card.__applyPending) card.__applyPending((o && o.pending) || [], o && o.pendingAll);
@@ -504,9 +505,14 @@ export function checkCards(cards, date, current) {
   runChecks(box, date, current);
 }
 const NOT_COUNT_REASONS = ['下班後私人逗留', '等人來載', '忘按下班，其實已經離開'];
-function buildCard(emp, date) {
+const NC_WHY = '請先選不算工時的原因（會留在核定紀錄）';      // 就是送出時「✕ …」那句，single 改成不能按時直接寫在送出鈕下面
+function buildCard(emp, date, bopt) {
   const br = brkOf(emp);
   const readOnly = !canWriteRow('hours', emp.emp_id, emp.store);      // 不在核定工時名單（只看）：不出現送出核定，欄位不可改
+  // 手動修改只留一條路（2026-11-24 Eason 方案一，docs 見 PR）：只有一頁核定的手動區（fineCard）、而且有權限核定的卡才用。
+  // single＝手動區一開就全部攤開、上方不再有「核定 N 小時」「收起」「手動改時段」，整張卡只有最下面一顆紅色「送出核定 N 小時」；其餘（完整頁、只看）逐字照舊
+  const single = !!(bopt && bopt.single) && !readOnly;
+  let syncLabel = () => {};      // single：送出鈕文字（送出鈕建好之後換成真的；時段變動時 refresh 會叫它）
   const card = h('div', 'du-card'); card.dataset.empId = rowKey(emp); if (emp.store) card.dataset.store = emp.store;
   // 這天還有待審的申請不能核定（2026-11-19）：__pendMine＝這位主管審得了的、__pendUpper＝要上層審的；__recalc 0 沒事／1 剛審完、重讀那天已核准的申請／2 讀好了、重新檢查中（沒回到 0 都不給核定）
   card.__pendMine = []; card.__pendUpper = []; card.__recalc = 0;
@@ -531,7 +537,8 @@ function buildCard(emp, date) {
       const mineOf = rs => (rs ? rs.find(r => r.emp_id === String(emp.emp_id)) || null : null);
       Promise.race([chk, timeout]).then(rs => {
         clearTimeout(tm);
-        if (seq !== card.__checkSeq || !card.isConnected) return;
+        if (seq !== card.__checkSeq) return;
+        if (!card.isConnected) { card.__needRecheck = true; return; }      // 檢查途中手動區被收起來（卡片不在畫面上）：結果丟掉，下次打開（quick.js manualBody）重新檢查，不留「檢查中…」
         if (rs === 'timeout') {      // 逾時：視同讀不到（按鈕恢復可按），多一句說明。seq 不動：下面 chk.then 晚到時，輸入沒再改過（seq 還對得上）才顯示結果
           timedOut = true; recalcDone(); card.__setCheck(null);
           preBox.className = 'du-pre'; preBox.hidden = false; preBox.textContent = TIMEOUT_HINT;
@@ -630,6 +637,7 @@ function buildCard(emp, date) {
 
   // ---- 重複打卡：同一天同型兩張卡相隔 60 分鐘內，店長選以哪張為準（2026-11-06 Eason）。不選＝照系統原判定（算 1 次忘刷），不擋送出 ----
   const dupPicks = C.dupInitialPicks(dupGroups, emp.approved && emp.approved.dup_ignore);
+  const dupInit = dupPicks.slice(), dupPaints = [];      // 「取消手動修改」要還原重複打卡的選擇
   dupGroups.forEach((g, gi) => {
     const box = h('div', 'du-dupbox');
     box.append(h('div', 'du-duptitle', '⧉ ' + C.dupGroupTitle(g)),
@@ -638,11 +646,11 @@ function buildCard(emp, date) {
     const btns = [{ ts: '', label: '不處理' }].concat(g.cards.map(c => ({ ts: c.ts, label: '以 ' + c.hm + ' 為準' }))).map(o => {
       const b = h('button', 'btn sm ghost du-dupopt', o.label, { type: 'button', 'data-ts': o.ts });
       b.disabled = readOnly;
-      b.onclick = () => { dupPicks[gi] = o.ts; paint(); if (card.__propose) card.__propose(); queueCheck(true); };      // 選了馬上照那張重算、重新檢查（2026-11-15 Eason）
+      b.onclick = () => { dupPicks[gi] = o.ts; paint(); if (card.__propose) card.__propose({ user: true }); queueCheck(true); };      // 選了馬上照那張重算、重新檢查（2026-11-15 Eason）
       opts.append(b); return b;
     });
     function paint() { btns.forEach(b => { const on = b.dataset.ts === dupPicks[gi]; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }); }
-    paint();
+    paint(); dupPaints.push(paint);
     box.append(opts);
     body.append(box);
   });
@@ -670,11 +678,14 @@ function buildCard(emp, date) {
   const offHint = pv.offPunch ? h('div', 'du-offhint', C.OFF_PUNCH_HINT) : null;      // 排休卻有打卡、沒有已核准的加班申請（申請到了由 __applyReq 收掉）
   if (offHint) body.append(offHint);
   const totalBox = h('div', 'du-total'); const breakToggle = h('button', 'du-breaktoggle', '', { type: 'button' }); breakToggle.hidden = true;
+  // single：一行步驟說明（原型 .dq-steps），卡片裡「已核准的申請」「待審的申請」都放在它上面、時段在它下面
+  const stepsEl = single ? h('div', 'dq-steps') : null;
+  if (stepsEl) { ['1. 改上下班時間', '2. 需要時填請假、遲到', '3. 按最下面送出'].forEach((t, i) => { if (i) stepsEl.append('　'); stepsEl.append(h('span', null, t)); }); body.append(stepsEl); }
   body.append(periodRows, totalBox);
   // 「更多」（2026-11-14 第 4 項）：今天沒休息、請假註記、遲到分鐘、加一段平常收起來；有假單、出差、遲到、已填過值就自動打開
   const moreBtn = h('button', 'du-morebtn', '更多：請假、遲到分鐘、加一段 ▾', { type: 'button', 'aria-expanded': 'false' });
   const moreBox = h('div', 'du-morebox'); moreBox.hidden = true;
-  const setMore = on => { moreBox.hidden = !on; moreBtn.setAttribute('aria-expanded', on ? 'true' : 'false'); moreBtn.textContent = on ? '收起：請假、遲到分鐘、加一段 ▴' : '更多：請假、遲到分鐘、加一段 ▾'; };
+  const setMore = on => { moreBox.hidden = !on; moreBtn.setAttribute('aria-expanded', on ? 'true' : 'false'); moreBtn.textContent = on ? (single ? '更多' : '收起') + '：請假、遲到分鐘、加一段 ▴' : '更多：請假、遲到分鐘、加一段 ▾'; };      // single：展開後標題不再出現「收起」（2026-11-24）
   // 這台裝置上次是開是關就照著（常用請假欄的人打開一次就一直開著）；localStorage 讀寫失敗＝收起
   const MORE_KEY = 'dzystore_dutymore';
   moreBtn.onclick = () => { setMore(moreBox.hidden); try { localStorage.setItem(MORE_KEY, moreBox.hidden ? '0' : '1'); } catch (e) { /* 記不住就算了 */ } };
@@ -776,6 +787,7 @@ function buildCard(emp, date) {
       if (rows.length === 2 && C.gapIsBreak(br, rows[0].end, rows[1].start)) { breakToggle.hidden = false; breakToggle.dataset.mode = 'merge'; breakToggle.textContent = '今天沒休息 → 併成一段'; }
       else if (rows.length === 1 && C.shiftCoversBreak(br, rows[0].start, rows[0].end)) { breakToggle.hidden = false; breakToggle.dataset.mode = 'split'; breakToggle.textContent = '插入休息 ' + br.start + '–' + br.end; }
     }
+    syncLabel();
     queueCheck();
   }
   breakToggle.onclick = () => {
@@ -795,6 +807,20 @@ function buildCard(emp, date) {
   const submit = h('button', 'btn du-submit', emp.approved ? '重新送出核定' : '送出核定', { type: 'button' });
   const actions = h('div', 'du-actions'); actions.append(submit);
   moreBox.append(addBtn);
+  // ---- single（手動修改只留一條路）：送出鈕帶時數、不能送時在下方寫一句原因、「取消手動修改」還原成系統建議 ----
+  let ncLabel = '';      // 「確認沒加班，照班表核定 N 小時」那條路的送出鈕文字（approve.js overBlock）；空＝一般
+  const whyEl = single ? h('div', 'du-verdict-n dq-submitwhy', '', { role: 'status' }) : null;
+  if (whyEl) whyEl.hidden = true;
+  const setWhy = t => { if (!whyEl) return; whyEl.textContent = t || ''; whyEl.hidden = !t; };      // 不能送出時畫在送出鈕下面的一句話（原本只是按鈕的 title 提示）
+  const curHours = () => { const { total, filled } = C.sumPeriods(readRows()), th = tripH(); return filled || th ? C.round2(total + th) : null; };
+  const subLabel = () => {
+    if (!single) return '重新送出核定';      // 完整頁：照舊
+    if (ncLabel) return ncLabel;
+    const base = card.__pending ? '送出核定' : '重新送出核定';
+    const hrs = pendBlocked() ? null : curHours();      // 還有待審單：時數審完才定，不帶時數
+    return hrs === null ? base : base + ' ' + hrs + ' 小時';
+  };
+  if (single) syncLabel = () => { if (!card.__subBusy) submit.textContent = subLabel(); };
   if (readOnly) actions.hidden = true;
   const result = h('div', 'du-result'); result.hidden = true;
   // 規則 4（2026-11-16 起）：核定和打卡差 30 分鐘以上要填原因；伺服器說要填才打開，重新核定帶回上次的原因
@@ -805,8 +831,57 @@ function buildCard(emp, date) {
   diffIn.value = prevDiff; diffBox.hidden = !prevDiff;
   if (readOnly) diffIn.disabled = true;
   const preBox = h('div', 'du-pre', null, { role: 'status' }); preBox.hidden = true;      // 送出前檢查的結果與處理按鈕
-  body.append(diffBox, preBox, actions, result);
+  body.append(diffBox, preBox, actions);
+  if (whyEl) body.append(whyEl);
+  body.append(result);
   const say = (cls, text) => { result.className = 'du-result ' + cls; result.hidden = false; result.textContent = text; };
+  // single：「系統建議（參考）」一行＝預填完成那一刻的內容（__propose 照打卡＋單算好、申請預填完）；「取消手動修改，回到系統建議」把輸入還原成它。
+  //   位置由 quick.js 放在時間軸下面（card.__sysEl）；已核定的卡（重新核定）沒有系統建議，不畫
+  const sysEl = single && !emp.approved ? h('div', 'dq-sysref') : null;
+  let sysSnap = null;
+  const snapNow = () => ({ rows: readRows().map(r => ({ start: r.start, end: r.end })), leaves: leaveList(), late: lateIn.value, diff: diffIn.value });
+  const paintSys = () => {
+    if (!sysEl) return;
+    sysEl.textContent = '';
+    const sn = sysSnap, filled = sn ? sn.rows.filter(x => x.start && x.end) : [];
+    if (!sn || (!filled.length && !sn.leaves.length)) { sysEl.hidden = true; return; }      // 沒有可建議的時段（沒班表又沒打卡）：不畫
+    sysEl.hidden = false;
+    const hrs = C.round2(C.sumPeriods(filled).total + C.tripHoursOfList(sn.leaves)), pr = card.__prop;
+    sysEl.append('系統建議（參考）：');
+    if (!filled.length) sysEl.append('整天請假');
+    filled.forEach((x, i) => { if (i) sysEl.append('、'); sysEl.append(h('span', null, x.start + '–' + x.end)); });      // 每一段時間不拆開；後面的「，N 小時，遲到 N 分」照一般文字換行（中文標點不能放行首，整串都不能斷會把手機版撐出橫向捲動）
+    sysEl.append('，' + hrs + ' 小時');
+    if (pr && pr.late > 0) sysEl.append('，遲到 ' + pr.late + ' 分');
+    if (pr && pr.early > 0) sysEl.append('，早退 ' + pr.early + ' 分');
+    const pend = card.__pendMine.concat(card.__pendUpper);
+    if (pend.length) sysEl.append('；' + [...new Set(pend.map(it => (C.REQ_KIND_LABEL[it.kind] ? C.REQ_KIND_LABEL[it.kind] + '單' : '申請單')))].join('、') + '審完後會重算');
+  };
+  const markSys = () => { if (!single) return; sysSnap = snapNow(); paintSys(); };
+  card.__sysEl = sysEl;
+  card.__single = single;
+  card.__restoreSys = () => {
+    if (!single || !sysSnap) return;
+    const sn = sysSnap;
+    periodRows.textContent = '';
+    sn.rows.forEach(x => periodRows.append(periodRow(x, refresh)));
+    setLeaveLines(sn.leaves);      // 內部會 refresh（重算時數、重新檢查）
+    lateIn.value = sn.late; diffIn.value = sn.diff; diffBox.hidden = !sn.diff;
+    card.__cardPicks = {}; card.__notCount = '';
+    dupInit.forEach((v, i) => { dupPicks[i] = v; }); dupPaints.forEach(f => f());
+    result.hidden = true; result.textContent = '';
+    refresh();
+    clearTimeout(card.__checkTimer); card.__checkSeq = (card.__checkSeq || 0) + 1; card.__needRecheck = true;      // 接著就收起來（卡片離開畫面）：現在不送檢查，下次打開才重新檢查
+  };
+  card.__recheck = () => queueCheck(true);
+  if (single) {
+    const undo = h('button', 'dq-cancel dq-undo', emp.approved ? '取消手動修改，回到已核定的內容' : '取消手動修改，回到系統建議', { type: 'button' });
+    undo.onclick = () => {
+      if (card.__subBusy) return;      // 送出進行中不收
+      card.__restoreSys();
+      card.dispatchEvent(new CustomEvent('duty-manual-cancel', { bubbles: true, detail: { emp_id: emp.emp_id, store: emp.store } }));
+    };
+    body.append(undo);
+  }
 
   // ---- 送出前先檢查（2026-11-14 第 1 項）：結果畫在卡片右上角（可以送出／要寫原因／會被擋）與 preBox（原因＋處理按鈕） ----
   const CHECK_ERR = { bad_periods: '上班時段格式不對', future_date: '不能核定還沒到的日子', home_review: '這位同仁由所屬部門核定', unauthorized: '沒有權限核定這位同仁' };
@@ -821,7 +896,15 @@ function buildCard(emp, date) {
     if (dupGroups.length) it.dup_ignore = C.dupIgnoreFrom(dupGroups, dupPicks);
     return it;
   };
-  card.__checking = on => { if (on && card.__pending) { mini.className = 'du-mini pending'; mini.textContent = '檢查中…'; } };
+  // single：檢查結果那一行顯示「檢查中…」、送出鈕暫時不能按（等結果回來整張重畫）。完整頁照舊只標右上角
+  const showChecking = () => {
+    verdict.hidden = false; verdict.textContent = ''; verdict.className = 'du-verdict gray du-verdict-ck';
+    verdict.append(h('div', 'du-verdict-t', '檢查中…', { role: 'status' }));
+    submit.disabled = true; submit.title = STALE_TITLE; setWhy('');
+  };
+  card.__checking = on => {
+    if (on && card.__pending) { mini.className = 'du-mini pending'; mini.textContent = '檢查中…'; if (single && !emp.approved && !absent && !pendBlocked()) showChecking(); }
+  };
   // 改了時段等，檢查結果還沒回來：舊結果標成過期（淡色、核定鈕與送出鈕停用、右上角「檢查中…」）。結果回來由 __setCheck 整張重畫（它會把送出鈕、提示全部重設）
   card.__markStale = () => {
     if (readOnly || !card.__pending || absent || emp.approved || pendBlocked()) return;      // 這幾種本來就不檢查，或畫面已經在說「待審單」
@@ -829,6 +912,7 @@ function buildCard(emp, date) {
     mini.className = 'du-mini pending'; mini.textContent = it ? '檢查中…' : '時段填完才檢查';
     preBox.hidden = true; preBox.className = 'du-pre'; preBox.textContent = '';      // 上一次的逾時提示
     if (!it) { verdict.hidden = true; verdict.textContent = ''; verdict.className = 'du-verdict'; }      // 時段還沒填完：不留舊的通過／未通過框，免得看起來像這個時段的結果
+    else if (single) { showChecking(); return; }      // single：舊結果換成「檢查中…」一行，送出鈕停用（結果回來由 __setCheck 整張重畫）
     else if (!verdict.hidden) {
       verdict.classList.add('stale');
       verdict.querySelectorAll('.du-verdict-go').forEach(b => { b.disabled = true; });
@@ -842,10 +926,12 @@ function buildCard(emp, date) {
   //      不會過＝灰底「未符合規定」＋要補齊的單（每項有處理鈕）、核定鈕灰掉；檢查讀不到＝照舊（可以送出，由打卡系統送出時判）
   const verdict = h('div', 'du-verdict'); verdict.hidden = true;
   const leaveWarn = h('div', 'du-leavewarn', '', { role: 'note' }); leaveWarn.hidden = true;
-  body.insertBefore(verdict, badge.nextSibling);
-  let editOpen = false;
+  if (single) body.insertBefore(verdict, moreBtn);      // single：檢查結果在時數下面（時段 → 時數 → 檢查結果 → 更多 → 送出）
+  else body.insertBefore(verdict, badge.nextSibling);
+  const topAnchor = () => (single ? stepsEl : verdict);      // 卡片裡的待審單、提醒放在這個元素上面
+  let editOpen = single;      // single：手動區一直是開的
   const editEls = () => [periodRows, totalBox, moreBtn, actions].concat(moreBox.hidden ? [] : [moreBox]);
-  const setEdit = on => { editOpen = on; editEls().forEach(x => { x.hidden = !on; }); if (!on) moreBox.hidden = true; else { try { if (localStorage.getItem('dzystore_dutymore') === '1') moreBox.hidden = false; } catch (e) {} } };
+  const setEdit = on => { if (single) on = true; editOpen = on; editEls().forEach(x => { x.hidden = !on; }); if (!on) moreBox.hidden = true; else { try { if (localStorage.getItem('dzystore_dutymore') === '1') moreBox.hidden = false; } catch (e) {} } };
   // ---- 這天還有待審的申請：不能核定（2026-11-19）。打卡端不擋待審單（檢查會說可以），所以這裡不看檢查結果：只要還有待審單就換成黃色提示、核定鈕與送出鈕停用。
   //      沒權限核定的人（readOnly）本來就沒有送出鈕，不顯示。判斷「待審單」與一頁核定共用 quick-calc.js pendSplit。
   const PEND_TITLE = '這天還有待審的申請：審完才能送出核定';
@@ -865,16 +951,18 @@ function buildCard(emp, date) {
       if (up.length) verdict.append(h('div', 'du-verdict-n', '另外還有 ' + up.length + ' 張申請在等上層審核（' + up.map(pendWord).join('、') + '），審完才能核定'));
     } else if (up.length) verdict.append(h('div', 'du-verdict-t', '這天還有 ' + up.length + ' 張申請在等上層審核，審完才能核定（' + up.map(pendWord).join('、') + '）'));
     else verdict.append(h('div', 'du-verdict-t', '單審完了，正在用最新的申請重新計算…'));
-    const acts = h('div', 'du-pre-acts');
-    const go = h('button', 'btn du-verdict-go', '核定（審完單才能按）', { type: 'button' }); go.disabled = true;
-    acts.append(go);
-    if (card.__pending && !emp.approved) {
-      const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '手動改時段', { type: 'button' });
-      adj.onclick = () => { setEdit(!editOpen); adj.textContent = editOpen ? '收起' : '手動改時段'; };
-      acts.append(adj);
+    if (!single) {      // single：提示框不帶核定鈕、不帶「收起／手動改時段」，只有最下面那顆送出鈕（灰、下方寫原因）
+      const acts = h('div', 'du-pre-acts');
+      const go = h('button', 'btn du-verdict-go', '核定（審完單才能按）', { type: 'button' }); go.disabled = true;
+      acts.append(go);
+      if (card.__pending && !emp.approved) {
+        const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '手動改時段', { type: 'button' });
+        adj.onclick = () => { setEdit(!editOpen); adj.textContent = editOpen ? '收起' : '手動改時段'; };
+        acts.append(adj);
+      }
+      verdict.append(acts);
     }
-    verdict.append(acts);
-    submit.disabled = true; submit.title = PEND_TITLE;
+    submit.disabled = true; submit.title = PEND_TITLE; setWhy(PEND_TITLE); syncLabel();
     if (card.__pending && !emp.approved) setEdit(editOpen);
     card.dispatchEvent(new CustomEvent('emp-checked', { bubbles: true }));
   };
@@ -884,19 +972,21 @@ function buildCard(emp, date) {
     if (card.__pending && !emp.approved) { card.__setCheck(card.__check); return; }
     verdict.hidden = true; verdict.textContent = ''; verdict.className = 'du-verdict';
     submit.disabled = false; if (submit.title === PEND_TITLE) submit.title = '';
+    setWhy(''); syncLabel();
   };
-  card.__propose = () => {
+  card.__propose = (po) => {      // po.user＝主管自己選了重複打卡哪張：重算時段，但那不是新的「系統建議」（取消手動修改要還原到選之前）
     if (readOnly || !card.__pending || emp.approved || e2eNoCore()) return;
     const pr = corePeriods({ segs: C.segsWithDupPicks(emp.segments, dupGroups, dupPicks), plan: emp.plan, reqs: card.__dayReqs || [], brk: br });
     card.__prop = pr;
     // 假單沒填時段、上班＋假單比班表多（2026-11-18 Eason 第 5 題）：只提醒、不擋
     const lw = leaveOverText(pr);
-    if (lw && !leaveWarn.isConnected) body.insertBefore(leaveWarn, verdict);
+    if (lw && !leaveWarn.isConnected) body.insertBefore(leaveWarn, topAnchor());
     leaveWarn.textContent = lw; leaveWarn.hidden = !lw;
     if (!pr) return;
     periodRows.textContent = '';
     pr.periods.forEach(x => periodRows.append(periodRow(x, refresh)));
     refresh();
+    if (!(po && po.user)) markSys();      // single：這就是「系統建議」
   };
   const NEED_LABEL = (p, need) => {
     if (p.rule === 'ot_hours' && need && need.ot_hours > 0) return '加班單 ' + C.round2(need.ot_hours - (need.ot_have || 0)) + ' 小時';
@@ -906,10 +996,10 @@ function buildCard(emp, date) {
     return p.text;
   };
   const DOC_RULES = p => (p.rule === 'ot_hours' && /要有加班單/.test(p.text)) || p.rule === 'miss' || /^ft8/.test(p.rule) || p.rule === 'over_credit';
-  card.__setCheck = res => {
+  const setCheckInner = res => {
     card.__check = res && typeof res === 'object' && typeof res.ok === 'boolean' && res.error !== 'unknown_action' ? res : null;
     preBox.hidden = true; preBox.className = 'du-pre'; preBox.textContent = '';
-    submit.classList.remove('du-submit-warn'); submit.disabled = false;
+    submit.classList.remove('du-submit-warn'); submit.disabled = false; setWhy(''); ncLabel = '';
     verdict.hidden = true; verdict.textContent = ''; verdict.className = 'du-verdict';
     if (submit.title === PEND_TITLE || submit.title === STALE_TITLE) submit.title = '';
     if (!card.__pending) { if (pendBlocked()) pendVerdict(); return; }
@@ -937,7 +1027,9 @@ function buildCard(emp, date) {
       li.append(h('span', 'du-need-t', '☐ 加班單 ' + otSuggestText(pr.over, pr.overMin)));
       if (canProxy) { const b = h('button', 'btn sm ghost du-preproxy', '幫同仁開單', { type: 'button' }); b.onclick = () => proxyForm(date, noLine, '打卡比班表多，沒有加班單'); li.append(b); }
       ul.append(li); verdict.append(ul);
-      verdict.append(h('div', 'du-verdict-n', (canProxy ? '' : '有加班：請同仁在 LINE「加班請假」補申請，核准後這裡會自動重算。') + '沒有加班（例：提早到、晚打卡）：按「手動改時段」確認後照班表送出 ' + ck.approved_hours + ' 小時，多出的時段不算。'));
+      verdict.append(h('div', 'du-verdict-n', (canProxy ? '' : '有加班：請同仁在 LINE「加班請假」補申請，核准後這裡會自動重算。') + (single ? '沒有加班（例：提早到、晚打卡）：選好下面的原因後，照班表送出 ' : '沒有加班（例：提早到、晚打卡）：按「手動改時段」確認後照班表送出 ') + ck.approved_hours + ' 小時，多出的時段不算。'));
+      // single：手動區一直開著，沒有「手動改時段」那顆鈕；下面送出鈕就是「確認沒加班，照班表核定 N 小時」（要先選不算工時的原因才能按）
+      if (!single) {
       const acts = h('div', 'du-pre-acts');
       // 只留一條路（2026-11-15 Eason：同一天兩顆核定鈕會混淆）：沒按「自己調」＝灰色「補齊後才能按」；按了「自己調」＝灰色收起，
       // 下面送出鈕改成「確認沒加班，照班表核定 N 小時」（送出前照舊確認框）
@@ -945,9 +1037,10 @@ function buildCard(emp, date) {
       adj.onclick = () => { setEdit(!editOpen); card.__setCheck(card.__check); };
       if (!editOpen) { const go = h('button', 'btn du-verdict-go', '核定通過（補齊後才能按）', { type: 'button' }); go.disabled = true; acts.append(go); }
       acts.append(adj); verdict.append(acts);
+      }
       setEdit(editOpen);
       if (editOpen) {
-        submit.textContent = '確認沒加班，照班表核定 ' + ck.approved_hours + ' 小時';
+        submit.textContent = ncLabel = '確認沒加班，照班表核定 ' + ck.approved_hours + ' 小時';
         // 多做的時段不認列要選理由（2026-11-15 開工確認第 2 題）：理由寫進核定紀錄（diff_reason），不通知同仁
         const nc = h('div', 'du-notcount');
         nc.append(h('div', 'du-needk', '不算工時的原因（必選，會留在核定紀錄）'));
@@ -957,7 +1050,10 @@ function buildCard(emp, date) {
         const cur = String(diffIn.value || '').replace(/^不認列：/, '');
         if (/^不認列：/.test(diffIn.value || '')) { if (NOT_COUNT_REASONS.includes(cur)) sel.value = cur; else { sel.value = '其他'; other.value = cur; } }
         other.hidden = sel.value !== '其他';
-        const put = () => { other.hidden = sel.value !== '其他'; const t = sel.value === '其他' ? other.value.trim() : sel.value; card.__notCount = t; diffIn.value = t ? '不算工時：' + t : ''; };
+        const put = () => {
+          other.hidden = sel.value !== '其他'; const t = sel.value === '其他' ? other.value.trim() : sel.value; card.__notCount = t; diffIn.value = t ? '不算工時：' + t : '';
+          if (single) { submit.disabled = !t; setWhy(t ? '' : NC_WHY); }      // single：沒選原因＝灰色送出鈕，下方寫一句話（不再只靠按了才跳錯誤）
+        };
         sel.onchange = put; other.oninput = put; put();
         nc.append(sel, other);
         verdict.append(nc);
@@ -965,14 +1061,16 @@ function buildCard(emp, date) {
     } else if (ck.ok) {
       mini.className = 'du-mini ok'; mini.textContent = '核定通過';
       verdict.className = 'du-verdict ok';
-      verdict.append(h('div', 'du-verdict-t', '✓ 核定通過：' + (ps || '整天請假') + '＝' + ck.approved_hours + ' 小時'));
+      verdict.append(h('div', 'du-verdict-t', (single ? '✓ 檢查通過：' : '✓ 核定通過：') + (ps || '整天請假') + '＝' + ck.approved_hours + ' 小時'));      // single：這一行不再是按鈕，改叫「檢查通過」
       C.crossNotes(emp, pr && !editOpen ? pr.notes : [], ck.approved_hours).forEach(n => verdict.append(h('div', 'du-verdict-n', n)));   // 跨店加班歸屬提醒（2026-11-18）
+      if (!single) {
       const acts = h('div', 'du-pre-acts');
       const go = h('button', 'btn du-verdict-go', '核定 ' + ck.approved_hours + ' 小時', { type: 'button' });
       go.onclick = () => { card.__noConfirm = true; submit.onclick(); };
       const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '手動改時段', { type: 'button' });
       adj.onclick = () => { setEdit(!editOpen); adj.textContent = editOpen ? '收起' : '手動改時段'; };
       acts.append(go, adj); verdict.append(acts);
+      }
       setEdit(editOpen);
     } else if (ck.error === 'need_diff_reason') {
       // 每張卡跟核定差超過 30 分鐘（2026-11-16 Eason）：單都齊了，每張卡選一個原因；選好寫進原因欄（diff_reason）→ 重新檢查 → 變「核定通過」
@@ -997,12 +1095,14 @@ function buildCard(emp, date) {
         box.append(row);
       });
       verdict.append(box);
+      if (!single) {
       const acts = h('div', 'du-pre-acts');
       const go = h('button', 'btn du-verdict-go', '核定（每張卡選好原因後）', { type: 'button' }); go.disabled = true;
       const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '手動改時段', { type: 'button' });
       adj.onclick = () => { setEdit(!editOpen); adj.textContent = editOpen ? '收起' : '手動改時段'; };
       acts.append(go, adj); verdict.append(acts);
-      submit.disabled = true; submit.title = '每張卡選好原因才能送出';
+      }
+      submit.disabled = true; submit.title = '每張卡選好原因才能送出'; setWhy(submit.title);
       setEdit(editOpen);
     } else {
       const msg = String(ck.message || CHECK_ERR[ck.error] || ck.error || '打卡系統不接受');
@@ -1032,16 +1132,19 @@ function buildCard(emp, date) {
           verdict.append(ul, h('div', 'du-verdict-n', '已核准的單要作廢或請同仁改：點上面「已核准的申請」。'));
         }
       } else verdict.append(h('div', 'du-verdict-n', msg.replace(/^這天還不能核定：/, '')));
+      if (!single) {
       const acts = h('div', 'du-pre-acts');
       const go = h('button', 'btn du-verdict-go', payLock ? '核定（解鎖後才能按）' : '核定通過（補齊後才能按）', { type: 'button' }); go.disabled = true;
       const adj = h('button', 'btn ghost du-verdict-adj', editOpen ? '收起' : '手動改時段', { type: 'button' });
       adj.onclick = () => { setEdit(!editOpen); adj.textContent = editOpen ? '收起' : '手動改時段'; };
       acts.append(go, adj); verdict.append(acts);
-      submit.disabled = true; submit.title = payLock ? '這個月薪資已鎖定：先到薪資頁解鎖才能送出' : '還不能核定：補齊後才能送出';      // Eason 定：灰底不能按（自己調也一樣）
+      }
+      submit.disabled = true; submit.title = payLock ? '這個月薪資已鎖定：先到薪資頁解鎖才能送出' : '還不能核定：補齊後才能送出'; setWhy(submit.title);      // Eason 定：灰底不能按（自己調也一樣）
       setEdit(editOpen);
     }
     card.dispatchEvent(new CustomEvent('emp-checked', { bubbles: true }));
   };
+  card.__setCheck = res => { setCheckInner(res); syncLabel(); };      // single：結果畫完再把送出鈕文字照目前時數、狀態校正一次（完整頁 syncLabel 是空的）
   diffIn.addEventListener('input', () => queueCheck());
   card.addEventListener('emp-approved', () => { preBox.hidden = true; submit.classList.remove('du-submit-warn'); verdict.hidden = true; setEdit(true); });
   /* 超過幾天同仁自己補不了單、才給代開（同打卡端 Requests.gs reqPastLimit_，2026-11-14 Eason）：
@@ -1079,7 +1182,7 @@ function buildCard(emp, date) {
     const add2 = h('button', 'du-proxy-add2 btn sm ghost', '＋ 加第二段', { type: 'button' });
     const segSum = h('div', 'seg-sum du-proxy-segsum');
     const why = h('input', 'du-proxy-why', null, { type: 'text', maxlength: '100', placeholder: '原因（必填）' });
-    const go = h('button', 'btn', '送出（幫同仁開單，等總監審核）', { type: 'button' });
+    const go = h('button', single ? 'btn ghost' : 'btn', '送出（幫同仁開單，等總監審核）', { type: 'button' });      // single：整張卡只有最下面那顆「送出核定」是紅色主按鈕，幫同仁開單改白底
     const curSegs = () => [{ start: a.value, end: b.value }].concat(rowsX.slice(0, extra).map(r => ({ start: r.a.value, end: r.b.value })));
     const sync = () => {
       const k = kind.value, ot = k === 'ot', miss = k === 'miss', m = mt.value;
@@ -1266,13 +1369,13 @@ function buildCard(emp, date) {
         submit.disabled = true; submit.textContent = '確認最新資料…';
         let okGo = false, why = '';
         try { const r = await chk(); okGo = r === true; why = typeof r === 'string' ? r : ''; } catch (e) { why = '讀不到打卡系統的最新資料，這次沒有送出，請稍後再試'; }
-        submit.disabled = false; submit.textContent = '重新送出核定';
+        submit.disabled = false; submit.textContent = subLabel();
         if (!okGo) { say('bad', '✕ ' + (why || '資料剛更新，請確認後再送')); return; }
       }
       if (emp.ver_req && !(typeof emp.ver === 'string' && emp.ver)) { say('bad', '✕ 這位同仁這天的資料版本讀不到，這次沒有送出，請重新整理後再按一次'); return; }      // 一律要帶版本（審查 R2）
       submit.disabled = true; submit.textContent = '確認最新資料…';
       let lq; try { lq = await leaveFreshOk(emp, date, leaveList(), initLeaves); } catch (e) { lq = '假別額度讀不到，含請假的核定這次沒有送出，請稍後再試'; }
-      submit.disabled = false; submit.textContent = '重新送出核定';
+      submit.disabled = false; submit.textContent = subLabel();
       if (lq !== true) { say('bad', '✕ ' + lq); return; }
     }
     // 最後一個 await 之後再檢查一次（第三輪審查）：卡片還在畫面上、還是目前這天；待審單（重讀時可能剛送來）；內容跟確認時一樣
@@ -1303,7 +1406,7 @@ function buildCard(emp, date) {
       say('bad', '✕ 核定失敗：' + e.message);
       failHelp(e.message, approveDate);
     }
-    finally { submit.disabled = !!(card.__pending && card.__check && card.__check.error === 'pay_locked' && !e2eNoCore()); submit.textContent = '重新送出核定'; }      // 薪資鎖月：送出鈕維持不能按
+    finally { submit.disabled = !!(card.__pending && card.__check && card.__check.error === 'pay_locked' && !e2eNoCore()); submit.textContent = subLabel(); }      // 薪資鎖月：送出鈕維持不能按
   };
   // 送出流程進行中（含確認框、重讀額度那幾個 await）：逾時後晚到的檢查結果不可重畫這張卡、不可動送出鈕
   { const submitRun = submit.onclick; submit.onclick = async () => { card.__subBusy = true; try { return await submitRun(); } finally { card.__subBusy = false; } }; }
@@ -1315,6 +1418,7 @@ function buildCard(emp, date) {
   card.__hasPunch = hasPunch;
   card.__absent = absent;
   card.__setExpanded = setExpanded;
+  markSys(); syncLabel();      // single：這一刻（班表預填）就是系統建議的起點；之後 __applyReq、__propose 預填完會再記一次
 
   // ---- 已核准的申請（2026-10-09，照 manager.html __applyReq）：還沒核定就幫主管預填；已核定過不覆蓋，改給一顆「依申請重新填」。
   //      預填只是畫面上的值，主管按送出核定才算數（核准申請本身不寫入核定）。加班在上班日接在班表後面（2026-11-09）；
@@ -1328,6 +1432,7 @@ function buildCard(emp, date) {
     card.__pendErr = ''; card.__pendRetry = null; card.__pendAll = (all || list || []).slice();      // 讀到待審清單了
     const sp = pendSplit((all || list || []).map(it => Object.assign({}, it, { pending: true, decidable: reqCanDecide(it) })));
     card.__pendMine = sp.mine; card.__pendUpper = sp.upper;
+    paintSys(); syncLabel();      // single：系統建議那行有待審單時多寫「…審完後會重算」；送出鈕文字（待審單擋著＝不帶時數）
     if (pendBlocked()) pendVerdict();
     else if (was && onlyErr && !card.__check) { if (verdict.classList.contains('du-verdict-pend')) { verdict.hidden = true; verdict.textContent = ''; verdict.className = 'du-verdict'; setBadge(emp.approved, initLeaves); } submit.disabled = false; if (submit.title === PEND_TITLE) submit.title = ''; }      // 還沒檢查過：只收掉「讀取中」，等檢查結果再畫（不打開手動修改）
     else if (was) card.__pendRelease();
@@ -1339,6 +1444,7 @@ function buildCard(emp, date) {
       // 這張審完了（核准或退回）：從待審名單拿掉；單都審完（上層那種也沒有）才恢復，但要等重讀申請、重新檢查完（__recalc）才給核定，不拿審單前的結果亮燈
       card.__pendMine = card.__pendMine.filter(x => !(String(x.id) === String(it.id) && (x.store || '') === (it.store || '')));
       if (!card.__pendMine.length && !card.__pendUpper.length) card.__recalc = 1;
+      paintSys(); syncLabel();
       if (pendBlocked()) pendVerdict();
       const rechecking = () => { if (card.__recalc === 1) card.__recalc = 2; queueCheck(true); };
       if (decision !== 'approve') { rechecking(); return; }
@@ -1357,7 +1463,7 @@ function buildCard(emp, date) {
       };
       reload();
     })));
-    body.insertBefore(box2, verdict);      // 待審單放在提示上面（提示寫「在上面核准或退回」）
+    body.insertBefore(box2, topAnchor());      // 待審單放在提示上面（提示寫「在上面核准或退回」）；single：放在步驟說明上面
   };
   card.__applyReq = reqs => {
     card.__dayReqs = reqs || [];
@@ -1473,7 +1579,7 @@ function buildCard(emp, date) {
             rl.onclick = () => card.dispatchEvent(new CustomEvent('duty-reload-day', { bubbles: true, detail: { date, emp } }));
             done.append(' ', rl);
             periodRows.parentNode.insertBefore(done, periodRows);
-            card.querySelectorAll('.du-submit').forEach(b => { b.disabled = true; b.title = '請先重新載入這天'; });
+            card.querySelectorAll('.du-submit').forEach(b => { b.disabled = true; b.title = '請先重新載入這天'; }); setWhy('請先重新載入這天');
             return;
           }
           const rest = reqs.filter(q => q.id !== r.id);
@@ -1538,8 +1644,8 @@ function buildCard(emp, date) {
       if (readOnly) b.hidden = true;
       b.onclick = () => { fill(fillables); b.remove(); setNote('已依申請填好，確認後按送出核定。'); };
       rbox.insertBefore(b, note);
-    } else if (!multi && fillable && !emp.approved) fill(fillables);
-    periodRows.parentNode.insertBefore(rbox, tag || periodRows);    // 順序：申請說明 → 來自申請 → 時段
+    } else if (!multi && fillable && !emp.approved) { fill(fillables); markSys(); }
+    periodRows.parentNode.insertBefore(rbox, single ? stepsEl : (tag || periodRows));    // 順序：申請說明 → 來自申請 → 時段（single：申請說明 → 步驟說明 → 來自申請 → 時段）
     // 已核准的申請收成一行（2026-11-14）：點開才看每張與作廢鈕；有多張同類要主管選、或已核定過要重填的才一開始就打開
     if (card.__rline) card.__rline.remove();
     const KL = { ot: '加班', leave: '請假', trip: '出差', miss: '忘打卡' };

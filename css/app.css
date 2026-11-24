@@ -779,6 +779,18 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
 .dq-fine .du-card.du-fine{border:0;box-shadow:none;padding:0;margin:0;background:transparent}
 .du-card.du-fine>.du-head{display:none}
 .dq-finebtn{font-weight:700}
+/* 手動修改只留一條路（2026-11-24 Eason 方案一；原型 manual-edit-ui/proto）：上方「系統建議（參考）」一行、步驟說明、只有最下面一顆「送出核定 N 小時」、取消連結。
+   灰色送出鈕借 .du-verdict-go:disabled 的灰；其餘都是既有色票與字級。只作用在 .du-single（一頁核定的手動區），完整頁與只看的卡不受影響 */
+.dq-sysref{background:#f1efec;border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.dq-steps{font-size:13px;color:var(--muted);margin-bottom:2px}
+.dq-steps span,.dq-sysref span{white-space:nowrap}
+.du-single .du-submit:disabled{background:#d9d4ce;border-color:#d9d4ce;color:#fff;opacity:1;cursor:not-allowed}
+.dq-submitwhy{margin-top:6px}
+.dq-undo{display:block;width:100%;text-align:center;text-decoration:underline;font-size:13px;margin-top:2px}
+.du-single .du-body>.du-periods{margin-top:6px}
+.du-single .du-inreq{margin-bottom:10px}
+.dq-fine .du-single>.du-body{border-top:0;padding:0}
+.du-verdict.du-verdict-ck .du-verdict-t{color:var(--muted)}
 .dq-waits{display:flex;flex-direction:column;gap:8px}
 .dq-wait{background:#fff;border:1px solid var(--line);border-left:4px solid #b86a00;border-radius:0 12px 12px 0;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
 .dq-wtop{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
