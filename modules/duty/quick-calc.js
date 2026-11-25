@@ -592,9 +592,19 @@ const clashMin = (p, q) => Math.max(...[-1440, 0, 1440].map((d) => Math.min(p[1]
  */
 export function timedLeaveCheck(inp) {
   const { emp, date, LO, brk } = inp || {};
-  const reqs = (inp && inp.reqs) || [];
-  if (!emp || emp.approved || !reqs.length) return null;
-  if (reqs.some((r) => !r || r.pending || (r.kind !== 'leave' && r.kind !== 'trip') || !r.start || !r.end)) return null;
+  const allReqs = (inp && inp.reqs) || [];
+  if (!emp || emp.approved || !allReqs.length) return null;
+  if (allReqs.some((r) => !r || r.pending)) return null;      // 有待審單：照原本
+  // 加班單不是假別（2026-11-24 Eason 案例：出差 21:30–23:00 1.5h＋同時段加班單 1.5h，班表 8h）：不帶進預檢的 leaves，也不當「混到別種單」而整個放棄，
+  // 不然預檢沒帶出差、打卡端用 8 小時判成「沒超過 8 小時卻有加班單」(ot_void)。超過 8 小時有沒有加班單，仍由打卡端對「時段＋出差／假單」的時數判（保護性檢查照舊）
+  // 只有「時段完全落在同日已核准出差時段內」的加班單才濾掉（那段時間是出差，加班單只是超過 8 小時的憑證；請假／補休蓋住的不算）；
+  // 任一張加班單有沒被蓋到的部分（班內加班、沒填時段…）照原本整個不適用、走逐筆：打卡端只要 trip_hours>0 就整天跳過 ot_slot／ot_in_sched，
+  // 預檢帶了出差反而會讓這種加班單被放行（PR #401 審查 BLOCKER 1）
+  const sum = C.reqHoursSummary(allReqs);
+  const reqs = allReqs.filter((r) => r.kind !== 'ot');
+  if (!reqs.length) return null;      // 只有加班單：照原本
+  if (allReqs.some((r) => r.kind === 'ot' && !(sum.dup[r.id] && sum.dup[r.id].tripFull))) return null;      // 只認出差：請假／補休蓋住的加班單不算（那種日子照改動前，打卡端 9 小時對 1 小時加班單且 trip_hours>0 會跳過時段檢查，反而放行；PR #401 第二輪審查）
+  if (reqs.some((r) => (r.kind !== 'leave' && r.kind !== 'trip') || !r.start || !r.end)) return null;
   if (reqs.length > 1 && C.reqPlan(reqs).multi) return null;
   // 兩張不同假別的單時段互相重疊（2026-11-18 驗收）：登記的時數加起來會把重疊那段算兩次 → 前端先擋、留逐筆（打卡端 reqLeaveOverlapProbs_ 也擋）
   for (let i = 0; i < reqs.length; i++) for (let j = i + 1; j < reqs.length; j++) {
@@ -611,7 +621,7 @@ export function timedLeaveCheck(inp) {
   if (po) return { stop: ['事假超過 14 天', po] };
   // 假單時段跟要核定的上班時段重疊：2026-11-18 起 corePeriods 已扣掉已核准、有時段的假單（遲到從假單結束算、請假時段裡有打卡也扣），正常不會再發生；
   // 留著當防呆（算法以後改壞時不帶假別、留逐筆），打卡系統也會擋（Requests.gs leave_overlap）
-  const core = corePeriods({ segs: emp.segments, plan: emp.plan, reqs, brk });
+  const core = corePeriods({ segs: emp.segments, plan: emp.plan, reqs: allReqs, brk });      // 加班單照樣算進時段（同手動修改卡片、同 quick.js precheck 的 core）
   if (!core || !core.periods.length) return null;      // 上班時段全被假單蓋掉（整天有時段假單、當天卻有打卡）：照原本逐筆（2026-11-18 第 4 題維持現狀；手動修改卡片照假單預填、上班時段空）
   const ps = core.periods.map((x) => spanOf(x.start, x.end)).filter(Boolean);
   const hit = reqs.find((r) => { const q = spanOf(r.start, r.end); return q && ps.some((p) => clashMin(p, q) > 0); });

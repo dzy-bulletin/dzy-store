@@ -1028,6 +1028,16 @@ function dutyDo(d, action, b) {
       const f0 = fakeOf(emp.emp_id), openSeg = !!f0 && f0.segs.some(x => !x.in || !x.out), covered = d.reqs.some(r => r.emp_id === emp.emp_id && r.date === date && r.status === 'approved');
       if (openSeg && !covered) return fail('BAD_INPUT', '這天還不能核定：缺加班單、假單或忘打卡單' + (emp.no_line ? '。這位同仁沒綁 LINE，請店長在考勤管理「代開申請」，送總監層級審核。' : ''));
     }
+    // 核定沒超過 8 小時卻有已核准加班單（打卡端 Requests.gs reqBindCheck_ ot_void，字句照抄；核定時數＝上班時段＋出差時數）：示範模式預設不擋；e2e 設 d.strictOt 才打開（2026-11-24 出差＋同時段加班單）
+    const voidText = (() => {
+      if (!d.strictOt) return '';
+      const oh = d.reqs.filter(r => r.emp_id === emp.emp_id && r.date === date && r.status === 'approved' && r.kind === 'ot').reduce((a, r) => a + (Number(r.hours) || 0), 0);
+      if (!(oh > 0.005)) return '';
+      let wk = leaves.reduce((a, x) => a + (x.type === '出差' && x.hours !== '' ? x.hours : 0), 0);
+      periods.forEach(p => { const [a, c] = [p.start, p.end].map(t => +t.slice(0, 2) * 60 + +t.slice(3)); wk += ((c <= a ? c + 1440 : c) - a) / 60; });
+      return wk - 8 > 0.005 ? '' : '核定沒有超過 8 小時，卻有 ' + Math.round(oh * 100) / 100 + ' 小時的已核准加班單，請先把加班單作廢';
+    })();
+    if (voidText && !d.strictLeave) return Object.assign(fail('BAD_INPUT', '這天還不能核定：' + voidText + '。請照上面調整核定時段，或處理那張單。'), { probs: [{ rule: 'ot_void', text: voidText }], need_doc: false });
     // 核定登記的假 vs 已核准的假單／出差單（打卡端 Requests.gs reqStrictLeaveProbs_，字句照抄）：示範模式預設不擋；e2e 設 d.strictLeave 才打開（2026-11-18 Q2，docs/approve-once/）
     if (d.strictLeave) {
       const okRows = d.reqs.filter(r => r.emp_id === emp.emp_id && r.date === date && r.status === 'approved' && (r.kind === 'leave' || r.kind === 'trip'));
@@ -1036,7 +1046,7 @@ function dutyDo(d, action, b) {
       const fmt = n => String(Math.round(n * 100) / 100), out = [];
       Object.keys(have).forEach(t => { if (!(t in reqd)) out.push('登記了' + t + ' ' + fmt(have[t]) + ' 小時，但沒有已核准的' + (t === '出差' ? '出差單' : '假單')); else if (Math.abs(have[t] - reqd[t]) > 0.005) out.push(t + '核定登記 ' + fmt(have[t]) + ' 小時，已核准的單是 ' + fmt(reqd[t]) + ' 小時'); });
       Object.keys(reqd).forEach(t => { if (!(t in have)) out.push('有已核准的' + t + ' ' + fmt(reqd[t]) + ' 小時，核定沒有登記'); });
-      if (out.length) return Object.assign(fail('BAD_INPUT', '這天還不能核定：' + out.join('；')), { probs: out.map(t => ({ rule: 'leave', text: t })), need_doc: true });
+      if (out.length || voidText) return Object.assign(fail('BAD_INPUT', '這天還不能核定：' + (voidText ? [voidText] : []).concat(out).join('；')), { probs: (voidText ? [{ rule: 'ot_void', text: voidText }] : []).concat(out.map(t => ({ rule: 'leave', text: t }))), need_doc: !!out.length });
       // 核定上班時段跟已核准、有時段的假單／出差單重疊（打卡端 Requests.gs reqLeaveOverlapProbs_，2026-11-18 第 6 題；字句照抄，任何重疊都擋）
       const mm = t => +t.slice(0, 2) * 60 + +t.slice(3), hmOf = n => String(Math.floor((n % 1440) / 60)).padStart(2, '0') + ':' + String(n % 60).padStart(2, '0');
       const PS = periods.filter(p => p && /^\d{2}:\d{2}$/.test(p.start || '') && /^\d{2}:\d{2}$/.test(p.end || '')).map(p => [mm(p.start), mm(p.end) <= mm(p.start) ? mm(p.end) + 1440 : mm(p.end)]);

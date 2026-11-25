@@ -370,6 +370,7 @@ select{min-height:44px}
 .du-reqrow{padding:6px 0;border-top:1px dashed rgba(107,76,0,.35)}
 .du-reqrow:first-of-type,.du-reqlead+.du-reqrow{border-top:0}
 .du-reqold{color:var(--bad);font-size:12.5px}
+.du-reqdup{color:var(--muted,#7a716a);font-size:12.5px;margin-top:2px}
 .du-reqacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
 .du-reqacts .btn{min-height:36px;font-size:13px}
 .du-proofmark{margin-left:4px;font-size:13px}

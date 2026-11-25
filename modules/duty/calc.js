@@ -467,6 +467,37 @@ export function planPrefill(emp, plan, br) {
 export function otPeriods(reqs) {
   return (reqs || []).filter(r => r && r.kind === 'ot' && r.start && r.end).map(r => ({ start: r.start, end: r.end }));
 }
+/**
+ * 已核准申請的時數合計（只給畫面「共 N 小時」用，不影響核定）。出差在核定時數裡等同打卡，加班單是「超過 8 小時」那段的憑證：
+ * 加班單時段跟同日已核准出差／請假時段重疊的部分，是同一段時間開了兩張單，不重複計入（部分重疊只扣重疊段；沒填起訖時段的單照加）。
+ * 回 { hours, dup: { [加班單 id]: { min: 重疊分鐘, by: '出差'｜'請假'｜'出差、請假', full: 整張都重疊, counted: 這張實際計入的小時 } } }
+ */
+export function reqHoursSummary(reqs) {
+  const list = (reqs || []).filter(Boolean);
+  const span = r => { const a = hhmmToMin(r.start), b = hhmmToMin(r.end); return a == null || b == null || a === b ? null : [a, b < a ? b + 1440 : b]; };
+  const cover = list.filter(r => (r.kind === 'trip' || r.kind === 'leave') && span(r)).map(r => ({ r, s: span(r) }));
+  const dup = {};
+  let hours = 0;
+  list.forEach(r => {
+    if (r.kind === 'miss') return;
+    let h = Number(r.hours) || 0;
+    const o = r.kind === 'ot' ? span(r) : null;
+    if (o && cover.length) {
+      // 逐分鐘標記：多張出差／請假彼此重疊時，同一分鐘不會扣兩次；跨午夜的單前後一天都比
+      const mark = new Set(), by = new Set(), tripMark = new Set();
+      const inSpan = (c, t) => [-1440, 0, 1440].some(d => t >= c.s[0] + d && t < c.s[1] + d);
+      for (let t = o[0]; t < o[1]; t++) cover.forEach(c => { if (inSpan(c, t)) { mark.add(t); by.add(c.r.kind === 'trip' ? '出差' : '請假'); if (c.r.kind === 'trip') tripMark.add(t); } });
+      if (mark.size) {
+        const full = mark.size >= o[1] - o[0];
+        h = full ? 0 : Math.max(0, h - mark.size / 60);      // 整張都被蓋住直接計 0（hours 存兩位小數，減分鐘會留尾巴）；部分蓋住才扣分鐘；合計最後才取兩位
+        // tripFull＝整張加班單都落在出差時段內（只認出差）：一頁核定預檢濾掉加班單的條件用它，請假蓋住的不算
+        dup[r.id] = { min: mark.size, by: ['出差', '請假'].filter(x => by.has(x)).join('、'), full, tripFull: tripMark.size >= o[1] - o[0], counted: round2(h) };
+      }
+    }
+    hours += h;
+  });
+  return { hours: round2(hours), dup };
+}
 export const OFF_PUNCH_HINT = '排休卻有打卡：請同仁補加班申請，核准後會自動帶入';
 
 // ---- 一天多種假別（2026-10-29，照 manager.html 2026-10-26；docs/duty-req-multi/spec.md §1.2）----

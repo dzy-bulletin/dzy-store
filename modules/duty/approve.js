@@ -1488,12 +1488,15 @@ function buildCard(emp, date, bopt) {
     const setNote = t => { note.textContent = t; note.hidden = !t; };
     let tag = null;
     const canVoid = !readOnly || canWriteRow('req', emp.emp_id, emp.store) || canVoidRow(emp.emp_id, emp.store);     // 能核他工時、或能審他申請的人（Eason 2026-10-29 選 2A）、或有考勤作廢（2026-11-13）；伺服器再驗一次
+    const hrsSum = C.reqHoursSummary(reqs);
     reqs.forEach(r => {
       const row = h('div', 'du-reqrow');
       const line = h('div', null, '✓ 已核准的申請：' + r.summary + '（' + r.decided_by + ' 核准）');
       const segT = approvedSegTag(reqs, r);      // 同一次送出的兩段（2026-11-18）：只在這一列後面標「第 N／M 段」，不影響上面任何計算
       if (segT) line.append(h('span', 'seg-tag du-seg-tag', '同一次送出 第 ' + segT.n + '／' + segT.m + ' 段'));
       row.append(line);
+      const dupR = hrsSum.dup[r.id];      // 加班單和出差／請假同時段：加班單是超過 8 小時的憑證要留著，但時數不另計
+      if (dupR) row.append(h('div', 'du-reqdup', dupR.full ? '加班單與' + dupR.by + '同時段，不另計' : '加班單有 ' + dupR.min + ' 分鐘與' + dupR.by + '同時段，這段不另計'));
       if (r.kind !== 'ot' && plan.older(r)) row.append(h('div', 'du-reqold', '同類還有一張較晚送出的申請，這張可能是舊單'));
       const acts = h('div', 'du-reqacts');
       if (multi && r.kind !== 'ot' && !readOnly) {
@@ -1650,7 +1653,7 @@ function buildCard(emp, date, bopt) {
     if (card.__rline) card.__rline.remove();
     const KL = { ot: '加班', leave: '請假', trip: '出差', miss: '忘打卡' };
     const kinds = [...new Set(reqs.map(r => KL[r.kind] || '申請'))].join('、');
-    const hrs = C.round2(reqs.reduce((a, r) => a + (r.kind === 'miss' ? 0 : Number(r.hours) || 0), 0));
+    const hrs = hrsSum.hours;      // 加班單跟同日出差／請假同時段的部分不重複計入（2026-11-24）
     const rline = h('button', 'du-reqline', null, { type: 'button', 'aria-expanded': 'false' });
     rline.append(h('span', null, '✓ 已核准' + kinds + ' ' + reqs.length + ' 張' + (hrs ? '，共 ' + hrs + ' 小時' : '')), h('span', 'du-reqline-more', '明細、作廢 ▸'));
     const openR = on => { rbox.hidden = !on; rline.setAttribute('aria-expanded', on ? 'true' : 'false'); rline.lastChild.textContent = on ? '收起 ▴' : '明細、作廢 ▸'; };
