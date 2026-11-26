@@ -320,7 +320,10 @@ export function segCountOk(plan, segs, br) {
 /**
  * 已核定的人：已核准加班單時數比「核定該有的加班」多超過 15 分鐘 → 回 { rest, hours, need, have }，否則 null（2026-11-23 主管定案：加班單只是憑證，比時數、不比時段）。
  * 該有的加班同薪資缺單檢查 payOtFormCheck_（Payroll.gs）與打卡端 reqStrictOtNeed_：班表休息日 H／例假 R＝核定時數全部；其他（上班日、國定假日、查不到班表）＝核定時數（含出差）超過 8 小時的部分。
- * 容差 0.25 小時（同 PAY_OT_FORM_TOL_H）：多 0.25 以內不列。同一天在同一單位別家店也上班（elsewhere 有時數）→ 兩家合併算、這裡看不全，不列（同打卡端 peerDay）。
+ * 容差 0.25 小時（同 PAY_OT_FORM_TOL_H）：多 0.25 以內不列。
+ * 同一天在同一單位別家店也有上班（別家有打卡、或有已核定／已核准出差單）：正職上班日改用 crossOt（打卡端 reqFt8Split_ 的移植，同 server/ot-check.js judge）
+ * 算「這家該有的加班」＝兩家合計超過 8 小時的部分歸哪家；別家時數來源＝伺服器附的 emp.ft8_peer（含「有核定沒打卡」的出差），歸屬用 emp.cross_role。
+ * 看不到別家（沒有 ft8_peer、同名分不出、別家有打卡還沒核定、支援身分不明、不是正職上班日）→ 不列（寧可漏報不誤報）。完全沒有跨店跡象的人照單店比較、與改之前一樣。休息日／例假不動。
  * 日別來源＝營運系統班表（server/schedule.js dutyPlans，經 mgr_day 每人的 plan.day_type 帶到這一頁）。班表查不到（plan 空、或沒有 day_type）＝不知道該有多少加班：
  * 目前不列回（OT_FLAG_CFG.unknownDay＝'skip'）；改成 'workday' 就當上班日（同打卡端 reqStrictOtNeed_ 把查不到當一般日）照列。主管還沒定這條，只改這一個值就能切換。
  */
@@ -332,6 +335,47 @@ const finiteH = (v) => {
   const n = typeof v === 'number' ? v : (typeof v === 'string' && /^\s*\d+(\.\d+)?\s*$/.test(v) ? Number(v) : NaN);
   return Number.isFinite(n) && n >= 0 && n <= OT_DAY_MAX_H ? n : NaN;
 };
+/** 核定時段最早的開始（分鐘）：跨店同時數的歸屬比較用（crossOt 的 ownFs）；讀不出來＝null */
+const firstStartMin = (periods) => {
+  const list = Array.isArray(periods) ? periods : (typeof periods === 'string' ? periods.split(/[,、]/).map((t) => { const m = /(\d{1,2}:\d{2})\s*[-–]/.exec(t); return m ? { start: m[1] } : null; }) : []);
+  let fs = null;
+  list.forEach((p) => { const m = p && /^(\d{1,2}):(\d{2})/.exec(String(p.start || '')); if (m) { const v = +m[1] * 60 + +m[2]; if (fs === null || v < fs) fs = v; } });
+  return fs;
+};
+const minHm = (m) => String(Math.floor(m / 60) % 24).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+/**
+ * 同一天同單位別家也上班時，這家（正職上班日）該有的加班＝crossOt 的 here（不另寫加總）。回：
+ *   undefined＝沒有跨店跡象（別家沒打卡、也沒有已核定／已核准出差）→ 呼叫端照單店比較；
+ *   null＝有跨店跡象但這裡算不準 → 不列（看不到別家：沒有 ft8_peer／同名分不出；別家有打卡還沒核定；支援身分不明；不是正職上班日）；
+ *   {need, text}＝兩家合計後這家該有的加班時數、crossOt 的說明句。
+ * 別家時數：ft8_peer.by（伺服器 attachElsewhere 附，副本新鮮的別家：已核定＝核定時數；沒核定沒打卡＝已核准出差單）；歸屬 emp.cross_role（支援帳號／原單位）。
+ * 只有已核准假單的別家不算上班（同 server/ot-check.js）。
+ */
+function crossNeed(emp, hours) {
+  const ew = C.elsewhereHours(emp);
+  const pr = emp.ft8_peer, by = pr && typeof pr === 'object' && pr.ok === true && Array.isArray(pr.by) ? pr.by : null;
+  const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0);
+  const worked = (by || []).filter((b) => b && (b.approved != null || b.punched || num(b.tp) > 0));
+  if (!ew.length && !worked.length) return undefined;
+  if (!(emp.ft === true || emp.ft8_on === true) || !emp.plan || emp.plan.day_type !== 'W') return ew.length ? null : undefined;      // 計時、非 W：照舊（別家有打卡＝不列；只有核定／出差＝單店比較）。ft8_on＝伺服器 schedFtHome：支援帳號這家 ft 常是 null、看原單位是正職上班日
+  if (!by) return null;
+  if (ew.some((x) => !by.some((b) => b && b.code === x.code))) return null;      // 有打卡的那家 ft8_peer 沒給（副本不新鮮）＝看不到它的核定
+  const others = [];
+  for (const b of worked) {
+    let h;
+    if (b.approved != null) h = Number(b.approved);
+    else if (b.punched) return null;      // 別家有打卡還沒核定：時數只是估的，不拿來下結論
+    else h = num(b.tp);
+    if (!(h > 0)) continue;
+    const e = ew.find((x) => x.code === b.code);
+    others.push({ label: String(b.label || '別店'), code: String(b.code || ''), unit: true, approved: C.round2(h), segs: e && e.fs != null ? [{ in: minHm(e.fs), out: null }] : [] });
+  }
+  if (!others.length) return ew.length ? null : undefined;
+  const role = emp.cross_role;
+  if (!role || (role.support !== true && role.support !== false)) return null;      // 支援身分不明＝加班歸哪家算不準（同 ot-check.js）
+  const x = C.crossOt({ ft: true, plan: { day_type: 'W' }, cross_role: role, elsewhere: others }, hours, firstStartMin(emp.approved && emp.approved.periods));
+  return x ? { need: C.round2(x.here), text: x.text } : null;
+}
 export function otExcess(emp, reqs) {
   try {      // 資料有任何怪異（getter 拋錯、怪物件…）→ 判斷不出來、不列回，不讓整頁壞掉
     if (!emp || !emp.approved) return null;
@@ -346,10 +390,15 @@ export function otExcess(emp, reqs) {
     const hours = C.round2(hours0);
     const dt = emp.plan && emp.plan.day_type, rest = dt === 'H' || dt === 'R';
     if (!dt && OT_FLAG_CFG.unknownDay !== 'workday') return null;      // 班表查不到：判斷不出該有多少加班，不列（見上面）
-    const need = rest ? hours : Math.max(0, C.round2(hours - OK_MAX_H));
+    let need = rest ? hours : Math.max(0, C.round2(hours - OK_MAX_H)), cross = null;
+    if (rest) { if (C.elsewhereHours(emp).length) return null; }      // 休息日／例假：照舊（別家也上班＝這裡看不全，不列）
+    else {
+      const x = crossNeed(emp, hours);      // undefined＝沒有跨店跡象（照單店比）；null＝有跡象但算不準、不列；物件＝兩家合計算出這家該有的加班
+      if (x === null) return null;
+      if (x) { need = x.need; cross = x.text; }
+    }
     if (!(have > need + OT_FLAG_TOL_H + 0.005)) return null;
-    if (C.elsewhereHours(emp).length) return null;
-    return { rest, hours, need, have };
+    return cross ? { rest, hours, need, have, cross } : { rest, hours, need, have };
   } catch (e) { return null; }
 }
 function classifyRaw(inp) {
@@ -367,6 +416,7 @@ function classifyRaw(inp) {
     if (ex) {
       const fix = '照打卡或出差單真的多上班，請按「手動修改」重新核定；沒有多上班，請把加班單作廢。加班單只是憑證，不會自己加進時數。';
       const note = ex.rest ? '休息日：核定 ' + ex.hours + ' 小時全部算加班，但已核准的加班單有 ' + ex.have + ' 小時，比核定多。' + fix
+        : ex.cross ? '上班日：核定 ' + ex.hours + ' 小時。' + ex.cross + '。這家該有 ' + ex.need + ' 小時加班，但已核准的加班單有 ' + ex.have + ' 小時。' + fix
         : '上班日：核定 ' + ex.hours + ' 小時，照規定超過 ' + OK_MAX_H + ' 小時才算加班（' + ex.need + ' 小時），但已核准的加班單有 ' + ex.have + ' 小時。' + fix;
       // noCheck：不送送出前檢查（precheckItem 回 null）——檢查會過時會被移到「核定通過」一鍵核定，主管就不是二選一（手動修改／作廢加班單）了。#372 合併後由 doneBefore 涵蓋
       return Object.assign(base, { status: 'abnormal', tag: '已核定，加班單比核定多', note, noCheck: true, actions: [{ id: 'full', label: '手動修改', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
