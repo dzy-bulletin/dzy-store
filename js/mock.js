@@ -823,6 +823,7 @@ function duty(action, me, s, b) {
   }
   const d = tgt ? dutyStore(tgt) : dutyDb();
   d.calls[action] = (d.calls[action] || 0) + 1;
+  if (action === 'mgr_req_decide' || action === 'mgr_req_decide_batch') (d.reqlog = d.reqlog || []).push({ action, body: Object.fromEntries(Object.entries(b || {}).filter(([k]) => !/^__/.test(k))) });      // e2e 比對送出內容（2026-11-25 審單出勤試算：開關開關都不能變）
   const fi = d.faults.findIndex(f => f.action === action);
   const fault = fi >= 0 ? d.faults[fi] : null;
   if (fault && fault.once) d.faults.splice(fi, 1);
@@ -1214,6 +1215,7 @@ function dutyDo(d, action, b) {
       if (r.upper_kind) o.upper_kind = r.upper_kind; if (r.proxy_by) o.proxy_by = r.proxy_by;
       if (b.__who) o.can_decide = !reqDeny(d, r, b.__who);      // 個人登入才有（伺服器 duty.js can_decide）：代開的單這個示範主管核不了      // 主管代開的單（mgr_req_proxy）：標代開，只有總監層級核得了
       if (r.date <= today) o.punches = clone(r.punches || []);   // 還沒到的日期沒有打卡可看
+      if (r.ot_check) o.ot_check = clone(r.ot_check);      // 審單出勤試算（e2e 直接給伺服器 server/ot-check.js 會附的那一欄；真伺服器只在個人登入、DUTY_REQ_OT_CHECK=1 時附）
       return o;
     });
     return ok({ items });

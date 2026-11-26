@@ -341,6 +341,13 @@ select{min-height:44px}
 .du-rq-grp .du-rq-evid{margin-top:8px}
 .du-rq-grp .du-rq-grp-info{margin:6px 0 0}
 .du-rq-grp .du-rq-l2[hidden],.du-rq-grp .du-rq-evid[hidden],.du-rq-grp .du-rq-warn[hidden]{display:none}
+/* 審單出勤試算（2026-11-25 ot-review-hint）：白底灰框、紅字＝多了（核定時會擋）、綠字＝相符、黃字＝別家還沒核定僅供參考、灰字＝提醒／算不出來 */
+.du-rq-ot{border:1px solid #e6dcd6;border-radius:8px;padding:7px 9px;font-size:12.5px;line-height:1.6;margin:0 0 8px;color:#3d2e28;overflow-wrap:anywhere}
+.du-rq-ot-t{font-weight:600;margin-bottom:2px}
+.du-rq-ot-l.ok{color:#1f7a3a}.du-rq-ot-l.bad{color:#c0392b;font-weight:600}.du-rq-ot-l.est{color:#a15a00}.du-rq-ot-l.dim{color:#7a6a63}
+.du-rq-ot[hidden]{display:none}
+.du-rq-ottag{display:inline-block;font-size:11.5px;line-height:1.5;padding:0 6px;border-radius:999px;margin-left:4px;white-space:nowrap}
+.du-rq-ottag.bad{background:#fdecea;color:#c0392b}.du-rq-ottag.ok{background:#e8f5ec;color:#1f7a3a}.du-rq-ottag.est{background:#fff6e0;color:#a15a00}
 .du-rq-gbtn{width:100%;margin-top:6px;min-height:44px}
 .du-rq-msg.ok{color:var(--ok)}
 .du-rq-grp.done{opacity:.85}

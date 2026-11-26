@@ -13,6 +13,7 @@ import { mirrorLine, mirrorFlags } from './mirror-line.js';      // 「資料更
 import { corePeriods, OVER_BLOCK_MIN, otSuggestText, cardDiffs, cardLabel, cardReasonText } from './core-calc.js';
 import { MOCK } from '../../js/config.js';
 import { capLockMark } from './cap-note.js';      // 系統鎖卡標示（2026-11-23）
+import { otBoxEl } from './ot-text.js';      // 審單出勤試算（2026-11-25，伺服器開關開著才有 ot_check）
 
 // 總開關：改成 false、重新發布網站，手機也回到舊畫面（不必動別的）
 export const QUICK_ON = true;
@@ -1011,6 +1012,10 @@ export function renderQuick(ctx) {
     const pendList = p.hasPend && !(p.actions || []).some((a) => a.id === 'reject') ? reqShown(st.pending).filter((it) => it.date === st.date && Q.keyOf(it) === p.key && !st.handled.has(hid(it)) && Q.reqDecidable(it, canWriteRow)) : [];
     if (p.pendNote) c.append(h('div', 'dq-pendnote', p.pendNote, { role: 'note' }));
     if (pendList.length) { const box = h('div', 'dq-pendreqs'); pendList.forEach((it) => box.append(otherReqEl(it))); c.append(box); }
+    const decA = pendList.length ? null : (p.actions || []).find((a) => a.decide);      // 「核准單，核定」：卡片上沒列待審單，試算框照那張單畫
+    const decIt = decA ? reqShown(st.pending).find((it) => String(it.id) === String(decA.decide.id) && (!decA.decide.store || !it.store || it.store === decA.decide.store)) : null;
+    const decOt = decIt ? otBoxEl(h, decIt.ot_check) : null;
+    if (decOt) c.append(decOt);
     const pend = st.pending.filter((it) => it.date === st.date && Q.keyOf(it) === p.key && !st.handled.has(hid(it)) && it.attach_id && Q.reqDecidable(it, canWriteRow) && !pendList.includes(it));      // 不能審的單（含自己的）伺服器不給看附件，同 request.js；列在待審單裡的那張已有附件鈕
     pend.forEach((it) => c.append(attachEl(it)));
     if (u.proxied) c.append(h('div', 'dq-info', '已幫同仁開單：' + u.proxied + '。等總監在「申請審核」核准後，再回來核定。'));
@@ -1255,6 +1260,7 @@ export function renderQuick(ctx) {
     const t = h('div', 'dq-rtop');
     t.append(h('b', null, it.name), h('span', 'dq-rk ' + (REQ_CLS[it.kind] || ''), C.REQ_KIND_LABEL[it.kind] || it.kind), h('span', 'dq-rd', C.shortDate(it.date)));
     c.append(t, h('div', 'dq-rs', (it.summary || '') + (it.reason ? '\n原因：' + it.reason : '')));
+    const ot = otBoxEl(h, it.ot_check); if (ot) c.append(ot);
     if (it.attach_id) c.append(attachEl(it));
     if (st.reqMsg[k]) c.append(h('div', 'dq-msg bad', st.reqMsg[k], { role: 'alert' }));
     const rej = st.reqReject[k];

@@ -7,6 +7,7 @@ import { S, call, callAll, h, failBar, failedStores, setReqBadge, loadLeave, lea
 import { watchJob } from './bg.js';
 import { tsLabel, shortDate, punchEvidence, compBalanceNote, reqQuotaBlock, reqWarnLines, REQ_KIND_LABEL, REQ_BATCH_MAX } from './calc.js';
 import { groupPairs, groupHours, segWord } from './req-group.js';
+import { otBoxEl, otTagEl, otConfirmText, otBatchText } from './ot-text.js';      // 審單出勤試算（2026-11-25，伺服器 DUTY_REQ_OT_CHECK 開著才有 ot_check）
 
 export function renderRequest(ctx) {
   const el = ctx.el;
@@ -96,7 +97,8 @@ async function runBatchInner(picked, card, title, msg, lock) {
   if (els.length > REQ_BATCH_MAX) { msg.className = 'du-rq-msg bad'; msg.textContent = '一次最多核准 ' + REQ_BATCH_MAX + ' 筆，請少勾幾筆'; return; }
   const list = els.map(el => '・' + (el.__req.storeName ? el.__req.storeName + ' ' : '') + el.__req.name + '：' + el.__req.summary).join('\n');
   const elseL = els.filter(el => elsewhereText(el.__req)).map(el => '・' + elsewhereText(el.__req));
-  if (!await confirmBox('核准以下 ' + els.length + ' 筆申請？\n' + list + (elseL.length ? '\n\n⚠ 其中有這天沒在本店打卡的（可能送錯店）：\n' + elseL.join('\n') : '') + '\n\n核准後，那幾天的核定會先幫你填好，你核定那天時確認送出才算數。', '核准 ' + els.length + ' 筆')) return;
+  const otB = otBatchText(els.map(el => ({ store: el.__req.storeName || (S.meta && S.meta.label) || '', name: el.__req.name, date: shortDate(el.__req.date), oc: el.__req.ot_check })));
+  if (!await confirmBox('核准以下 ' + els.length + ' 筆申請？\n' + list + (elseL.length ? '\n\n⚠ 其中有這天沒在本店打卡的（可能送錯店）：\n' + elseL.join('\n') : '') + (otB ? '\n\n' + otB : '') + '\n\n核准後，那幾天的核定會先幫你填好，你核定那天時確認送出才算數。', '核准 ' + els.length + ' 筆')) return;
   lock(true); msg.className = 'du-rq-msg'; msg.textContent = '送出中…';
   // 跨店時依店分批（每批一次 mgr_req_decide_batch，帶那一批的店）；任一批沒通過只影響那一批，結果逐店回報
   const groups = new Map();
@@ -155,6 +157,7 @@ function buildGroup(its, card, title) {
     if (Number(it.hours) > 0) p.dateEl.textContent = Number(it.hours) + ' 小時';
     p.l2.hidden = true; if (p.evEl) p.evEl.hidden = true;
     if (p.ewEl && i > 0 && els[0].__parts.ewEl) p.ewEl.hidden = true;      // 「這天沒在本店打卡」兩張一樣，列一次
+    if (p.otEl && i > 0 && els[0].__parts.otEl) p.otEl.hidden = true;      // 出勤試算：同一人同一天，兩段合起來算一次，列一次
     el.classList.add('du-rq-in-grp'); el.__grp = () => wrap.__refresh();
     rows.append(el);
   });
@@ -173,7 +176,7 @@ function buildGroup(its, card, title) {
     wrap.__gone = true;      // 只剩一張：拆組，剩下那張照現在的樣子
     els.forEach(el => {
       const p = el.__parts;
-      if (el.querySelector('.du-rq-ok')) { p.nameEl.textContent = p.name0; p.dateEl.textContent = p.date0; p.l2.hidden = false; if (p.evEl) p.evEl.hidden = false; if (p.ewEl) p.ewEl.hidden = false; }
+      if (el.querySelector('.du-rq-ok')) { p.nameEl.textContent = p.name0; p.dateEl.textContent = p.date0; p.l2.hidden = false; if (p.evEl) p.evEl.hidden = false; if (p.ewEl) p.ewEl.hidden = false; if (p.otEl) p.otEl.hidden = false; }
       el.classList.remove('du-rq-in-grp'); el.__grp = null;
       wrap.before(el);
     });
@@ -220,6 +223,7 @@ function buildItem(it, card, title, onDone) {
   const sup = supportTag(it);      // 支援（原單位）
   const nameEl = h('span', 'du-rq-name', it.name), dateEl = h('span', 'du-rq-date', shortDate(it.date));
   who.append(h('span', 'du-rq-kind ' + (REQ_KIND_LABEL[it.kind] ? it.kind : ''), REQ_KIND_LABEL[it.kind] || it.kind), nameEl, ...(sup ? [sup] : []), ...(upOn && canDecide ? [h('span', 'du-rq-kind upper', upperLabel(it))] : []), ...(it.storeName ? [h('span', 'du-where', '打卡地點：' + it.storeName, { 'data-where': it.store })] : []));
+  const otTg = otTagEl(h, it.ot_check); if (otTg) who.append(otTg);      // 時數對不上／相符／僅供參考
   l1.append(who, dateEl);
   const l2 = h('div', 'du-rq-l2', it.summary + (it.reason ? '\n原因：' + it.reason : '') + compBalanceNote(leaveFor(it.store), it) + '\n送出：' + tsLabel(it.created_at));
   el.append(l1, l2);
@@ -229,7 +233,9 @@ function buildItem(it, card, title, onDone) {
   const ew = elsewhereText(it);
   const ewEl = ew ? h('div', 'du-rq-warn du-rq-else', '⚠ ' + ew) : null;
   if (ewEl) el.append(ewEl);
-  el.__parts = { nameEl, dateEl, l2, evEl, ewEl, name0: nameEl.textContent, date0: dateEl.textContent };      // 同一次送出的組框要換掉其中幾行（見 buildGroup），拆組時還原
+  const otEl = otBoxEl(h, it.ot_check);      // 當天出勤試算框（只提示，不擋核准）
+  if (otEl) el.append(otEl);
+  el.__parts = { nameEl, dateEl, l2, evEl, ewEl, otEl, name0: nameEl.textContent, date0: dateEl.textContent };      // 同一次送出的組框要換掉其中幾行（見 buildGroup），拆組時還原
   const wl = reqWarnLines(it);                    // 事假前一天／出差前一週／本月事假第 3 次起／本月第 N 次忘刷（2026-11-06，提醒不擋）
   if (wl.length) el.append(h('div', 'du-rq-warn', wl.map(w => '⚠ ' + w).join('\n') + '（提醒，不影響核准）'));
 
@@ -277,7 +283,7 @@ function buildItem(it, card, title, onDone) {
       }
       if (!reason.value.trim()) return say('bad', '請寫退回理由');
       body.reason = reason.value.trim();
-    } else if (!await confirmBox((elsewhereText(it) ? '⚠ ' + elsewhereText(it) + '\n\n確定要在本店核准嗎？\n\n' : '') + '核准 ' + it.name + '：' + it.summary + '？\n核准後，那天的核定會先幫你填好，你核定那天時確認送出才算數。', '核准')) return;
+    } else if (!await confirmBox((elsewhereText(it) ? '⚠ ' + elsewhereText(it) + '\n\n確定要在本店核准嗎？\n\n' : '') + '核准 ' + it.name + '：' + it.summary + '？\n' + (otConfirmText(it.ot_check) ? otConfirmText(it.ot_check) + '\n' : '') + '核准後，那天的核定會先幫你填好，你核定那天時確認送出才算數。', '核准')) return;
     ok.disabled = no.disabled = true; say('', '送出中…');
     if (it.__mirror) body.bg = true;      // Mac mini 副本讀的清單：先顯示、背景送（2026-11-14），打卡端照樣檢查還是不是待審
     try {

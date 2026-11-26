@@ -9,6 +9,7 @@ import { corePeriods, OVER_BLOCK_MIN, otSuggestText, cardDiffs, cardLabel, cardR
 import * as C from './calc.js';
 import { api } from '../../js/api.js';
 import { leaveOverText } from './core-calc.js';      // 2026-11-18 第 5 題提醒（另起一行：上面那行同時有別的分支在改）
+import * as OM from './over-manual.js';      // 手動修改後重算紅框（2026-11-25 Eason，另起一行同上）
 import { planFlags, REASONS, pendSplit, planOtText } from './quick-calc.js';
 import { leaveIncrements, leaveShort } from './leave-batch.js';
 import { pendingFor } from './pend-gate.js';
@@ -878,7 +879,7 @@ function buildCard(emp, date, bopt) {
     sn.rows.forEach(x => periodRows.append(periodRow(x, refresh)));
     setLeaveLines(sn.leaves);      // 內部會 refresh（重算時數、重新檢查）
     lateIn.value = sn.late; diffIn.value = sn.diff; diffBox.hidden = !sn.diff;
-    card.__cardPicks = {}; card.__notCount = '';
+    card.__cardPicks = {}; card.__notCount = ''; card.__ncWrote = '';
     dupInit.forEach((v, i) => { dupPicks[i] = v; }); dupPaints.forEach(f => f());
     result.hidden = true; result.textContent = '';
     refresh();
@@ -1016,7 +1017,7 @@ function buildCard(emp, date, bopt) {
     verdict.hidden = true; verdict.textContent = ''; verdict.className = 'du-verdict';
     if (submit.title === PEND_TITLE || submit.title === STALE_TITLE) submit.title = '';
     if (!card.__pending) { if (pendBlocked()) pendVerdict(); return; }
-    if (submit.textContent === '仍要送出' || /^確認沒加班/.test(submit.textContent)) submit.textContent = '送出核定';
+    if (submit.textContent === '仍要送出' || OM.isNotCountLabel(submit.textContent)) submit.textContent = '送出核定';
     if (pendBlocked()) { pendVerdict(); return; }      // 還有待審單：不看檢查結果（不亮綠燈、不給核定鈕）
     const ck = card.__check;
     if (!ck) { setBadge(null, initLeaves); setEdit(true); card.dispatchEvent(new CustomEvent('emp-checked', { bubbles: true })); return; }
@@ -1029,18 +1030,23 @@ function buildCard(emp, date, bopt) {
     const ps = readRows().filter(r => r.start && r.end).map(r => r.start + '–' + r.end).join('、');
     verdict.hidden = false;
     // 打卡超出班表合計達 30 分鐘、沒有加班單（2026-11-14 Eason 選 B）：不亮燈；補加班單，或主管按「自己調」確認同仁沒加班後照班表送出
-    const overBlock = ck.ok && pr && pr.overMin >= OVER_BLOCK_MIN;
+    // 2026-11-25 Eason「10 題全照推薦」（開工確認第 2 題 B2）：主管改過時段＝系統標的超額扣掉他已經填進時段的部分，剩下達 30 分才擋；沒改時段照舊（over-manual.js）
+    const rowsNow = readRows().filter(r => r.start && r.end).map(r => ({ start: r.start, end: r.end }));
+    const od = OM.overDecision(pr, rowsNow, ck.ok, OVER_BLOCK_MIN);
+    const overBlock = od.block;
+    // 先選了不算工時的原因、再把時段改到蓋住超額：紅框消失時把紅框流程填的那句清掉（不然核定紀錄會留下跟事實相反的原因），重新檢查一次（2026-11-26 #412 驗收補修）
+    if (OM.shouldClearNotCount(od, diffIn.value, card.__ncWrote)) { diffIn.value = ''; card.__notCount = ''; card.__ncWrote = ''; queueCheck(); }
     if (overBlock) {
       const noLine = false, canProxy = proxyOpen(date);
       mini.className = 'du-mini bad'; mini.textContent = '還不能核定';
       verdict.className = 'du-verdict gray du-verdict-over';
-      verdict.append(h('div', 'du-verdict-t', '還不能核定：要補加班單'));
+      verdict.append(h('div', 'du-verdict-t', OM.overTitle(od.over, od.overMin)));
       verdict.append(h('div', 'du-needk', '要補齊：'));
       const ul = h('ul', 'du-needs'), li = h('li');
-      li.append(h('span', 'du-need-t', '☐ 加班單 ' + otSuggestText(pr.over, pr.overMin)));
+      li.append(h('span', 'du-need-t', '☐ 加班單 ' + otSuggestText(od.over, od.overMin)));
       if (canProxy) { const b = h('button', 'btn sm ghost du-preproxy', '幫同仁開單', { type: 'button' }); b.onclick = () => proxyForm(date, noLine, '打卡比班表多，沒有加班單'); li.append(b); }
       ul.append(li); verdict.append(ul);
-      verdict.append(h('div', 'du-verdict-n', (canProxy ? '' : '有加班：請同仁在 LINE「加班請假」補申請，核准後這裡會自動重算。') + (single ? '沒有加班（例：提早到、晚打卡）：選好下面的原因後，照班表送出 ' : '沒有加班（例：提早到、晚打卡）：按「手動改時段」確認後照班表送出 ') + ck.approved_hours + ' 小時，多出的時段不算。'));
+      verdict.append(h('div', 'du-verdict-n', OM.OVER_NOTE));
       // single：手動區一直開著，沒有「手動改時段」那顆鈕；下面送出鈕就是「確認沒加班，照班表核定 N 小時」（要先選不算工時的原因才能按）
       if (!single) {
       const acts = h('div', 'du-pre-acts');
@@ -1053,7 +1059,7 @@ function buildCard(emp, date, bopt) {
       }
       setEdit(editOpen);
       if (editOpen) {
-        submit.textContent = ncLabel = '確認沒加班，照班表核定 ' + ck.approved_hours + ' 小時';
+        submit.textContent = ncLabel = OM.overSubmitLabel(od.changed, ck.approved_hours);
         // 多做的時段不認列要選理由（2026-11-15 開工確認第 2 題）：理由寫進核定紀錄（diff_reason），不通知同仁
         const nc = h('div', 'du-notcount');
         nc.append(h('div', 'du-needk', '不算工時的原因（必選，會留在核定紀錄）'));
@@ -1064,7 +1070,7 @@ function buildCard(emp, date, bopt) {
         if (/^不認列：/.test(diffIn.value || '')) { if (NOT_COUNT_REASONS.includes(cur)) sel.value = cur; else { sel.value = '其他'; other.value = cur; } }
         other.hidden = sel.value !== '其他';
         const put = () => {
-          other.hidden = sel.value !== '其他'; const t = sel.value === '其他' ? other.value.trim() : sel.value; card.__notCount = t; diffIn.value = t ? '不算工時：' + t : '';
+          other.hidden = sel.value !== '其他'; const t = sel.value === '其他' ? other.value.trim() : sel.value; card.__notCount = t; diffIn.value = t ? '不算工時：' + t : ''; card.__ncWrote = diffIn.value;
           if (single) { submit.disabled = !t; setWhy(t ? '' : NC_WHY); }      // single：沒選原因＝灰色送出鈕，下方寫一句話（不再只靠按了才跳錯誤）
         };
         sel.onchange = put; other.oninput = put; put();
@@ -1076,6 +1082,8 @@ function buildCard(emp, date, bopt) {
       verdict.className = 'du-verdict ok';
       verdict.append(h('div', 'du-verdict-t', (single ? '✓ 檢查通過：' : '✓ 核定通過：') + (ps || '整天請假') + '＝' + ck.approved_hours + ' 小時'));      // single：這一行不再是按鈕，改叫「檢查通過」
       C.crossNotes(emp, pr && !editOpen ? pr.notes : [], ck.approved_hours).forEach(n => verdict.append(h('div', 'du-verdict-n', n)));   // 跨店加班歸屬提醒（2026-11-18）
+      if (od.changed && od.oldBlock && od.coveredMin > 0) verdict.append(h('div', 'du-verdict-n du-om-n', OM.coveredText(od.covered)));      // 手動時段蓋到系統標的超額（2026-11-25 第 1 句）
+      if (od.changed && pr && pr.late > 0) OM.lateDropped(emp.plan, emp.segments, rowsNow, lateIn.value).forEach(x => verdict.append(h('div', 'du-verdict-n du-om-n', OM.lateText(x))));      // 這段不記遲到（第 1 題 A，只提示）
       if (!single) {
       const acts = h('div', 'du-pre-acts');
       const go = h('button', 'btn du-verdict-go', '核定 ' + ck.approved_hours + ' 小時', { type: 'button' });
@@ -1319,7 +1327,7 @@ function buildCard(emp, date, bopt) {
 
   submit.onclick = async () => {
     if (pendBlocked()) { pendVerdict(); return say('bad', '✕ ' + pendWhy()); }      // 所有送出的路（送出鈕、綠燈「核定 N 小時」、手動改時段後的送出、重新核定）都從這裡過
-    if (/^確認沒加班/.test(submit.textContent) && !card.__notCount) return say('bad', '✕ 請先選不算工時的原因（會留在核定紀錄）');
+    if (OM.isNotCountLabel(submit.textContent) && !card.__notCount) return say('bad', '✕ 請先選不算工時的原因（會留在核定紀錄）');
     // 硬擋（Eason 2026-08-22「硬擋，不給送出」，manager.html:1296–1320）：額度用完、期限過了的假別不給送出。
     // 下拉的 disabled 只擋滑鼠，程式指定仍設得進去，所以送出前用同一份資料再判一次；原本就選著這個假別的既有紀錄放行，否則已超額的人連重送核定都做不了
     const lv = leaveList();

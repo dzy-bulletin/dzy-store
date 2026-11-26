@@ -822,3 +822,12 @@ export function segsWithDupPicks(segs, groups, picks) {
   });
   return out;
 }
+
+/* ── 審單出勤試算（2026-11-25 Eason 開工確認 ot-review-hint 第 3 題 A）──
+   單店口徑照打卡端 Requests.gs reqStrictOtNeed_（mala-clock-in 8afc02d）：休息日（H）、例假（R）核定的時數全部算加班；
+   其他（上班日、空白＝查不到班表）超過 8 小時的部分算加班。對照測試 test/server/ot-check-gas.test.js 直接載入打卡端那支逐值比。 */
+export function otNeedStrict(hours, schedDay) {
+  const rest = schedDay === 'H' || schedDay === 'R';
+  const need = rest ? Number(hours) : Math.max(Number(hours) - FT8_H, 0);
+  return { rest, need: Math.round(need * 100) / 100 };
+}
