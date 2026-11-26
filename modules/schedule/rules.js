@@ -47,6 +47,11 @@ const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
 
 /** 某人某天適用的身分條款（依 from_date 生效） */
 export const FT_OT_MAX = 2;                                            // 正職休息日加班每期上限（天）
+/** F2：正職這一期「例假＋休息日」至少幾天＝在職天數×8/28，不足一天的部分不計（無條件捨去）。
+ *  2026-11-26 資訊部主管裁示（選項 A）：依比例計算、不足一天不用給——在職 2 天→0、6 天→1、7 天→2、13 天→3、27 天→7、整期 28 天→8。
+ *  原本是無條件進位（在職 2 天也要 1 天）。門市 F2、總部／央廚四週檢查、自動排班的休假配額（auto.js ftPartialQuota）共用這一個函式，不要各自再算。
+ *  整數運算：n×8 是整數、先乘後除，7、14、21、28 天剛好整除時不會因浮點少算一天。 */
+export const ftRestNeed = (inDays) => { const n = Math.max(0, Math.trunc(Number(inDays) || 0)); return (n * 8 - (n * 8) % 28) / 28; };
 
 export function termAt(terms, emp, date) {
   let t = null;
@@ -321,14 +326,14 @@ export function checkPeriod(ctx) {
     // 制度別：正職四週變形、計時每週制
     if (t0 && t0.kind === 'ft') {
       if (!blank.length) {                                               // 還沒排完的人先只提示「還沒排」，不重複列例休天數
-        // 到職或離職落在期內：依在職天數比例（每 14 天在職至少 2 天例假、滿 7 天至少 1 天；例＋休 至少 在職天數×8/28 無條件進位）
+        // 到職或離職落在期內：依在職天數比例（每 14 天在職至少 2 天例假、滿 7 天至少 1 天；例＋休 至少 在職天數×8/28、不足一天不計＝ftRestNeed）
         for (const [half, label] of [[dates.slice(0, 14), '前兩週'], [dates.slice(14), '後兩週']]) {
           const inH = half.filter(d => employed(st, d));
           const need = inH.length >= 14 ? 2 : inH.length >= 7 ? 1 : 0;
           const r = inH.filter(d => mine[d] && mine[d].day_type === 'R').length;
           if (r < need) add('F1', 'block', e, half[0], `${who} ${label}${inH.length < 14 ? `（在職 ${inH.length} 天）` : ''}只有 ${r} 天例假，至少要 ${need} 天`);
         }
-        const needRH = Math.ceil(inPeriod.length * 8 / 28);
+        const needRH = ftRestNeed(inPeriod.length);
         const rh = inPeriod.filter(d => mine[d] && (mine[d].day_type === 'R' || mine[d].day_type === 'H')).length;
         if (rh < needRH) add('F2', 'block', e, start, `${who} 這期${fullPeriod ? '' : `（在職 ${inPeriod.length} 天）`}例假加休息日只有 ${rh} 天，至少要 ${needRH} 天`);
       }
@@ -534,7 +539,7 @@ export function checkSelfMonth(ctx) {
           const r = inH.filter((d) => mine[d] && mine[d].day_type === 'R').length;
           if (r < need) add('F1', 'block', e, half[0], `${who} ${label}只有 ${r} 天例假，至少要 ${need} 天`);
         }
-        const needRH = Math.ceil(inMonth.length * 8 / 28);
+        const needRH = ftRestNeed(inMonth.length);
         const rh = inMonth.filter((d) => mine[d] && (mine[d].day_type === 'R' || mine[d].day_type === 'H')).length;
         if (rh < needRH) add('F2', 'block', e, first, `${who} 這期例假加休息日只有 ${rh} 天，至少要 ${needRH} 天`);
       }

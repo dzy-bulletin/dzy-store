@@ -6,7 +6,7 @@
 //       → 3 逐日配對（先滿足最少人數，用增廣路徑做二分圖配對）→ 4 修復（同週對調休假日）→ 4.2 備援同仁補缺人 → 5 整期檢查，沒有「擋」才回傳
 import { periodDates, addDays } from './period.js';
 import { shiftMinutes, gapMinutes, cellShift, cellShiftIds, isExtId } from './hours.js';
-import { checkPeriod, termAt, employed, isHoliday, allowedList, backupAt, ptCapMin, MIN_GAP, FT_OT_MAX, DAY_MAX, RULES5_FROM, ptRunMax, PT_WIN_DAYS, PT_WIN_MAX } from './rules.js';
+import { checkPeriod, termAt, employed, isHoliday, allowedList, backupAt, ptCapMin, MIN_GAP, FT_OT_MAX, DAY_MAX, RULES5_FROM, ptRunMax, PT_WIN_DAYS, PT_WIN_MAX, ftRestNeed } from './rules.js';
 
 const REPAIR_MAX = 200;   // DAY_MAX 改從 rules.js 來（2026-11-01 改 10 小時）
 const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
@@ -97,7 +97,7 @@ function priorRun(ctx, e, start) {
   return run;
 }
 
-/** 期中到職／離職的正職（以及整期在職但有一週放不下 2 天休假的正職）：各週休假數，加總＝檢查規則 F2 的 ceil(在職天數×8/28)（2026-10-11 審查：原本每週各自四捨五入，28 個報到日有 12 個排不出來）。
+/** 期中到職／離職的正職（以及整期在職但有一週放不下 2 天休假的正職）：各週休假數，加總＝檢查規則 F2 的 ftRestNeed(在職天數)＝在職天數×8/28 不足一天不計（2026-11-26 由無條件進位改捨去；2026-10-11 審查：原本每週各自四捨五入，28 個報到日有 12 個排不出來）。
  *  整週給 2 天，不滿一週的按比例取整數，差額依餘數大小補到不滿一週的那幾週（不超過該週在職天數）。整期在職或計時回 null（照原本每週算）。 */
 function ftPartialQuota(ctx, st, dates, fixed) {
   const inP = dates.filter(d => employed(st, d));
@@ -117,7 +117,7 @@ function ftPartialQuota(ctx, st, dates, fixed) {
   if (inP.length === 28 && cap.every(c => c >= 2)) return null;
   const raw = lens.map(n => (n === 7 ? 2 : 2 * n / 7));
   const q = raw.map((x, i) => Math.min(Math.floor(x), cap[i]));
-  let left = Math.ceil(inP.length * 8 / 28) - q.reduce((a, b) => a + b, 0);
+  let left = ftRestNeed(inP.length) - q.reduce((a, b) => a + b, 0);       // 各週先取整數（不超過 F2 的合計），差額再補
   const order = [0, 1, 2, 3].filter(w => lens[w] > 0 && lens[w] < 7).sort((a, b) => (raw[b] - q[b]) - (raw[a] - q[a]) || a - b);
   while (left > 0) {
     const w = order.find(i => q[i] < cap[i]) ?? [0, 1, 2, 3].filter(i => q[i] < cap[i]).sort((a, b) => q[a] - q[b] || a - b)[0];      // 不滿一週的都放不下了：給目前休最少的那一週
