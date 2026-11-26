@@ -645,7 +645,7 @@ export function precheckItem(p, emp, core) {
   if (!p || !emp || p.noCheck) return null;
   if (core && !core.periods.length) core = null;      // 上班時段全被假單蓋掉（2026-11-18）：當成算不出時段，照原本
   const a0 = Array.isArray(p.actions) && p.actions[0] && p.actions[0].id !== 'full' ? p.actions[0] : null;
-  const base = (a0 && a0.payload) || p.payload;
+  const base = (a0 && a0.payload) || p.payload || p.ft8Check;      // ft8Check：這家不滿 8、改之前不擋的卡照舊送原本按鈕的內容（2026-11-25，見 classify）
   // 算不出時段（沒班又沒打卡，例：排休那天只有假單）也沒有原本要送的內容：不送檢查，照原本分類（2026-11-14 許芷瑄排休喪假被顯示成 bad_periods）
   if (!core && !(base && ((base.periods || []).length || (base.leaves || []).length))) return null;
   const it = Object.assign({ emp_id: emp.emp_id }, base || {}, core ? { periods: core.periods } : {});
@@ -686,13 +686,32 @@ export function classify(inp) {
   if (bad && (res.status === 'ok' || res.status === 'abnormal')) {
     return Object.assign(res, { status: 'abnormal', tag: '時數要核對', note: '算出來的時段或時數不合理', chk: '', hours: null, payload: null, actions: [{ id: 'full', label: '手動修改', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
   }
-  // 正職上班日滿 8 小時（2026-11-13 Eason）：任何一顆按鈕送出的上班＋出差＋假單不滿 8 小時 → 只能到完整頁（要補假單或跨店相加）
-  if (res.status === 'ok' || res.status === 'abnormal') {
+  // 正職上班日滿 8 小時（2026-11-13 Eason）：任何一顆按鈕送出的這家上班＋出差＋假單不滿 8 小時 → 不給一鍵核定
+  // 2026-11-25 Eason 開工確認 A／第 2 題：只看這家自己（別家的核定、假單、出差單由打卡系統一起算），不再自己寫「還差幾小時」——
+  //   標「未滿 8 小時（待確認）」、等打卡系統的檢查（quick.js：通過＝移到核定通過；被擋＝照打卡系統原句；還沒回覆＝留在這裡、不能一鍵）
+  // 打卡系統這次不檢查滿 8（門市共用登入、舊伺服器沒給 ft8_on；#409 審查第 3 項）：照主線（11/25 以前）的寫法，一字不改
+  if ((res.status === 'ok' || res.status === 'abnormal') && !C.ft8Live(inp.emp)) {
     const gaps = sends.map((x) => C.ft8Summary(inp.emp, C.sumPeriods((x.periods || []).map((p) => ({ start: p.start, end: p.end }))).total, x.leaves)).filter((f) => f && f.gap);
     if (gaps.length) {
       const g = gaps[0];
       return Object.assign(res, { over: false, status: 'abnormal', tag: '正職未滿 8 小時', note: '上班 ' + g.work + '＋出差 ' + g.trip + '＋假單 ' + g.leave + '＝' + g.sum + ' 小時，還差 ' + g.gap + ' 小時，要有已核准的假單或補休單', chk: '', hours: null, payload: null,
         actions: [{ id: 'full', label: '手動修改', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
+    }
+  } else if (res.status === 'ok' || res.status === 'abnormal') {
+    const gaps = sends.map((x) => [C.ft8Own(inp.emp, C.sumPeriods((x.periods || []).map((p) => ({ start: p.start, end: p.end }))).total, x.leaves), x]).filter((f) => f[0] && f[0].gap);
+    if (gaps.length) {
+      const [g, x] = gaps[0];
+      // 送去只檢查的內容要跟改之前逐欄相同（不可降的標準）：改之前就會擋的卡（連同別家也不滿 8）照舊不帶原本的按鈕內容；
+      // 改之前不擋（這家不滿 8、但加上別家已滿 8）的卡照舊用原本那顆按鈕的內容（ft8Check，precheckItem 用）
+      const before = sends.some((s0) => { const f = C.ft8Summary(inp.emp, C.sumPeriods((s0.periods || []).map((p) => ({ start: p.start, end: p.end }))).total, s0.leaves); return f && f.gap; });
+      const a0 = res.actions && res.actions[0] && res.actions[0].id !== 'full' ? res.actions[0] : null;
+      const ft8Check = before ? null : ((a0 && a0.payload) || res.payload || null);
+      // ft8Wait＝這家合計（quick.js 依檢查狀態換句尾）；ft8Base＝這家要核定的時數（上班＋出差）與時段，跨店那句提醒用（原本這張卡 hours 是空的，跨店那句把這家當 0 小時算）
+      // 有這位主管審得了的待審單：跟下面那段一樣補「有待審單：先審單再核定」那行字（#409 審查第 5 項；只補字，判斷不變）
+      //   （這裡已把按鈕換成手動修改／先跳過，原本的「核准單，核定」也不在了，所以有待審單就補這行）
+      const pendNote = res.hasPend && !res.pendReq ? { pendNote: '有待審單：先審單再核定' } : {};
+      return Object.assign(res, { over: false, status: 'abnormal', tag: C.FT8_WAIT_TAG, note: C.ft8WaitNote(g.sum, 'wait'), ft8Wait: g.sum, ft8Base: { hours: C.round2(g.work + g.trip), payload: x }, ft8Check, chk: '', hours: null, payload: null,
+        actions: [{ id: 'full', label: '手動修改', primary: true }, { id: 'skip', label: '先跳過', primary: false }] }, pendNote);
     }
   }
   if (C.cap10On(inp.emp)) cap10Mark(inp.emp, res, res.leaveCheck);      // 單日滿 10 小時新定義（2026-11-23）：開關開著才走這條

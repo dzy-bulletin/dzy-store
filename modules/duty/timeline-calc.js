@@ -223,7 +223,7 @@ export function severity(tag, model) {
   if (/少打卡|少上班卡|少下班卡|沒有打卡|忘刷|無打卡/.test(t)) return 0;
   if (model && model.devs && model.devs.some((d) => d.kind === 'miss')) return 0;
   if (/未符合|沒核定成功|被退回/.test(t)) return 1;
-  if (/請假卻有打卡|對不上|正職未滿/.test(t)) return 2;
+  if (/請假卻有打卡|對不上|正職未滿|未滿 8 小時/.test(t)) return 2;      // 「未滿 8 小時（待確認）」（2026-11-25）跟原本「正職未滿 8 小時」同一級
   if (/審核|申請|假單|出差單|有新申請/.test(t)) return 3;
   if (/加班|超過|排休有打卡/.test(t)) return 4;
   if (/遲到|早退|晚到|早走/.test(t)) return 5;

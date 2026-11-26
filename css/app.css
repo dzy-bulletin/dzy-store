@@ -679,6 +679,7 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
 .dq-prevnote{background:#fff4e0;color:var(--warn,#8a5a00);border-radius:14px;padding:18px 16px;text-align:center;font-size:16px;font-weight:700;line-height:1.6;overflow-wrap:anywhere}   /* 月初：上個月的待核定還在讀／讀不到／還有，取代「都核定完了」（2026-11-20 驗收） */
 .dq-pendnote{background:#fff4e0;color:var(--warn,#8a5a00);border-radius:8px;padding:8px 10px;font-size:13px;font-weight:600}
 .dq-pendreqs{display:flex;flex-direction:column;gap:8px}
+.dq-ft8pass{background:#e3f2e9;color:var(--ok);border-radius:8px;padding:6px 10px;font-size:13px;font-weight:600;overflow-wrap:anywhere}   /* 核定通過的卡：這家自己不滿 8、打卡系統說連同別家已滿 8（2026-11-25） */
 .dq-pendreqs .dq-rq{border-style:dashed}
 .du-leavewarn{font-size:12.5px;font-weight:700;color:var(--warn,#8a5a00);border-left:3px solid var(--warn,#c98a00);padding-left:8px;margin:6px 0}
 .dq-rtop{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
@@ -738,6 +739,7 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
 .du-reqline{font:inherit;width:100%;display:flex;justify-content:space-between;gap:8px;align-items:center;background:#e6f3ea;border:0;border-radius:8px;padding:9px 12px;color:var(--ok);font-weight:700;cursor:pointer;margin:4px 0}
 .du-reqline-more{font-weight:400;color:var(--muted);font-size:13px}
 .du-total .du-total-cont,.du-total .du-ft8:not(.short){background:none;border:0;padding:0;color:var(--muted);font-size:12.5px;font-weight:400}
+.du-total .du-ft8.pass{color:inherit;font-weight:600}   /* 這家自己不滿 8、打卡系統檢查通過：黑字（2026-11-25 第 4 題）；待確認（.wait）照灰字 */
 .du-cok{color:var(--ok)}
 /* 考勤核定時間軸（2026-11-15，docs/duty-timeline/）：班表虛線、打卡灰條、單的框、差異色塊；摘要、簡潔／詳細、細調、等同仁補單 */
 .dq-tlw{display:flex;flex-direction:column;gap:2px}
@@ -764,6 +766,7 @@ body.embed.embed-only.embed-tabs .embed-who{justify-content:flex-end}
 .dq-tag.sev0,.dq-tag.sev1,.dq-tag.sev2{background:var(--bad)}
 .dq-tag.sev3{background:#7a5bc7}
 .dq-tag.sev4,.dq-tag.sev5{background:#b86a00}
+.dq-tag.wait{background:#b86a00;white-space:nowrap}   /* 未滿 8 小時（待確認）：還在等打卡系統，不是錯（2026-11-25 確認頁示意黃色）；排序照原本「正職未滿 8 小時」那一級 */
 .dq-hright{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
 .dq-mode{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
 .dq-modeb{font:inherit;min-height:36px;border:0;background:#fff;padding:0 12px;font-weight:700;cursor:pointer;color:var(--muted)}

@@ -970,6 +970,7 @@ function dutyDo(d, action, b) {
         ...leaveOut(d.leave[date + r.emp_id]), shift_in: f.shift[0], shift_out: f.shift[1],
         plan: (d.plans && d.plans[r.emp_id]) || null, brk: { start: d.brk[0], end: d.brk[1] }, ...(Array.isArray(d.ftEmps) ? { ft: d.ftEmps.includes(r.emp_id) } : {}) };      // ft：正職（2026-11-13，e2e 設 d.ftEmps 才有）
       if (r.no_line) out.no_line = true;                // 打卡端 mgr_day 帶的「沒綁 LINE」（2026-11-10）
+      if (d.empElse && d.empElse[date + r.emp_id]) Object.assign(out, JSON.parse(JSON.stringify(d.empElse[date + r.emp_id])));      // 伺服器 attachElsewhere 附的 elsewhere／cross_role（e2e 設 d.empElse 才有，2026-11-25）
       if (d.capSys && Array.isArray(d.capSys[date + r.emp_id])) out.cap_sys = d.capSys[date + r.emp_id].slice();      // 系統鎖卡（打卡端 Cap10.gs capAnnotateDay_；e2e 設 d.capSys 才有，2026-11-23）
       const a = d.approved[date + r.emp_id]; if (a) out.approved = { ...a };
       // 人資退回（2026-11-13）：示範後端照伺服器的 attachReturns／return_ok；d.returnOk＝true 時示範人資身分（能退回）
@@ -994,6 +995,7 @@ function dutyDo(d, action, b) {
   }
   if (action === 'mgr_approve_check') {      // 只檢查不寫入（2026-11-14）：一天多人，逐人照 mgr_approve 跑到寫入前（打卡端 reqMgrApproveCheck_）
     window.__checkCalls = (window.__checkCalls || 0) + 1;      // e2e 數次數（不存進示範資料）
+    (window.__checkLog = window.__checkLog || []).push(JSON.parse(JSON.stringify({ date: b.date, items: b.items || [] })));      // e2e：送去只檢查的內容原樣留著（新舊前端比對送給打卡端的欄位，2026-11-25；不存進示範資料）
     if (payLockMsg(d, b.date)) return ok({ date: b.date, results: (Array.isArray(b.items) ? b.items : []).slice(0, 40).map(it => ({ emp_id: String(it.emp_id), ok: false, error: 'pay_locked', message: payLockMsg(d, b.date) })), denied: [] });      // 薪資鎖月：每個人都擋
     const results = (Array.isArray(b.items) ? b.items : []).slice(0, 40).map(it => {
       const r = dutyDo(d, 'mgr_approve', Object.assign({}, it, { date: b.date, dry_run: true }));
@@ -1062,7 +1064,56 @@ function dutyDo(d, action, b) {
     const trip = leaves.reduce((a, x) => a + (x.type === '出差' && x.hours !== '' ? x.hours : 0), 0);
     // 正職上班日滿 8 小時（打卡端 reqFt8_，2026-11-13）：e2e 設 d.ftEmps 才打開；班表 W＋上班＋出差＋已核准假單（看申請單）< 8 就擋
     const pl0 = d.plans && d.plans[emp.emp_id];
-    if (Array.isArray(d.ftEmps) && d.ftEmps.includes(emp.emp_id) && pl0 && pl0.day_type === 'W') {
+    // 別家店摘要（打卡端 reqPeerDay_ 的結果，e2e 設 d.ftPeer[日期+員編] 才走這條；2026-11-25）：照打卡端 #233 reqFt8_／reqFt8Split_ 的規則與字句（mala-clock-in apps-script/Requests.gs）。
+    //   d.ftRole[日期+員編]＝{support:true|false, home:'hq'}（營運系統帶的 sched_support／sched_home）。沒設 d.ftPeer 的人照下面舊的單店寫法（舊測試不變）
+    const peer = d.ftPeer && d.ftPeer[date + emp.emp_id];
+    if (peer && Array.isArray(d.ftEmps) && d.ftEmps.includes(emp.emp_id) && pl0 && pl0.day_type === 'W') {
+      const r2 = x => Math.round(x * 100) / 100, f = x => String(r2(x));
+      const NM = { gf: '小辛辣新竹光復', mztjs: '墨竹亭新竹金山', mztgf: '墨竹亭新竹光復', mztlzl: '墨竹亭台北六張犁', mztmc: '墨竹亭台中美村', mztrg: '墨竹亭內湖瑞光', mztwx: '墨竹亭台中文心', hq: '總部', cf: '中央廚房' };
+      const names = cs => cs.map(c => NM[c] || c).join('、') || '別家店';
+      const tp0 = leaves.reduce((a, x) => a + (x.type === '出差' && x.hours !== '' ? x.hours : 0), 0);
+      let ownWork = tp0; periods.forEach(p => { const [a, c] = [p.start, p.end].map(t => +t.slice(0, 2) * 60 + +t.slice(3)); ownWork += ((c <= a ? c + 1440 : c) - a) / 60; });
+      ownWork = r2(ownWork);
+      const lvH = r2(d.reqs.filter(r => r.emp_id === emp.emp_id && r.date === date && r.status === 'approved' && r.kind === 'leave').reduce((a, r) => a + (Number(r.hours) || 0), 0));
+      const otHave = r2(d.reqs.filter(r => r.emp_id === emp.emp_id && r.date === date && r.status === 'approved' && r.kind === 'ot').reduce((a, r) => a + (Number(r.hours) || 0), 0));
+      const work = r2(ownWork - tp0), own = r2(ownWork + lvH);
+      const role = (d.ftRole && d.ftRole[date + emp.emp_id]) || {}, support = role.support === true, home = role.support === false;
+      const pr = Object.assign({ worked: false, pending: false, failed: false, work: 0, leave: 0, names: [] }, peer);
+      const probs = []; let gap = 0, otNeed = 0;
+      if (own < 8 - 0.005 && !pr.failed) {
+        if (!pr.worked && !pr.leave) {
+          gap = r2(8 - own);
+          probs.push({ rule: 'ft8', text: '正職上班日要滿 8 小時（上班 ' + f(work) + '＋出差 ' + f(tp0) + '＋假單 ' + f(lvH) + '＝' + f(own) + ' 小時），還差 ' + f(gap) + ' 小時，要有已核准的假單或補休單' });
+        } else if (!pr.pending) {
+          const ptp = Number(pr.trip) || 0, comb = r2(own + pr.work + pr.leave);
+          if (comb < 8 - 0.005) {
+            gap = r2(8 - comb);
+            probs.push({ rule: 'ft8', text: '正職上班日要滿 8 小時：這家 ' + f(own) + ((pr.names || []).length || !ptp ? '＋' + names(pr.names || []) + ' ' + f(r2(pr.work - ptp + pr.leave)) : '') +
+              (ptp ? '＋' + names(pr.tnames || []) + '出差單 ' + f(ptp) : '') + '＝' + f(comb) + ' 小時，還差 ' + f(gap) + ' 小時，要有已核准的假單或補休單' });
+          }
+        }
+      }
+      if ((support || home) && pr.worked && !pr.failed && !pr.pending) {      // reqFt8Split_：兩家合計超過 8 的加班算支援單位（最多它自己上班的時數）
+        const by = pr.by || {}, codes = Object.keys(by);
+        const comb = r2(ownWork + codes.reduce((a, c) => a + (Number(by[c].work) || 0), 0)), need = Math.max(0, r2(comb - 8));
+        const homeCode = support ? String(role.home || '') : '', sups = support ? [{ code: '', work: ownWork, fs: null, ot: 0 }] : [];
+        codes.forEach(c => { if (support && (!homeCode || c === homeCode)) return; sups.push({ code: c, work: Number(by[c].work) || 0, fs: by[c].fs == null ? null : Number(by[c].fs), ot: Number(by[c].ot) || 0 }); });
+        let abs = null;
+        sups.forEach(x => { if (!(x.work > 0)) return; if (!abs || x.work > abs.work + 0.005) { abs = x; return; } if (Math.abs(x.work - abs.work) <= 0.005 && x.fs != null && (abs.fs == null || x.fs > abs.fs)) abs = x; });
+        const atSup = abs ? r2(Math.min(need, abs.work)) : 0, atHome = r2(need - atSup), selfAbs = !!abs && abs.code === '';
+        const here = r2(selfAbs ? atSup : (support ? 0 : atHome));
+        const tx = Number(pr.trip) > 0 ? '（含' + names(pr.tnames || []) + '出差單 ' + f(Number(pr.trip)) + ' 小時）' : '';
+        if (here > 0.005 && otHave + 0.005 < here) {
+          otNeed = here;
+          probs.push({ rule: 'ot_hours', text: '兩家上班合計 ' + f(comb) + ' 小時' + tx + '，超過 8 的部分要在這家' + (support ? '（被支援）' : '（原單位）') + '開 ' + f(here) + ' 小時加班單（已核准 ' + f(otHave) + ' 小時）' +
+            (atSup > 0.005 && !selfAbs ? '；另外 ' + f(atSup) + ' 小時算在 ' + names([abs.code]) : '') });
+        }
+      }
+      if (probs.length) {
+        const hint = emp.no_line ? '這位同仁沒綁 LINE，請店長在考勤管理「代開申請」，送總監層級審核。' : '請同仁在 LINE「加班請假」補申請；超過 4 天（11/28 以前 11 月的日子不限）請店長在考勤管理「代開申請」，送總監層級審核。';
+        return Object.assign(fail('BAD_INPUT', '這天還不能核定：' + probs.map(p => p.text).join('；') + '。' + hint), { probs, need: { ot_hours: otNeed, ot_have: otHave, leave_hours: gap }, need_doc: true });
+      }
+    } else if (Array.isArray(d.ftEmps) && d.ftEmps.includes(emp.emp_id) && pl0 && pl0.day_type === 'W') {
       let wk = trip; periods.forEach(p => { const [a, c] = [p.start, p.end].map(t => +t.slice(0, 2) * 60 + +t.slice(3)); wk += ((c <= a ? c + 1440 : c) - a) / 60; });
       const lv = d.reqs.filter(r => r.emp_id === emp.emp_id && r.date === date && r.status === 'approved' && r.kind === 'leave').reduce((a, r) => a + (Number(r.hours) || 0), 0);
       const sum = Math.round((wk + lv) * 100) / 100;

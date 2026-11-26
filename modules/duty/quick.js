@@ -148,19 +148,38 @@ export function renderQuick(ctx) {
       Object.assign(p, { status: 'abnormal', tag: u.pre ? (u.failedDiff ? '要寫原因' : '還不能核定') : '沒核定成功', note: u.failed, actions: [main, { id: 'full', label: '手動修改', primary: false }] });
     }
     // 打卡＋單＝核定時數（2026-11-14）：檢查會過＝照算好的時段核定；異常的人也移到「核定通過」；不會過＝寫出要補齊的單
-    if (u.pass && !u.failed && !p.noCheck && !p.pendReq && !p.hasPend && !e2eNoCore() && (p.status === 'ok' || p.status === 'abnormal')) {      // noCheck＝不送檢查的卡（已核定但加班單比核定多等）：同一天重讀時舊的 u.pass 不能把他升進一鍵核定（2026-11-23）；已核定又有待審單：維持「有待審單」（2026-11-16）；還沒核定、有待審單（hasPend）也不升（2026-11-18 第 7 題，第二道）
+    // 這家自己不滿 8、打卡系統說可以（2026-11-25 主管裁示 A，#409）：營運系統在副本也要看得到別家夠（C.ft8Seen）才升進核定通過／一鍵；
+    //   看不到＝留在「未滿 8 小時（待確認）」（副本看得到別家有打卡還沒核定＝寫這個原因；其他＝只寫營運系統看不到，不猜原因），只有手動修改、先跳過
+    //   這家的合計口徑同打卡端 reqFt8_：上班（這次送檢查的時段）＋出差（登記的出差）＋這家這天已核准的假單（不看登記，送檢查的內容可能沒帶假別）
+    //   只在打卡系統這次會檢查滿 8 時（C.ft8Live：個人登入＋正職上班日，支援帳號看原單位；#409 審查第 2、3 項）
+    const own8 = u.pass && !u.failed ? C.ft8GuardOwn(emp, C.sumPeriods((u.pass.payload && u.pass.payload.periods) || []).total,
+      ((u.pass.payload && u.pass.payload.leaves) || []).filter((x) => x && x.type === '出差')
+        .concat(((approved && approved[key]) || []).filter((r) => r && r.kind === 'leave' && r.status !== 'pending' && Number(r.hours) > 0).map((r) => ({ type: String(r.leave_type || '假'), hours: Number(r.hours) })))) : null;
+    const seen8 = own8 && own8.gap ? C.ft8Seen(emp, own8.sum) : null;
+    if (seen8 && !seen8.ok && !p.noCheck && !p.pendReq && !p.hasPend && !e2eNoCore() && (p.status === 'ok' || p.status === 'abnormal')) {
+      Object.assign(p, { status: 'abnormal', tag: C.FT8_WAIT_TAG, note: C.ft8GuardNote(own8.sum, seen8.why), ft8Wait: own8.sum, ft8Guard: seen8.why, hours: null, payload: null,
+        ft8Base: p.ft8Base || { hours: C.round2(own8.work + own8.trip), payload: u.pass.payload },
+        actions: [{ id: 'full', label: '手動修改', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
+    } else if (u.pass && !u.failed && !p.noCheck && !p.pendReq && !p.hasPend && !e2eNoCore() && (p.status === 'ok' || p.status === 'abnormal')) {      // noCheck＝不送檢查的卡（已核定但加班單比核定多等）：同一天重讀時舊的 u.pass 不能把他升進一鍵核定（2026-11-23）；已核定又有待審單：維持「有待審單」（2026-11-16）；還沒核定、有待審單（hasPend）也不升（2026-11-18 第 7 題，第二道）
       const cards = u.cards && u.cards.length ? u.cards : null;
       const act = { id: 'plan', label: '核定 ' + C.round2(u.pass.hours) + ' 小時' + (cards ? '（選原因）' : ''), primary: true, hours: u.pass.hours, payload: u.pass.payload, askReason: !!cards, cards };
       Object.assign(p, cards ? { status: 'abnormal', tag: '要選原因', note: '打卡跟核定差超過 30 分鐘：' + cards.map(cardLabel).join('、') }
         : { status: 'ok', tag: '核定通過', note: C.crossNotes(emp, u.pass.notes, u.pass.hours, firstStart(u.pass.payload)).join('；') },
         { hours: u.pass.hours, payload: u.pass.payload, actions: [act, { id: 'full', label: '手動修改', primary: false }] });
+      // 這家自己不滿 8、打卡系統說可以、營運系統也看得到夠（2026-11-25 第 4 題＋裁示 A）：核定通過的卡多一行「連同同一天別家已滿 8 小時」（照這次送檢查的時段＋假別算這家；其他人沒有這一行）
+      if (!cards && seen8 && seen8.ok) p.ft8Pass = C.ft8PassText();
       if (C.cap10On(emp)) Q.cap10Mark(emp, p);      // 單日滿 10 小時新定義（2026-11-23）：紅字改照打卡系統算的時數＋登記的請假重判；開關關著＝照舊（紅字留在換之前的判斷）
     } else if ((u.need || u.needMgr) && !p.pendReq && !p.hasPend && !e2eNoCore() && p.status === 'abnormal') {      // 不會過：寫出要補齊的單，不再給「選原因」（2026-11-14 不再靠寫原因放行）
       // 核定登記假別（needMgr，2026-11-18）是主管在手動修改裡做的事，不寫成「請同仁補…」；同時缺同仁的單時兩句都寫
       const mgrOnly = !!u.needMgr && !u.need;
-      const note = (u.need ? '要補齊：' + u.need + (u.needMgr ? '；' + u.needMgr : '') : u.needMgr) + (p.clashNote ? '；' + p.clashNote : '');      // 假單和上班時段重疊：提醒照留
-      Object.assign(p, { tag: '還不能核定', note, mgrNote: !!u.needMgr,
+      // 打卡系統「正職上班日要滿 8 小時」「兩家上班合計…」的原句照原文顯示（2026-11-25），不接在「要補齊：」後面變成「請同仁補正職上班日…」；其餘要補的單照舊
+      const ft8 = u.ft8 && u.ft8.length ? u.ft8.join('；') : '', needTxt = ft8 ? u.needRest : u.need;
+      const note = [needTxt ? '要補齊：' + needTxt : '', ft8, u.needMgr].filter(Boolean).join('；') + (p.clashNote ? '；' + p.clashNote : '');      // 假單和上班時段重疊：提醒照留
+      Object.assign(p, { tag: '還不能核定', note, mgrNote: !!u.needMgr, ft8Raw: !!ft8,
         actions: [{ id: 'full', label: mgrOnly ? '手動修改' : '手動修改（幫同仁開單或改單）', primary: true }, { id: 'skip', label: '先跳過', primary: false }] });
+    } else if (p.ft8Wait != null && p.tag === C.FT8_WAIT_TAG) {      // 打卡系統還沒給結論（2026-11-25 第 2 題）：照檢查狀態換句尾，仍不能一鍵核定
+      const ck = st.ckKeys && st.ckKeys.has(key);
+      p.note = C.ft8WaitNote(p.ft8Wait, ck && (st.checking || st.ckFail === 'slow') ? 'wait' : ck && st.ckFail === 'fail' ? 'fail' : '');
     }
     // 列進「核定通過」的人：打卡比班表晚到、早退達 15 分鐘，名單上標橘色「遲到 N 分／早退 N 分」（只提醒不擋，同完整頁的橘色標籤；2026-11-15 考勤驗收 B2-2b-4）
     if (p.status === 'ok') p.warn = Q.lateEarlyOf(emp, brkOf(emp), (approved && approved[key]) || []).tags;      // 帶已核准的單：有時段假單時遲到從假單結束算（2026-11-18，跟展開說明同一個數）
@@ -177,9 +196,17 @@ export function renderQuick(ctx) {
     }
     // 跨店加班歸屬提醒（2026-11-18 Eason：總部不擋，但要寫出在金山上幾小時、其中幾小時是加班、單開在哪家）
     if ((p.status === 'ok' || p.status === 'abnormal') && !emp.approved && !/今天也在/.test(p.note || '')) {
-      const base = (Array.isArray(p.actions) && p.actions.length ? mainAction(p) : null) || p;
-      const x = C.crossOt(emp, base.hours != null ? base.hours : p.hours, firstStart(base.payload || p.payload));
-      if (x) p.note = (p.note ? p.note + '；' : '') + x.text;
+      if (p.ft8Wait != null && p.tag === C.FT8_WAIT_TAG) {
+        // 待確認的卡（2026-11-25 #409 第 3 件）：確認前只寫別家看得到的時數，不寫「合計 N 小時…不用／要有加班單」這種像結論的話
+        const ck = st.ckKeys && st.ckKeys.has(key);
+        const fx = C.crossFact(emp, !p.ft8Guard && !!ck && (st.checking || st.ckFail === 'slow'));
+        if (fx) p.note = (p.note ? p.note + '；' : '') + fx;
+      } else {
+        // 這家不滿 8 的卡（ft8Base，2026-11-25）被擋時沒有一鍵按鈕、hours 是空的：用這家要核定的上班＋出差算，不再把這家當 0 小時
+        const base = p.ft8Base && p.hours == null ? p.ft8Base : (Array.isArray(p.actions) && p.actions.length ? mainAction(p) : null) || p;
+        const x = C.crossOt(emp, base.hours != null ? base.hours : p.hours, firstStart(base.payload || p.payload));
+        if (x) p.note = (p.note ? p.note + '；' : '') + x.text;
+      }
     }
     if (p.leaveWarn && !String(p.note || '').includes(p.leaveWarn)) p.note = (p.note ? p.note + '；' : '') + p.leaveWarn;      // 假單沒填時段、上班＋假單比班表多（2026-11-18 第 5 題）：只提醒，前面換掉 note 的也補回來
     // 在等同仁補單、還沒有新的單送來：不列在要處理的人裡（列在「等同仁補單」），不算「還剩幾人」；單送來了就回到原本的分類
@@ -544,8 +571,13 @@ export function renderQuick(ctx) {
           // 核定登記假別（打卡端 rule＝leave）是主管在手動修改裡做的事：另外寫，不混進「請同仁補…」（2026-11-18）
           const mgr = Q.mgrNeedText(probs), rest = probs.filter((x) => !x || (x.rule !== 'leave' && x.rule !== 'ot_gap'));      // ot_gap（加班單沒接上，2026-11-18）也是主管改時段或請同仁改單，不寫「請同仁補」
           const text = rest.length ? rest.map((x) => C.fixText(x, ps)).join('；') : probs.length ? '' : String(r.message || CHECK_CODE[r.error] || '打卡系統不接受，請按「手動修改」核對').replace(/^這天還不能核定：/, '');
+          // 打卡系統「正職上班日要滿 8 小時」「兩家上班合計…要開加班單」原句另外記（2026-11-25）：卡片照原文顯示，不接在「要補齊：」後面變成「請同仁補…」；
+          //   need 照舊（判斷要不要給「請同仁補單」等按鈕不變）
+          //   打卡系統這次不檢查滿 8（門市共用登入、舊伺服器；C.ft8Live）：照主線，不另記原句（#409 審查第 3 項）
+          const raw8 = C.ft8Live(emp0(p)) ? C.isFt8Raw : () => false;
+          const ft8 = rest.filter(raw8).map((x) => String(x.text)), needRest = rest.filter((x) => !raw8(x)).map((x) => C.fixText(x, ps)).join('；');
           if (p.status === 'ok') Object.assign(U(p.key), { failed: '還不能核定：' + [text, mgr].filter(Boolean).join('；'), failedDiff: false, pre: true });
-          else Object.assign(U(p.key), { need: text, needMgr: mgr });
+          else Object.assign(U(p.key), { need: text, needMgr: mgr, ft8, needRest });
         });
       }));
     } catch (e) { miss = true; }      // 不讓一個意外卡住灰組：當成這次沒檢查到
@@ -560,7 +592,7 @@ export function renderQuick(ctx) {
     if (decision === 'approve' && it.date === st.date) { const list = st.appr[key] || (st.appr[key] = []); if (!list.some((x) => String(x.id) === String(it.id))) list.push(Object.assign({}, it, { status: 'approved' })); }
     if (it.date !== st.date) return;
     st.fineEls.delete(key);      // 細調卡片照新的單重建
-    const u = U(key); u.pass = null; u.cards = null; u.need = ''; u.needMgr = ''; u.mismatch = '';
+    const u = U(key); u.pass = null; u.cards = null; u.need = ''; u.needMgr = ''; u.ft8 = null; u.needRest = ''; u.mismatch = '';
     recompute();
     if (st.checking) { (st.ckAgain || (st.ckAgain = new Set())).add(key); return; }
     if (Q.checkTargets(st.people).some((p) => p.key === key)) startCheck(st.tok, new Set([key]));
@@ -961,15 +993,16 @@ export function renderQuick(ctx) {
     const c = h('div', 'dq-card' + (p.status === 'blocked' ? ' blocked' : ''), null, { 'data-key': p.key });
     const top = h('div', 'dq-ctop');
     const manual = isManual(p);
-    top.append(whoEl(p), manual ? h('div', 'dq-mright', MANUAL_TAG) : h('div', 'dq-tag' + (p.status === 'blocked' ? ' blocked' : '') + ' sev' + sevOf(p), p.tag));
+    top.append(whoEl(p), manual ? h('div', 'dq-mright', MANUAL_TAG) : h('div', 'dq-tag' + (p.status === 'blocked' ? ' blocked' : '') + ' sev' + sevOf(p) + (p.tag === C.FT8_WAIT_TAG ? ' wait' : ''), p.tag));      // wait：未滿 8 小時（待確認）用黃色、不斷行（2026-11-25 確認頁示意）
     c.append(top);
     const tl = tlFor(p); if (tl) c.append(tl);
     if (manual) return manualBody(c, p);
     const grid = h('div', 'dq-grid');
     // 要同仁補單的那句是建議，不是同仁送的申請（2026-11-16 Eason：「申請那句話改成建議」）
-    const adv = !!p.mgrNote || /^(要補齊|請同仁|還沒有|要有|要補)/.test(p.note || '');      // 核定登記假別（mgrNote）也是建議，但是主管要做的事（2026-11-18）
+    const adv = !!p.mgrNote || !!p.ft8Raw || /^(要補齊|請同仁|還沒有|要有|要補)/.test(p.note || '');      // 核定登記假別（mgrNote）也是建議，但是主管要做的事（2026-11-18）；打卡系統「正職上班日要滿 8 小時」原句（ft8Raw，2026-11-25）也放在建議框
     const noteTxt = adv ? String(p.note).replace(/^要補齊：\s*(要補)?/, '請同仁補').replace(/^要補/, '請同仁補') : p.note;
-    [line(adv ? '建議' : /^(打卡跟核定差|班表 [\d.]+ 小時，超過)/.test(p.note || '') ? '提醒' : '申請', noteTxt), line('比對', p.chk, 'dq-chk')].forEach((x) => { if (x) grid.append(...x); });
+    const waitLb = p.ft8Wait != null && p.tag === C.FT8_WAIT_TAG;      // 未滿 8 小時（待確認）那句是提醒，不是同仁送的申請（2026-11-25）
+    [line(adv ? '建議' : waitLb || /^(打卡跟核定差|班表 [\d.]+ 小時，超過)/.test(p.note || '') ? '提醒' : '申請', noteTxt), line('比對', p.chk, 'dq-chk')].forEach((x) => { if (x) grid.append(...x); });
     if (adv && grid.firstChild) { grid.classList.add('adv'); timeChips(grid.childNodes[1]); }      // 建議補單：底色框＋時段做成小標籤，一眼看得出要補哪幾段（2026-11-16 Eason：更有質感、好辨識）
     if (grid.childNodes.length) c.append(grid);
     if (Q.overText(p)) c.append(h('div', 'du-total-over dq-over', Q.overText(p)));      // 超過單日 10 小時：紅字、不擋（2026-11-15）
@@ -1114,6 +1147,7 @@ export function renderQuick(ctx) {
     c.append(top);
     const tl = tlFor(p); if (tl) c.append(tl);
     if (manual) return manualBody(c, p);
+    if (p.status === 'ok' && p.ft8Pass) c.append(h('div', 'dq-ft8pass', p.ft8Pass));      // 這家自己不滿 8、打卡系統檢查通過（2026-11-25 第 4 題）；其他人這張卡照舊、不多這一行
     const row = h('div', 'dq-acts two');
     if (p.status === 'ok') row.append(btn('dq-act primary', '核定 ' + C.round2(mainAction(p).hours != null ? mainAction(p).hours : p.hours) + ' 小時', () => act(p, Object.assign({}, mainAction(p), { label: '' }))));
     row.append(btn('dq-act ghost dq-finebtn', fineShown(p.key) ? '收起' : (p.status === 'done' ? '手動修改（重新核定）' : p.status === 'readonly' ? '查看明細' : '手動修改'), () => goFull(p)));

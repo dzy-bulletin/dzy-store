@@ -623,6 +623,97 @@ export function ft8Text(s) {
   const oth = (s.others || []).map((x) => '＋' + x.label + ' ' + x.h).join('');
   return '正職上班日：上班 ' + s.work + '＋出差 ' + s.trip + '＋假單 ' + s.leave + oth + '＝' + s.sum + '／' + FT8_H + ' 小時' + (s.gap ? '，還差 ' + s.gap + ' 小時，要有已核准的假單或補休單' : '');
 }
+/* ── 卡片只顯示打卡系統的結論（2026-11-25 Eason 開工確認 A，docs 見 PR）──
+   「連同別家夠不夠 8 小時、要不要加班單」規則只有打卡系統一份（11/24 起連別家已核准的出差單也算），營運系統看不到別家的出差單、假單，
+   所以這家自己不滿 8 小時時，畫面不再自己寫「還差幾小時」：打卡系統還沒回覆＝待確認；檢查通過＝寫「連同同一天別家已滿 8 小時」；被擋＝照打卡系統原句。
+   這家自己就滿 8 小時＝照舊（ft8Text）。 */
+/** 這家自己的合計（不含別家）：{work, trip, leave, sum, gap}；不是正職上班日＝null */
+export function ft8Own(emp, workH, leaves) {
+  return emp ? ft8Summary(Object.assign({}, emp, { elsewhere: [] }), workH, leaves) : null;
+}
+export const FT8_WAIT_TAG = '未滿 8 小時（待確認）';
+/** 這次打卡系統會不會檢查「正職上班日滿 8 小時」（伺服器 mgr_day 每列的 ft8_on，2026-11-25 #409 審查第 2、3 項）：
+ *  ＝個人帳號登入（核定帶 acting_name，打卡端 Code.gs 才採信 sched_ft）而且 schedFtHome 判正職上班日（支援帳號看原單位）。
+ *  不是 true（門市共用登入、舊伺服器沒給）＝打卡系統不檢查或不知道 → 滿 8 小時的卡片與那一行照主線（11/25 以前）寫法，不套待確認、不套保險 */
+export const ft8Live = (emp) => !!emp && emp.ft8_on === true;
+/** 保險用的「這家合計」：只在 ft8Live 時有值；支援帳號在這家 emp.ft 常是 null，照打卡端（sched_ft＝原單位正職）當正職算；
+ *  這家班表是休息日／例假（H／R）＝打卡端不套滿 8 → null */
+export function ft8GuardOwn(emp, workH, leaves) {
+  if (!ft8Live(emp)) return null;
+  const dt = emp.plan && emp.plan.day_type;
+  if (dt === 'H' || dt === 'R') return null;
+  return ft8Own(Object.assign({}, emp, { ft: true, plan: Object.assign({}, emp.plan || {}, { day_type: 'W' }) }), workH, leaves);
+}
+/** 一頁核定「待確認」那句；how＝'wait' 確認中、'fail' 讀不到、其他＝還沒確認 */
+export function ft8WaitNote(own, how) {
+  const tail = how === 'wait' ? '（確認中…）' : how === 'fail' ? '（打卡系統讀不到，還沒確認）' : '（還沒確認，請按「手動修改」）';
+  return '這家 ' + own + ' 小時。打卡系統會連同同一天別家的核定、假單、出差單一起算' + tail;
+}
+/** 打卡系統檢查結果裡「正職上班日要滿 8 小時」的原句（照抄，不改寫） */
+export function ft8ProbTexts(ck) {
+  return (ck && Array.isArray(ck.probs) ? ck.probs : []).filter((p) => p && /^ft8/.test(String(p.rule || '')) && p.text).map((p) => String(p.text));
+}
+/** 打卡系統「滿 8 小時、兩家合計要不要加班單」那幾句（Requests.gs reqFt8_ 出的：rule ft8，或 ot_hours／ot_peer 以「兩家上班合計」開頭）——一頁核定卡片照原文顯示 */
+export const isFt8Raw = (p) => !!p && !!p.text && (/^ft8/.test(String(p.rule || '')) || ((p.rule === 'ot_hours' || p.rule === 'ot_peer') && /^兩家上班合計/.test(String(p.text))));
+/* ── 滿 8 小時的保險（2026-11-25 主管裁示 A，#409）──
+   打卡系統有兩種「先放行」：同一天別家有打卡還沒核定、讀不到別家——這兩種情況這家不滿 8 小時也會檢查通過。
+   所以這家不滿 8、打卡系統說可以時，營運系統自己也要在副本看得到別家夠：
+     看得到的合計＝這家（上班＋出差＋假單）＋同一單位每家別店［已核定＝核定時數；沒核定也沒打卡＝已核准出差單；沒核定有打卡＝0］＋別店已核准假單
+     （伺服器 attachElsewhere 附的 emp.ft8_peer，口徑同打卡端 reqPeerOne_／reqPeerAdd_；server/duty-elsewhere.js peerOf）。
+     副本讀不到或不新鮮的那家＝看不到（伺服器不列），只會讓合計變少；沒有 ft8_peer（舊伺服器、副本沒開）或 ok 不是 true（這家同名兩位）＝全部看不到。
+   合計滿 8＝放進核定通過、可以一鍵；不滿 8＝待確認（寫原因、要核定按手動修改）。
+   只當保險：合計不拿來顯示「還差幾小時」。 */
+/** {ok:true} 或 {ok:false, why:'pending'（副本看得到同一天別家有打卡還沒核定）|'unread'（營運系統看不到夠的時數，原因不一定：別家讀不到、副本不新鮮、同名兩位…，句子不寫原因）} */
+export function ft8Seen(emp, own) {
+  const p = emp && emp.ft8_peer;
+  if (!p || typeof p !== 'object' || p.ok !== true || !Array.isArray(p.by)) return { ok: false, why: 'unread' };
+  const n = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0);
+  let sum = n(own), pending = false;
+  p.by.forEach((x) => {
+    if (!x || typeof x !== 'object') return;
+    if (x.approved != null && Number.isFinite(Number(x.approved))) sum += n(x.approved);      // 那家已核定：核定時數（已含登記的出差，不再加出差單）
+    else if (x.punched) pending = true;                                                         // 那家有打卡還沒核定：打卡系統先放行，營運系統不算
+    else sum += n(x.tp);                                                                        // 那家沒核定也沒打卡：已核准出差單
+    sum += n(x.lv);                                                                             // 那家已核准假單：都算（同打卡端）
+  });
+  return round2(sum) >= FT8_H - 0.005 ? { ok: true } : { ok: false, why: pending ? 'pending' : 'unread' };
+}
+/** 一頁核定：打卡系統說可以、營運系統看不到夠（ft8Seen 不 ok）時卡片那句（待確認，不能一鍵） */
+export function ft8GuardNote(own, why) {
+  return '這家 ' + own + ' 小時。' + (why === 'pending'
+    ? '同一天別家有打卡還沒核定，打卡系統先放行；營運系統還看不到別家核定的時數，要核定請按「手動修改」'
+    : '打卡系統檢查通過，但營運系統看不到同一天別家有沒有滿 ' + FT8_H + ' 小時，要核定請按「手動修改」');
+}
+/** 這家自己不滿 8、打卡系統檢查通過、營運系統也看得到夠（ft8Seen ok）：核定通過卡那一行 */
+export function ft8PassText() {
+  return '連同同一天別家已滿 ' + FT8_H + ' 小時';
+}
+/** 待確認的卡上「同一天也在別家」那句（2026-11-25 #409 第 3 件）：確認前只寫看得到的事實，不寫合計、要不要加班單這種像結論的話。
+ *  waiting＝打卡系統還在確認（句尾說等確認）；不是正職上班日、沒有同一單位別家的時數＝null */
+export function crossFact(emp, waiting) {
+  if (!emp || emp.ft !== true || !emp.plan || emp.plan.day_type !== 'W') return null;
+  const xs = elsewhereHours(emp);
+  if (!xs.length) return null;
+  return '今天也在' + xs.map((x) => x.label + (x.est ? '有打卡，約 ' + x.h + ' 小時（那邊還沒核定）' : '上班 ' + x.h + ' 小時（那邊已核定）')).join('、') +
+    (waiting ? '；兩家合計、要不要加班單，等打卡系統確認後才會寫' : '');
+}
+/** 手動修改頁「正職上班日」那一行 → {text, cls}（cls：'' 照舊、'short' 紅字、'pass' 黑字、'wait' 灰字）；不是正職上班日＝null。
+ *  s＝ft8Summary（含別家，照舊那句用）、own＝ft8Own、ck＝這組時段的檢查結果（null＝還沒回來、逾時、讀不到、時段改過） */
+export function ft8Line(emp, s, own, ck) {
+  if (!ft8Live(emp)) return s ? { text: ft8Text(s), cls: s.gap ? 'short' : '' } : null;      // 打卡系統不檢查滿 8（門市共用登入、舊伺服器）：照主線那一行
+  if (!s || !own) return null;
+  if (!own.gap) return { text: ft8Text(s), cls: s.gap ? 'short' : '' };      // 這家自己就滿 8：逐字照舊
+  const raw = ft8ProbTexts(ck);
+  if (raw.length) return { text: raw.join('；'), cls: 'short' };
+  if (ck && ck.ok === true) {
+    const g = ft8Seen(emp, own.sum);      // 保險（主管裁示 A）：營運系統也看得到別家夠才寫「已滿 8 小時」；看不到＝灰字寫原因（不下結論，送出時的檢查照舊）
+    if (g.ok) return { text: '正職上班日：這家 ' + own.sum + ' 小時，' + ft8PassText() + '（打卡系統檢查通過）', cls: 'pass' };
+    return { text: '正職上班日：這家 ' + own.sum + ' 小時。' + (g.why === 'pending'
+      ? '同一天別家有打卡還沒核定，打卡系統先放行（營運系統看不到別家核定的時數，請自己確認別家的時數再送出）'
+      : '打卡系統檢查通過，但營運系統看不到同一天別家有沒有滿 ' + FT8_H + ' 小時（請自己確認再送出）'), cls: 'wait' };
+  }
+  return { text: '正職上班日：這家 上班 ' + own.work + '＋出差 ' + own.trip + '＋假單 ' + own.leave + '＝' + own.sum + ' 小時（打卡系統會連同同一天別家的核定、假單、出差單一起算）', cls: 'wait' };
+}
 
 /* ── 跨店加班歸屬（2026-11-18 Eason；同打卡端 Requests.gs reqFt8Split_）──
    同一天在原單位和支援單位都上班（同一單位才相加：墨竹亭↔總部、總部↔小辛辣；小辛辣↔墨竹亭不算），合計超過 8 小時的加班算支援單位，

@@ -512,6 +512,7 @@ function buildCard(emp, date, bopt) {
   // 手動修改只留一條路（2026-11-24 Eason 方案一，docs 見 PR）：只有一頁核定的手動區（fineCard）、而且有權限核定的卡才用。
   // single＝手動區一開就全部攤開、上方不再有「核定 N 小時」「收起」「手動改時段」，整張卡只有最下面一顆紅色「送出核定 N 小時」；其餘（完整頁、只看）逐字照舊
   const single = !!(bopt && bopt.single) && !readOnly;
+  let ft8Ck = null;      // 「正職上班日」那一行用的檢查結果（見 ft8Draw，2026-11-25）
   let syncLabel = () => {};      // single：送出鈕文字（送出鈕建好之後換成真的；時段變動時 refresh 會叫它）
   const card = h('div', 'du-card'); card.dataset.empId = rowKey(emp); if (emp.store) card.dataset.store = emp.store;
   // 這天還有待審的申請不能核定（2026-11-19）：__pendMine＝這位主管審得了的、__pendUpper＝要上層審的；__recalc 0 沒事／1 剛審完、重讀那天已核准的申請／2 讀好了、重新檢查中（沒回到 0 都不給核定）
@@ -764,7 +765,19 @@ function buildCard(emp, date, bopt) {
   const readRows = () => [...periodRows.querySelectorAll('.du-prow')].map(r => ({ row: r, start: r.querySelector('.p-start').value, end: r.querySelector('.p-end').value }));
 
   // 每次時段有變動就整個重算（manager.html:1099–1141）。刻意不記「主管有沒有動過」——休息列純粹依「相鄰兩段之間的空檔是不是剛好等於休息帶」決定
+  // 「正職上班日」那一行（2026-11-25 Eason 開工確認第 4 題）：這家自己就滿 8 小時照舊；不滿 8 時跟著打卡系統這組時段的檢查結果走
+  //   （ft8Ck：還沒回來／逾時／讀不到＝灰字只寫這家的算式；通過＝黑字「連同同一天別家已滿 8 小時（打卡系統檢查通過）」；被擋＝紅字打卡系統原句）。
+  //   時段、請假一改（refresh）就作廢，等這組時段的新結果（__setCheck）再換（ft8Ck 宣告在 buildCard 開頭：refresh 可能在這裡之前就被叫到）
+  function ft8Draw(total) {
+    const lv = leaveList(), L = C.ft8Line(emp, C.ft8Summary(emp, total, lv), C.ft8Own(emp, total, lv), ft8Ck);
+    const old = totalBox.querySelector(':scope > .du-ft8');
+    if (!L) { if (old) old.remove(); return; }
+    const el = h('div', 'du-ft8' + (L.cls ? ' ' + L.cls : ''), L.text);
+    if (old) old.replaceWith(el); else totalBox.append(el);
+    totalBox.hidden = false;
+  }
   function refresh() {
+    ft8Ck = null;
     const rows = readRows();
     periodRows.querySelectorAll('.du-break').forEach(n => n.remove());
     for (let i = 1; i < rows.length; i++) if (C.gapIsBreak(br, rows[i - 1].end, rows[i].start))
@@ -780,8 +793,7 @@ function buildCard(emp, date, bopt) {
       const cw = C.contBreakWarn(rows);             // 連續 4 小時沒休 30 分（2026-11-06）：黃字、不擋
       if (cw) totalBox.append(h('div', 'du-total-cont', C.contBreakText(cw)));
     } else totalBox.classList.remove('over');
-    const f8 = C.ft8Summary(emp, total, leaveList());   // 正職上班日滿 8 小時（2026-11-13）：整天請假沒有時段也要顯示
-    if (f8) { totalBox.hidden = false; totalBox.append(h('div', 'du-ft8' + (f8.gap ? ' short' : ''), C.ft8Text(f8))); }
+    ft8Draw(total);   // 正職上班日滿 8 小時（2026-11-13）：整天請假沒有時段也要顯示
     breakToggle.hidden = true;                      // 一顆鈕在「併成一段」與「插入休息」之間切換，兩個方向都回得去
     if (C.hasBreak(br)) {
       if (rows.length === 2 && C.gapIsBreak(br, rows[0].end, rows[1].start)) { breakToggle.hidden = false; breakToggle.dataset.mode = 'merge'; breakToggle.textContent = '今天沒休息 → 併成一段'; }
@@ -998,6 +1010,7 @@ function buildCard(emp, date, bopt) {
   const DOC_RULES = p => (p.rule === 'ot_hours' && /要有加班單/.test(p.text)) || p.rule === 'miss' || /^ft8/.test(p.rule) || p.rule === 'over_credit';
   const setCheckInner = res => {
     card.__check = res && typeof res === 'object' && typeof res.ok === 'boolean' && res.error !== 'unknown_action' ? res : null;
+    ft8Ck = card.__pending ? card.__check : null; ft8Draw(C.sumPeriods(readRows()).total);      // 「正職上班日」那一行跟著這次的結果換（2026-11-25）
     preBox.hidden = true; preBox.className = 'du-pre'; preBox.textContent = '';
     submit.classList.remove('du-submit-warn'); submit.disabled = false; setWhy(''); ncLabel = '';
     verdict.hidden = true; verdict.textContent = ''; verdict.className = 'du-verdict';
