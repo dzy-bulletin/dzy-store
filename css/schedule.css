@@ -200,6 +200,14 @@ button.hq-day{cursor:pointer}
 /* 班別顏色（2026-11-03 Eason：門市／央廚／總部班表都依班別上色）：底色＝班別顏色混白，列印照印 */
 .sc-c.shc,.sc-c.shc.we,.sc-c.shc.bd,.sc-c.shc.ot{background:color-mix(in srgb,var(--shc) 60%,#fff);-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .hq-day.shc,.hq-day.shc.hol,.hq-day.shc.ot{background:color-mix(in srgb,var(--shc) 60%,#fff);-webkit-print-color-adjust:exact;print-color-adjust:exact}
+/* 週六日／國定假日整欄底色一致（2026-11-27 主管要求）：有排出勤（班別有顏色）的格子也用週末淡紅，不被班別顏色蓋掉。
+   狀態底色照舊優先：生日淡綠、休息日加班淡橘、指定休假暖黃（後面的規則特異度較高或排在後面）。平日格不受影響。 */
+.sc-c.shc.we{background:var(--sc-we)}
+.sc-c.shc.we.bd{background:var(--sc-bd)}
+.sc-c.shc.we.ot{background:#fdf1dc}
+.sc-c.shc.we.pin-off{background:var(--sc-pin)}
+.hq-day.shc.hol{background:var(--sc-we,#fbeeec)}
+.hq-day.shc.hol.ot{background:#fdf1dc}
 .hq-swatch{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid var(--line);margin-right:6px;vertical-align:-1px;background:#fff}
 #hqShColor{width:44px;height:34px;padding:2px;border:1px solid var(--line);border-radius:8px;background:#fff}
 
