@@ -16,7 +16,7 @@
 //   stations: { id: { name, active, sort } }, stationNeed: { date: { station_id: 最少人數 } }   // 工作站別（沒有使用中的站就不檢查 T1／T2）；days 的格子多 station_id
 // }
 // 回傳 [{ code, level:'block'|'warn'|'info', emp_id, date, msg }]
-import { periodDates, addDays, diffDays, weekday } from './period.js';
+import { periodDates, addDays, diffDays, weekday, dayIndex } from './period.js';
 import { shiftMinutes, gapMinutes, cellShift, cellShiftIds, combineShifts, isExtId, localCell, breakOk } from './hours.js';
 
 export const H = 60;
@@ -25,6 +25,11 @@ export const DAY_MAX = 10 * H;                // 單日上限：Eason 2026-11-01
 const PERIOD_NORMAL = 160 * H, WEEK_NORMAL = 40 * H;
 // 出勤規範第 5 批（Eason 2026-11-08），這一期（第一天）起生效：加班上限改看 28 天週期、計時排班規則、正職連上 7 天覆核、兩店合併看連續上班、央廚四週檢核
 export const RULES5_FROM = '2026-11-29';
+/** 計時同仁的國定假日假（L＋國）可移到同期別天的第一期（Eason 2026-11-28 定案：從 T02＝2026-11-29 起；T01 以前計時只能排在國定假日當天）。
+ *  薪資端從 2026-12 月份起認這個調移，班表不可比薪資早開。門市排班（board.js 選單與 checkPeriod）與總部自填（checkSelfPeriod 的計時，ptHolKinds；
+ *  總部畫面平日補假日預填的 L國 對計時＝移到別天）、央廚固定排班（checkSelfMonth 以一整期檢查時的計時）共用 ptHolChecks（2026-11-28 主管「總部也改」「央廚也改」） */
+export const PT_HOL_MOVE_FROM = '2026-11-29';
+export const ptHolMove = (periodStart) => !!periodStart && periodStart >= PT_HOL_MOVE_FROM;
 export const MONTH_OT = 46 * H, MONTH_OT_WARN = 36 * H;   // 每月加班：超過 46 擋、超過 36 警告（Eason 2026-10-27，取代 10-11 的「46 只提醒」）
 const PT_OT_RUN = 6;                         // 計時連上第 6 天＝休息日加班，提醒（Eason 2026-10-27；第 7 天由 P3 擋）
 /** 計時連排「一般工作日」上限（天），自動排班與檢查共用同一組數字：T02（RULES5_FROM）起最多 5 天（第 6 天只能排成休息日出勤，排成一般工作日 P8 擋）；
@@ -195,6 +200,33 @@ function hasPrior(ctx, emp, start) {
   return false;
 }
 
+/** 計時的國定假日檢查（門市 checkPeriod、總部 checkSelfPeriod、央廚 checkSelfMonth 共用同一段，2026-11-28 主管「總部也改」「央廚也改」）。
+ *  dates＝整期 28 天（T 期，起點同薪資端 payPeriodRange_）；inPeriod＝在職的那幾天；ptMove＝這期開放移假（ptHolMove）。國定假日只認 hol.days（節日當天）。 */
+function ptHolChecks(add, e, who, mine, hol, dates, inPeriod, ptMove) {
+  const hols = inPeriod.filter(d => isHoliday(hol, d));
+  const guo = inPeriod.filter(d => mine[d] && mine[d].day_type === 'L' && mine[d].leave === '國');
+  if (ptMove) { if (guo.length > hols.length) add('C7', 'block', e, guo[hols.length], `${who} 排了 ${guo.length} 天國定假日假，這期${hols.length ? `只有 ${hols.length} 天國定假日` : '沒有國定假日'}`); }
+  else for (const d of guo) if (!isHoliday(hol, d)) add('C7', 'block', e, d, `${who} ${md(d)} 不是國定假日；計時同仁的國定假日假只能排在國定假日當天`);
+  // 移走的國定假日假抵哪一天——跟薪資端 mala-clock-in apps-script/Payroll.gs payHolMovedCore_ 同一套（逐天結果要一致，測試有對照）：
+  //   本期（28 天，起點同班表 T 期）所有國定假日由早到晚；先把「排在國定假日當天」的國定假日假對掉那天（那天不再被抵），
+  //   排在非國定假日的國定假日假（left 個）依日期先後抵剩下的國定假日，不管那天有沒有上班（沒上班的國定假日也會被抵掉）。
+  //   被抵掉的國定假日當天上班＝當一般日、不加倍；沒被抵掉的照舊工資加倍。薪資端用整期（不看到職離職）的國定假日清單，這裡跟它一樣。
+  const guoAll = dates.filter(d => mine[d] && mine[d].day_type === 'L' && mine[d].leave === '國');
+  const periodHols = dates.filter(d => isHoliday(hol, d));
+  const moved = ptMove ? guoAll.filter(d => !periodHols.includes(d)) : [];
+  const covered = {};
+  if (ptMove) { let left = moved.length; for (const d of periodHols) { if (guoAll.includes(d) || left <= 0) continue; left--; covered[d] = true; } }
+  const movedTxt = moved.map(md).join('、');
+  for (const d of hols) {
+    const c = mine[d];
+    if (!c) continue;
+    if (c.shift_id) {
+      if (covered[d]) add('C3', 'info', e, d, `${who} ${md(d)}（${hol.days[d]}）國定假日上班，已把國定假日假移到 ${movedTxt}，這天當一般日、工資不加倍`);
+      else add('C3', 'info', e, d, `${who} ${md(d)}（${hol.days[d]}）國定假日上班，要本人同意、工資加倍`);
+    } else if ((c.day_type === 'R' || c.day_type === 'H') && !covered[d]) add('C4', 'info', e, d, `${who} ${md(d)}（${hol.days[d]}）剛好是${c.day_type === 'R' ? '例假' : '休息日'}，要另外補一天假`);
+  }
+}
+
 export function checkPeriod(ctx) {
   const R = [];
   const add = (code, level, emp_id, date, msg) => R.push({ code, level, emp_id: emp_id || null, date: date || null, msg });
@@ -307,21 +339,18 @@ export function checkPeriod(ctx) {
 
     // 國定假日（Eason 2026-10-12）：正職預設國定假日照常上班，同一期另排一天「國定假日假」（L＋國，可排在任何一天）；
     //   國定假日假天數＝本期在職的國定假日天數。排不夠只提醒（當天出勤要給雙倍薪資），排太多擋。
-    //   計時維持原規則：國定假日假只能排在國定假日當天，當天上班提醒工資加倍、碰到例休提醒補假。
+    //   計時（Eason 2026-11-28）：T02（PT_HOL_MOVE_FROM）起也能把國定假日假移到同期別天，上限同正職（多了擋 C7），但排少了不提醒（沒有 C8）；
+    //   移走後原國定假日當天上班當一般日、不加倍。T01 以前維持原規則：國定假日假只能排在國定假日當天，當天上班提醒工資加倍、碰到例休提醒補假。
+    //   國定假日一律認節日當天（hol.days），不認補假日。
     const hols = inPeriod.filter(d => isHoliday(hol, d));
     const guo = inPeriod.filter(d => mine[d] && mine[d].day_type === 'L' && mine[d].leave === '國');
-    if (t0 && t0.kind === 'ft') {
+    // 國定假日這段看的身分：總部自填（checkSelfPeriod）其他規則都當正職，只有這段計時要照計時（ctx.holPt，2026-11-28 主管「總部也改」）
+    const holKind = ctx.holPt && ctx.holPt[e] ? 'pt' : (t0 && t0.kind);
+    const ptMove = holKind === 'pt' && ptHolMove(start);
+    if (holKind === 'ft') {
       if (guo.length > hols.length) add('C7', 'block', e, guo[hols.length], `${who} 排了 ${guo.length} 天國定假日假，這期${hols.length ? `只有 ${hols.length} 天國定假日` : '沒有國定假日'}`);
       else if (guo.length < hols.length) add('C8', 'warn', e, hols[0], `${who} 本期有 ${hols.length - guo.length} 天國定假日假還沒排；國定假日（${hols.map(d => `${md(d)} ${hol.days[d]}`).join('、')}）當天出勤要給雙倍薪資`);
-    } else {
-      for (const d of guo) if (!isHoliday(hol, d)) add('C7', 'block', e, d, `${who} ${md(d)} 不是國定假日；計時同仁的國定假日假只能排在國定假日當天`);
-      for (const d of hols) {
-        const c = mine[d];
-        if (!c) continue;
-        if (c.shift_id) add('C3', 'info', e, d, `${who} ${md(d)}（${hol.days[d]}）國定假日上班，要本人同意、工資加倍`);
-        if (c.day_type === 'R' || c.day_type === 'H') add('C4', 'info', e, d, `${who} ${md(d)}（${hol.days[d]}）剛好是${c.day_type === 'R' ? '例假' : '休息日'}，要另外補一天假`);
-      }
-    }
+    } else ptHolChecks(add, e, who, mine, hol, dates, inPeriod, ptMove);
 
     // 制度別：正職四週變形、計時每週制
     if (t0 && t0.kind === 'ft') {
@@ -458,11 +487,20 @@ export const blocks = (results) => results.filter(r => r.level === 'block');
 
 // 總部自填排班（2026-11-03 Eason：總部同仁也照四週變形，一期 28 天，規則照門市正職）：每人當成從頭就是正職，其餘照 checkPeriod。
 // ctx：{ period, staff, shifts, days（含前 LOOKBACK 天）, holidays, monthOtMin? }；沒有人力需求、站別、指定、配對；「沒有前期出勤資料」那條不列（同仁自己填，看了只會困惑）
+// 國定假日那段例外（2026-11-28 主管「總部也改」）：計時（st.emp_kind＝'pt'）從 PT_HOL_MOVE_FROM（T02）那期起照門市計時——國定假日認節日當天（hol.days）、
+//   L國 可排同期別天、上限＝本期在職國定假日數（C7）、排少不提醒（沒有 C8）、移走後原國定假日上班當一般日（C3 寫明）、碰到例休提醒補假（C4）。
+//   其他規則（例休、工時、連上）照舊當正職；T01 以前計時也照舊當正職（不變）。holidays 要給整份（days＋gov），C3／C4／C7 只認 days。
+export function ptHolKinds(staff, period) {
+  const start = periodDates(period)[0], out = {};
+  if (!ptHolMove(start)) return out;
+  for (const st of staff || []) if (st && st.emp_kind === 'pt') out[st.emp_id] = true;
+  return out;
+}
 export function checkSelfPeriod(ctx) {
   const ft = [{ from_date: '0000-01-01', kind: 'ft', target_min: null, week_min: null, same_days: 0, allowed_shifts: [], allowed_shifts_hol: [], backup: 0 }];
   const terms = {};
   for (const st of ctx.staff) terms[st.emp_id] = ft;
-  return checkPeriod(Object.assign({ actuals: {}, demand: {}, pins: {}, pairs: [], monthOtMin: {}, stations: {}, stationNeed: {} }, ctx, { terms }))
+  return checkPeriod(Object.assign({ actuals: {}, demand: {}, pins: {}, pairs: [], monthOtMin: {}, stations: {}, stationNeed: {} }, ctx, { terms, holPt: ptHolKinds(ctx.staff, ctx.period) }))
     .filter(r => r.code !== 'N0');
 }
 
@@ -576,7 +614,10 @@ export function checkSelfMonth(ctx) {
     const otDays = inMonth.filter((d) => mine[d] && mine[d].day_type === 'H' && mine[d].shift_id);
     if (otDays.length > FT_OT_MAX) add('F8', 'warn', e, otDays[FT_OT_MAX], `${who} 這期排了 ${otDays.length} 天休息日加班，超過每期 ${FT_OT_MAX} 天（要付加班費）`);
 
-    // 國定假日（含補假）上班：提醒工資加倍（同門市 C8）；「國定假日假」只能排在國定假日或補假當天（同門市 C7，總部是每週制、沒有同期別可移）
+    // 央廚計時（2026-11-28 主管「央廚也改」）：T02 起、而且這次檢查剛好是一整期（28 天、從 T 期第一天開始＝薪資端 payPeriodRange_ 的期）→ 照門市計時（ptHolChecks）：
+    //   認節日當天、L國 可移同期別天、多排 C7（央廚 soft 降成提醒）、排少不提醒、C3 寫明加不加倍、C4 碰到例休提醒補假。以整月檢查（舊網站 month）時維持下面原規則。
+    if (st.emp_kind === 'pt' && ctx.dates && dates.length === 28 && dayIndex(first) === 0 && ptHolMove(first)) { ptHolChecks(add, e, who, mine, hol, dates, inMonth, true); continue; }
+    // 國定假日（含補假）上班：提醒工資加倍（同門市 C8）；「國定假日假」只能排在國定假日或補假當天（同門市 C7）。正職、T01 以前、計時以整月檢查時照這段
     for (const d of inMonth) {
       const c = mine[d];
       const hn = holName(hol, d);

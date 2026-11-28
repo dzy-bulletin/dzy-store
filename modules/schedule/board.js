@@ -4,7 +4,7 @@ import { timeText, segsOf, shiftMinutes, shiftCode, cellShift, cellShiftIds, isE
 import { api } from '../../js/api.js';
 import { S, canEdit, loadAnnual, load, mutate, movePeriod, WD, md, hm, DAY_LABEL, LEAVE_LABEL, call } from './state.js';
 import { weekday, periodEnd, todayTaipei } from './period.js';
-import { termAt, LEAVES, NOTE_COLORS } from './rules.js';
+import { termAt, ptHolMove, LEAVES, NOTE_COLORS } from './rules.js';
 import { stHidden, setStHidden, stToggleHtml } from './stview.js';
 import { setupChecklist } from './checklist.js';
 import { getSession } from '../../js/auth.js';
@@ -294,8 +294,10 @@ export function renderBoard(ctx) {
     } else {
       const cur = c.shift_id ? 'S:' + c.shift_id + (c.day_type === 'H' ? ':H' : '') : c.day_type === 'L' ? 'L:' + c.leave : c.day_type || '';
       // 國定假日假：國定假日當天都可選；正職在有國定假日的期別可移到別天（Eason 2026-10-12）
-      const isFt = (termAt(D.terms, S.sel.emp, S.sel.date) || {}).kind === 'ft';
-      const guoOk = !!D.holidays.days[S.sel.date] || (isFt && D.dates.some((d) => D.holidays.days[d]));
+      // 計時同仁從 T02 起也可移到同期別天（Eason 2026-11-28；T01 以前計時只能排在國定假日當天）
+      const kindNow = (termAt(D.terms, S.sel.emp, S.sel.date) || {}).kind;
+      const moveOk = kindNow === 'ft' || (kindNow === 'pt' && ptHolMove(D.dates[0]));
+      const guoOk = !!D.holidays.days[S.sel.date] || (moveOk && D.dates.some((d) => D.holidays.days[d]));
       const otOpts = activeShifts.map((s) => `<option value="S:${esc(s.id)}:H">${esc(shiftCode(s.name))}（休息日出勤）</option>`).join('');
       // 支援其他門市的班：每家店一組（只列使用中的班；原本排的那班已停用照列，才選得到原值）
       const xList = (x) => x.shifts.filter((s) => s.active || s.id === c.shift_id || s.id === c.shift2_id);
